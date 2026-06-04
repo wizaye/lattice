@@ -1,0 +1,80 @@
+/* ============================================================
+   Vault picker popover (appears above the left-sidebar footer)
+
+   Rendered via a React portal to <body> with `position: fixed`
+   (top/left are set inline from the trigger's getBoundingClientRect),
+   so the menu escapes the left sidebar's `overflow: hidden` and is
+   never clipped when the sidebar is narrowed.
+   ============================================================ */
+
+.vault-menu {
+  /* `position: fixed` is set inline along with top/left; the rest of
+     the visual presentation lives here. */
+  min-width: 220px;
+  max-width: 320px;
+  padding: 6px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.40),
+    0 2px 6px rgba(0, 0, 0, 0.25);
+  /* Sits above the sidebar splitter (z-index: 2) and window controls
+     are at 100 — 1000 keeps us clearly on top of everything. */
+  z-index: 1000;
+  animation: vault-menu-pop 110ms ease-out;
+}
+
+@keyframes vault-menu-pop {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.vault-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.vault-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: var(--text-normal);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.vault-menu-item:hover { background: var(--hover); }
+.vault-menu-item.active { background: var(--hover); }
+
+.vault-menu-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vault-menu-check.codicon,
+.vault-menu-leading.codicon {
+  font-size: var(--icon-sm);
+  line-height: 1;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.vault-menu-item.active .vault-menu-check.codicon {
+  color: var(--text-normal);
+}
+
+.vault-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-soft);
+}

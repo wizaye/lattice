@@ -1,0 +1,217 @@
+/* ============================================================
+   Settings overlay — Obsidian-style modal
+   ============================================================ */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 24px;
+  animation: settings-fade 140ms ease-out;
+}
+
+:root[data-theme="light"] .settings-overlay {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+@keyframes settings-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.settings-dialog {
+  display: flex;
+  width: min(900px, 100%);
+  height: min(640px, 100%);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 4px 12px rgba(0, 0, 0, 0.25);
+  animation: settings-pop 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes settings-pop {
+  from { transform: translateY(8px) scale(0.985); opacity: 0; }
+  to   { transform: none;                          opacity: 1; }
+}
+
+/* ---- Left list ---- */
+
+.settings-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-soft);
+  overflow-y: auto;
+  padding: 14px 8px 18px;
+}
+
+.settings-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  padding: 10px 10px 6px;
+  text-transform: none;
+}
+.settings-sidebar > .settings-group-label:first-child { padding-top: 2px; }
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-item:hover { background: var(--hover); }
+.settings-item.active {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+
+.settings-item-icon.codicon {
+  font-size: var(--icon-sm);
+  line-height: 1;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.settings-item.active .settings-item-icon.codicon {
+  color: var(--text-normal);
+}
+.settings-item-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Right content pane ---- */
+
+.settings-content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-editor);
+  overflow-y: auto;
+  padding: 24px 28px 28px;
+}
+
+.settings-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+.settings-close:hover { background: var(--hover); color: var(--text-normal); }
+.settings-close .codicon { font-size: var(--icon-sm); line-height: 1; }
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+  padding-right: 32px; /* keep clear of the close button */
+}
+
+.settings-body p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-normal);
+}
+
+.settings-body-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.settings-body-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-normal);
+  background: var(--hover);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+}
+.settings-btn:hover { background: var(--border-strong); }
+.settings-btn .codicon { font-size: var(--icon-sm); line-height: 1; }
+
+.settings-btn.primary {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: transparent;
+}
+.settings-btn.primary:hover {
+  filter: brightness(1.06);
+}
+
+/* ---- Row layout for setting rows (Appearance theme picker etc.) ---- */
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.settings-row:first-of-type { border-top: 0; }
+
+.settings-row-text { flex: 1; min-width: 0; }
+.settings-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.settings-row-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}

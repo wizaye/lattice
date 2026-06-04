@@ -1,0 +1,9 @@
+# Faster incremental dev builds for the Tauri Rust crate.
+#
+# We do NOT pin a custom linker here (lld can require extra MSVC setup),
+# so this file is opt-in friendly: drop in `linker = "rust-lld"` under
+# [target.x86_64-pc-windows-msvc] if you've installed the LLD toolchain
+# and want another ~30-50% link-time cut.
+
+[build]
+incremental = true

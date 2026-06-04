@@ -1,0 +1,151 @@
+/* Right sidebar — icons flow naturally at the left edge of the header.
+   The floating window controls (top-right, z-index 100) cover whichever
+   icons would land underneath when the sidebar is narrowed. */
+
+.rs-header {
+  gap: 2px;
+  /* no padding-right reservation — icons slide under the window controls
+     as the sidebar shrinks */
+  overflow: hidden;
+}
+
+.rs-header-drag {
+  flex: 1;
+  height: 100%;
+}
+
+.rs-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+
+.rs-section { display: flex; flex-direction: column; }
+
+.rs-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.rs-section-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rs-section-count {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.rs-section-body { padding: 4px 8px 12px 8px; }
+
+.rs-link-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rs-link-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.rs-link-item:hover { background: var(--hover); }
+.rs-link-item svg {
+  width: 13px; height: 13px;
+  stroke: var(--text-muted); fill: none; stroke-width: 1.6;
+  flex-shrink: 0;
+}
+.rs-link-item .codicon {
+  font-size: var(--icon-xs);
+  line-height: 1;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.rs-link-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Empty-state ===== */
+.rs-empty {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* ===== Tags panel ===== */
+.rs-tag-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.rs-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text-normal);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.rs-tag:hover {
+  background: var(--border-strong);
+}
+
+/* ===== Outline panel ===== */
+.rs-outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rs-outline-item {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-normal);
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-outline-item:hover { background: var(--hover); }
+.rs-outline-item[data-level="1"] { padding-left: 8px;  font-weight: 600; }
+.rs-outline-item[data-level="2"] { padding-left: 18px; }
+.rs-outline-item[data-level="3"] { padding-left: 28px; color: var(--text-muted); }
+.rs-outline-item[data-level="4"] { padding-left: 38px; color: var(--text-muted); }
+.rs-outline-item[data-level="5"] { padding-left: 48px; color: var(--text-faint); }
+.rs-outline-item[data-level="6"] { padding-left: 58px; color: var(--text-faint); }

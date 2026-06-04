@@ -1,0 +1,645 @@
+/* =========================================================
+   Editor area + panes
+   - The topmost pane's tabbar sits flush with y=0 of the
+     window. Gooey tabs (active tab's bottom corners curve
+     down into the editor body surface).
+   ========================================================= */
+
+.editor-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg-editor);
+  position: relative;
+}
+
+/* ---- pane ---- */
+
+.pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-editor);
+}
+
+/* ---- pane tabbar ---- */
+
+.pane-tabbar {
+  display: flex;
+  align-items: center;
+  height: var(--header-h);
+  min-height: var(--header-h);
+  background: var(--bg-header);
+  /* Left gutter (16px) gives the first tab visible breathing room from
+     the sidebar splitter — matches Obsidian's relaxed tab strip. */
+  padding: 0 0 0 16px;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+/* Top-strip seam at the absolute bottom of the tab strip.
+   The active tab is a short pill floating inside the 36 px strip
+   (height ~28 px), so this seam line runs underneath ALL tabs
+   uninterrupted — the active pill's own bottom edge sits ABOVE the
+   seam, and the small gap below it visually merges with the editor
+   area beneath. No SVG wings needed. */
+.pane-tabbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border-tab);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Tabs container — SHRINK-TO-FIT (flex: 0 1 max-content):
+     - Natural width = sum of tab basis (N × 220px), so when there are
+       few tabs the container is exactly that wide and the `+` button
+       (a sibling AFTER pane-tabs) sits flush with the last tab.
+     - `max-content` basis is critical: with `auto` + `overflow: hidden`
+       the flex algorithm collapses the basis to min-content (~0),
+       leaving pane-tabs to be sized only by what siblings give it.
+     - flex-shrink: 1 means when the tabbar can't fit N × 220px, the
+       container shrinks and tabs inside compress proportionally.
+     - flex-grow: 0 prevents pane-tabs from eating extra empty space
+       (`.pane-drag` is the flex:1 spacer that absorbs slack and
+       pushes `.pane-actions` to the right).
+   No horizontal scrolling — matches Chrome/Edge/VS Code: tabs at max
+   width when there's room, equal-share compression when there isn't. */
+.pane-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 0 1 max-content;
+  min-width: 0;
+  overflow: hidden;
+  /* anchor for the absolutely-positioned `.tab-insertion` indicator */
+  position: relative;
+}
+
+.pane-drag {
+  flex: 1;
+  height: 100%;
+  min-width: 12px;
+}
+
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 4px;
+  height: 100%;
+  flex-shrink: 0;
+}
+
+/* ---- in-pane document header (back/forward + centered title + book/more) ---- */
+
+.pane-doc-header {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 8px;
+  background: var(--bg-editor);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.pane-doc-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  z-index: 1;
+}
+
+.pane-doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  z-index: 1;
+}
+
+.pane-doc-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 80px;
+}
+
+.pane-doc-header .icon-btn.tiny:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pane-doc-header .icon-btn.tiny:disabled:hover {
+  background: transparent;
+}
+
+/* ---- individual gooey tab ---- */
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  /* Tab is a shorter pill (28 px) floating CENTERED inside the 36 px
+     tab strip. The 4 px gap above + below the tab lets the strip's
+     own background show through around the active pill, and lets the
+     strip's bottom seam line read continuously beneath every tab
+     (the active pill's bottom edge sits 4 px above the seam, but the
+     overall pill + seam combo reads as one chrome-style tabstrip). */
+  height: 28px;
+  padding: 0 8px 0 12px;
+  /* gap between title and the close × — ensures uniform alignment
+     regardless of title length */
+  gap: 6px;
+  color: var(--text-muted);
+  /* Inactive tabs at REST are JUST TEXT — no fill, no visible border.
+     Hover paints a rounded-pill background via the ::before pseudo
+     (see .tab:not(.active)::before below). Active tab overrides bg +
+     border below. */
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  /* Flex-compress behavior: each tab has an explicit 220px width
+     (Chrome-style max tab width) but shrinks proportionally when the
+     container can't fit all tabs at full size.
+       - width:220px — explicit so the tab's CONTENT max-content (used
+         by `.pane-tabs` to compute its natural max-content basis) is
+         exactly 220px, not the ~105px of icon+text+close content.
+         Without this, pane-tabs' `max-content` collapses to the
+         intrinsic content sum and tabs render at ~105px even when
+         there is ample room for 220px each.
+       - flex-shrink:1 — shrink equally with siblings when constrained
+       - flex-grow:0 — never grow past 220 (width is the cap)
+     This 220px-per-tab basis is what gives `.pane-tabs`
+     (`flex: 0 1 max-content`) a natural width = N × 220px, so the
+     `+` button stays glued to the last tab instead of being pushed
+     away by an empty/short pane-tabs.
+     `min-width: 0` allows shrinking past intrinsic content width so
+     the title can ellipsis-clip as the strip fills up. */
+  width: 220px;
+  flex-grow: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  border-radius: 6px;
+  /* Subtle mount + interaction polish — `animation` plays once when the
+     tab is added (new file opened, split created, drag/drop); the
+     transition handles the active-state colour shift and the live width
+     collapse during the close animation below. Pure cosmetic; never
+     blocks input (pointer-events stays on, the close button itself
+     starts the timed exit). */
+  animation: tab-mount 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    width 140ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 140ms ease,
+    padding 140ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes tab-mount {
+  from { opacity: 0; transform: translateY(-2px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Close animation — collapse to 0 width, fade out. The parent unmounts
+   the element ~140 ms after the user clicks ×, so these targets need to
+   land in the same window. `overflow: hidden` + min-width: 0 guarantees
+   the title text doesn't bleed into siblings while shrinking. */
+.tab.closing {
+  width: 0 !important;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.tab.closing .tab-title,
+.tab.closing .tab-close {
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+
+/* Hover-pill background for INACTIVE tabs only.
+   - inset: 0 — covers the entire (28 px) tab box.
+   - Rounded to match the tab's own 6 px radius.
+   - No border (transparent fill only).
+   - The .tab-title and .tab-close are inline-flex children that
+     paint AFTER the absolutely-positioned ::before in the natural
+     paint order — so the pill renders behind the text without
+     needing any z-index trickery. */
+.tab:not(.active)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: transparent;
+  pointer-events: none;
+  transition: background 120ms ease;
+}
+.tab:hover { color: var(--text-normal); }
+.tab:not(.active):hover::before { background: var(--hover); }
+
+/* Subtle vertical separator between adjacent inactive tabs — a 1px
+   line sitting at the tab's right edge (gap is now 0 so this is the
+   boundary with the next tab). Hidden on:
+     - The last tab in the row (nothing to separate from).
+     - Any tab immediately followed by the active tab (no separator
+       needed next to the active pill).
+     - The active tab itself (its own border draws its right side).
+   Insets are 6px top + bottom so the divider reads as a short tick
+   centered vertically within the 28 px tab — same proportional feel
+   as Chrome/Edge. */
+.tab:not(.active)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--border-tab);
+  pointer-events: none;
+}
+.tab:not(.active):last-child::after,
+.tab:not(.active):has(+ .tab.active)::after {
+  display: none;
+}
+
+/* ACTIVE tab — a simple rounded pill with bg + 1 px border,
+   floating inside the 36 px tab strip. Lifted with z-index so the
+   pill's bg + border paint cleanly over the inactive tabs' right
+   separator and the strip's bottom seam line beneath. */
+.tab.active {
+  color: var(--text-normal);
+  background: var(--tab-bg-active);
+  border: 1px solid var(--border-tab);
+  z-index: 3;
+}
+
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* line-height: 1 collapses the text's line-box to its font cap
+     height, so its visual center aligns pixel-precisely with the
+     close-button's flex center (instead of the default 1.2 line-box
+     pushing the glyph baseline slightly below true center). */
+  line-height: 1;
+  /* position: relative ensures the title paints AFTER the absolutely-
+     positioned `.tab:not(.active)::before` hover-pill in document
+     order, so the text reads on top of the pill instead of being
+     hidden behind it. */
+  position: relative;
+}
+
+.tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  color: inherit;
+  /* Always visible by default (Obsidian behavior) — not opacity 0. */
+  opacity: 0.55;
+  flex-shrink: 0;
+  /* Same reason as .tab-title — keep the × button above the hover-pill. */
+  position: relative;
+  transition:
+    background 110ms ease,
+    opacity 110ms ease,
+    transform 90ms ease;
+}
+.tab-close:active { transform: scale(0.88); }
+.tab-close svg {
+  width: 11px; height: 11px;
+  stroke: currentColor; fill: none; stroke-width: 1.6;
+}
+.tab-close .codicon { font-size: var(--icon-xs); line-height: 1; color: currentColor; }
+.tab:hover .tab-close, .tab.active .tab-close { opacity: 0.9; }
+.tab-close:hover { background: var(--hover); opacity: 1 !important; }
+
+/* "+" new tab — lives OUTSIDE `.pane-tabs` as a sibling so it stays
+   pinned next to the last tab even when the tab list overflows. */
+.tab-new {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Match the strip height so the `+` button sits on the same baseline
+     as the tab row (the parent `.pane-tabbar` uses align-items:
+     flex-end, so a full-height button's center lines up exactly with
+     the tab's center). 28×28 hit-target keeps the click area comfy
+     while the 14px glyph stays visually balanced with the tab text. */
+  width: 28px;
+  height: var(--header-h);
+  margin-left: 8px;
+  /* No background here — the hover bg is painted by ::before so it
+     stays tight (24×24) inside the larger hit area instead of
+     filling the entire 28×36 box, which would read as a vertical bar. */
+  background: transparent;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 120ms ease, transform 90ms ease;
+}
+.tab-new:active { transform: scale(0.92); }
+.tab-new::before {
+  content: "";
+  position: absolute;
+  inset: 6px 2px;
+  border-radius: 4px;
+  background: transparent;
+  pointer-events: none;
+  transition: background 120ms ease;
+}
+.tab-new:hover { color: var(--text-normal); }
+.tab-new:hover::before { background: var(--hover); }
+.tab-new svg {
+  width: 14px; height: 14px;
+  stroke: currentColor; fill: none; stroke-width: 1.6;
+  /* Same reason as .tab-title — keep glyph above the absolute pseudo. */
+  position: relative;
+}
+.tab-new .codicon {
+  font-size: var(--icon-sm);
+  line-height: 1;
+  color: currentColor;
+  position: relative;
+}
+
+/* ---- pane body / document ---- */
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.pane-doc {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 40px 64px 80px 64px;
+  font-family: var(--font-text);
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--text-normal);
+  max-width: 100%;
+}
+
+.pane-doc > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+
+/* ---- split container ---- */
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.split.horizontal { flex-direction: row; }
+.split.vertical { flex-direction: column; }
+
+.split-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-divider {
+  position: relative;
+  background: var(--divider);
+  flex-shrink: 0;
+  /* Above pane content so the hit-zone is grabbable, below floating
+     menus (split menu = z-index 100) so a drag never blocks the menu. */
+  z-index: 5;
+}
+.split-divider.vertical {
+  width: 1px;
+  cursor: col-resize;
+}
+.split-divider.horizontal {
+  height: 1px;
+  cursor: row-resize;
+}
+
+/* Larger invisible hit-zone so the user can grab the 1px line easily,
+   matching the sidebar splitter UX (see Splitter.css). */
+.split-divider-hit {
+  position: absolute;
+  background: transparent;
+}
+.split-divider.vertical .split-divider-hit {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+.split-divider.horizontal .split-divider-hit {
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+}
+
+.split-divider:hover {
+  background: var(--accent);
+  transition: background 0.12s linear 0.06s;
+}
+
+/* ---- drop overlay (edge hint while dragging) ---- */
+
+.drop-overlay {
+  position: absolute;
+  pointer-events: none;
+  background: var(--selection);
+  z-index: 10;
+  animation: drop-overlay-fade 110ms ease-out;
+}
+@keyframes drop-overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.drop-overlay.center { inset: 0; }
+.drop-overlay.left   { top: 0; bottom: 0; left: 0; width: 50%; }
+.drop-overlay.right  { top: 0; bottom: 0; right: 0; width: 50%; }
+.drop-overlay.top    { left: 0; right: 0; top: 0; height: 50%; }
+.drop-overlay.bottom { left: 0; right: 0; bottom: 0; height: 50%; }
+
+/* ---- tabbar insertion indicator (shown while dragging a tab/file
+        over the tab strip; marks the slot where the drop will land) */
+
+.tab-insertion {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+  /* Above tabs (z:auto) but below the pane-body drop overlay (z:10). */
+  z-index: 4;
+  /* Center the 2px line on the exact insertion seam. */
+  transform: translateX(-1px);
+  box-shadow: 0 0 6px rgba(127, 109, 242, 0.6);
+}
+
+/* ---- custom drag-image (Obsidian-style chip below cursor) ----
+   Built dynamically in dragGhost.ts. setDragImage anchors the cursor
+   at the wrapper's TOP-LEFT (0,0), so the wrapper's padding pushes
+   the visible chip to render BELOW + RIGHT of the cursor tail. */
+
+.lattice-drag-ghost {
+  padding: 14px 0 0 14px;
+  pointer-events: none;
+}
+
+.lattice-drag-ghost-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  background: var(--tab-bg-active);
+  border: 1px solid var(--border-tab);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-ui);
+}
+
+/* ---- in-pane Split menu ---- */
+
+/* Wrapper makes the menu anchor relative to the trigger button.
+   Without position:relative the absolutely-positioned .split-menu
+   would align to the nearest positioned ancestor (the pane), and
+   open in the wrong spot when there are multiple panes in a row. */
+.split-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.split-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  /* Anchor to the RIGHT edge of the trigger button so the menu
+     opens leftward and never falls off the right side of the pane
+     (the doc-header actions sit flush against the pane's right). */
+  right: 0;
+  z-index: 100;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-menu, var(--bg-sidebar));
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  /* Subtle elevation so the menu reads as floating above the doc. */
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  transform-origin: top right;
+  animation: split-menu-pop 110ms ease-out;
+}
+
+@keyframes split-menu-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+
+.split-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.split-menu-item:hover {
+  background: var(--hover);
+}
+.split-menu-icon {
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Trailing element on the right side of a menu item — used for the
+   check mark on "New tab" in the View options menu and for the
+   chevron-right on submenu cues ("Copy path >", "Open linked view >")
+   in the doc More menu. */
+.split-menu-trailing {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Thin separator between groups in the doc More menu. */
+.split-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-soft);
+}
+
+/* Tabbar "View options" menu — short, anchors RIGHT under the chevron. */
+.tabbar-menu {
+  min-width: 180px;
+}
+
+/* Document "More options" menu — long, scrollable if it overflows. */
+.doc-more-menu {
+  min-width: 240px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* Danger item ("Delete file") — red text + matching icon. */
+.split-menu-item.danger,
+.split-menu-item.danger .split-menu-icon,
+.split-menu-item.danger .split-menu-trailing {
+  color: var(--text-error, #e36464);
+}
+.split-menu-item.danger:hover {
+  background: rgba(227, 100, 100, 0.12);
+}
+

@@ -1,0 +1,114 @@
+/* Left sidebar — header / toolbar / content / footer */
+
+.ls-header {
+  gap: 2px;
+}
+.ls-header-drag {
+  flex: 1;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+
+.ls-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.ls-toolbar-spacer { display: none; }
+.ls-toolbar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ls-search-input {
+  flex: 1;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 0 8px;
+  color: var(--text-normal);
+  font-size: 12px;
+}
+.ls-search-input::placeholder { color: var(--text-faint); }
+.ls-search-input:focus { border-color: var(--accent); }
+
+.ls-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 0;
+}
+
+/* Per-view wrapper — used as a keyed remount target so changing the
+   active view (files ↔ search ↔ bookmarks) plays a brief cross-fade
+   instead of swapping content instantly. Pure cosmetic; doesn't change
+   the underlying view logic. */
+.ls-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  animation: ls-view-fade 160ms ease-out;
+}
+
+@keyframes ls-view-fade {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.ls-empty {
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 24px 12px;
+  font-style: italic;
+}
+
+/* Footer — vault picker + help/gear */
+.ls-footer { /* extends .col-footer */
+  position: relative;
+}
+
+.ls-vault-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ls-vault {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ls-vault:hover { background: var(--hover); color: var(--text-normal); }
+.ls-vault svg {
+  width: 12px; height: 12px;
+  stroke: currentColor; fill: none; stroke-width: 1.6;
+}
+.ls-vault .codicon { font-size: var(--icon-xs); line-height: 1; color: currentColor; }
+
+.ls-vault-name {
+  font-weight: 500;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.ls-footer-spacer { flex: 1; }
