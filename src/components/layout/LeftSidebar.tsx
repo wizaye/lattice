@@ -16,7 +16,8 @@ import {
   IcSortAZ,
   IcSun,
 } from "../common/Icons";
-import { FileTree } from "../filetree/FileTree";
+import { FileTree, type InlineEditState } from "../filetree/FileTree";
+import { useVaultStore } from "../../state/vaultStore";
 import { VaultPickerMenu } from "../modals/VaultPickerMenu";
 import "./LeftSidebar.css";
 
@@ -69,6 +70,9 @@ export function LeftSidebar({
     "BoQ",
     vaultName,
   ].filter((v, i, a) => a.indexOf(v) === i);
+
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const [inlineEdit, setInlineEdit] = useState<InlineEditState>(null);
   return (
     <>
       {/* Header — view switcher tabs */}
@@ -97,7 +101,7 @@ export function LeftSidebar({
         <div className="ls-header-drag" data-tauri-drag-region />
         {isMac && (
           <button
-            className="icon-btn ls-toggle-btn"
+            className="icon-btn tiny ls-toggle-btn"
             title="Hide left sidebar"
             onClick={onToggleSidebar}
             style={{ marginRight: 6 }}
@@ -113,10 +117,10 @@ export function LeftSidebar({
         <div className="ls-toolbar">
           {view === "files" && (
             <>
-              <button className="icon-btn tiny" title="New note">
+              <button className="icon-btn tiny" title="New note" onClick={() => vaultPath && setInlineEdit({ path: vaultPath, type: "newFile" })}>
                 <IcEdit />
               </button>
-              <button className="icon-btn tiny" title="New folder">
+              <button className="icon-btn tiny" title="New folder" onClick={() => vaultPath && setInlineEdit({ path: vaultPath, type: "newFolder" })}>
                 <IcNewFolder />
               </button>
               <button className="icon-btn tiny" title="Sort">
@@ -156,7 +160,14 @@ export function LeftSidebar({
         <div className="ls-content">
           <div key={view} className="ls-view">
             {view === "files" && (
-              <FileTree nodes={files} selectedId={selectedId} onOpen={onOpenFile} />
+              <FileTree 
+                nodes={files} 
+                selectedId={selectedId} 
+                onOpen={onOpenFile} 
+                inlineEdit={inlineEdit}
+                setInlineEdit={setInlineEdit}
+                vaultPath={vaultPath}
+              />
             )}
             {view === "search" && (
               <div className="ls-empty">Type to search the vault.</div>

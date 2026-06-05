@@ -18,7 +18,8 @@ import {
   splitLeaf,
   uid,
 } from "../../state/splitTree";
-import { Markdown } from "./Markdown";
+// Markdown component kept for future reading-mode toggle
+import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CanvasView } from "../canvas/CanvasView";
 import { EmptyTab } from "./EmptyTab";
 import { setDragImageBelowCursor } from "../common/dragGhost";
@@ -865,11 +866,18 @@ function Pane(props: PaneProps) {
                   />
                 );
               }
-              // Default: markdown reading view.
+              // Default: markdown editor view (CodeMirror).
               return (
-                <div className="pane-doc">
-                  <Markdown source={file.content ?? ""} />
-                </div>
+                <CodeMirrorEditor
+                  content={file.content ?? ""}
+                  filePath={file.id}
+                  onChange={(c) =>
+                    onUpdateFileContent?.(file.id, c)
+                  }
+                  onSave={() => {
+                    /* save handled by editorStore in App */
+                  }}
+                />
               );
             })()
           ) : (

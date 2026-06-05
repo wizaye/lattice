@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { initialVault, VAULT_NAME, flattenVault } from "./state/mockVault";
 import type { FileNode, SplitTree, Tab } from "./state/types";
+import { useVaultStore } from "./state/vaultStore";
+import { useEditorStore } from "./state/editorStore";
+import { pickVaultFolder, createFolder as createFolderOnDisk } from "./lib/tauriApi";
 import {
   findLeaf,
   leaves,
@@ -34,8 +36,8 @@ const STRIP_W = 36;
 function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
   const tab: Tab = {
     id: uid("tab"),
-    fileId: "file-rahul-1on1",
-    title: "Rahul's 1 on 1",
+    fileId: null,
+    title: "New tab",
   };
   const leafId = uid("leaf");
   return {
@@ -130,31 +132,32 @@ function collectHeadings(content: string): HeadingRef[] {
 
 export default function App() {
   // ---- Vault & active file -------------------------------------------------
-  // Vault is held in React state so canvas / future markdown edits can
-  // persist within the session. The tree is walked depth-first to apply
-  // a partial update to whichever node id matches — cheaper than a deep
-  // immutable update lib for the few-hundred-node mock vault.
-  const [vaultNodes, setVaultNodes] = useState<FileNode[]>(initialVault);
-  const vault = useMemo(() => flattenVault(vaultNodes), [vaultNodes]);
+  // Vault state is managed by zustand. The store reads from the real
+  // filesystem via Tauri commands. Components receive the same props
+  // they always did — only the data source changed.
+  const vaultNodes = useVaultStore((s) => s.fileTree);
+  const vault = useVaultStore((s) => s.flatVault);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  void vaultPath; // reserved for future backend backlinks call
+  const vaultName = useVaultStore((s) => s.vaultName) || "Lattice";
 
-  /** Write back the new body for a file (markdown or canvas). No-op if
-   *  the id isn't a non-folder node. Used by CanvasView's save hook;
-   *  later the markdown editor will use this too. */
+  // Debounce timer ref for auto-saving file content to disk
+  const saveTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  /** Write back the new body for a file (markdown or canvas). Updates
+   *  the in-memory vault tree + editor store, and debounce-saves to disk. */
   const onUpdateFileContent = useCallback(
     (fileId: string, content: string) => {
-      setVaultNodes((prev) => {
-        const visit = (nodes: FileNode[]): FileNode[] =>
-          nodes.map((n) => {
-            if (n.id === fileId && n.kind !== "folder") {
-              return { ...n, content };
-            }
-            if (n.children) {
-              return { ...n, children: visit(n.children) };
-            }
-            return n;
-          });
-        return visit(prev);
-      });
+      // Update zustand vault store (in-memory tree)
+      useVaultStore.getState().updateFileContent(fileId, content);
+      // Update editor store (content cache)
+      useEditorStore.getState().setFileContent(fileId, content);
+      useEditorStore.getState().markDirty(fileId);
+      // Debounce save to disk (500ms)
+      clearTimeout(saveTimerRef.current[fileId]);
+      saveTimerRef.current[fileId] = setTimeout(() => {
+        useEditorStore.getState().saveFile(fileId);
+      }, 500);
     },
     [],
   );
@@ -220,42 +223,74 @@ export default function App() {
   // — the modal already exposes typed callbacks so swapping in Tauri
   // commands is a one-file change.
   const [vaultsOpen, setVaultsOpen] = useState(false);
-  const [knownVaults, setKnownVaults] = useState<Vault[]>(() => [
-    {
-      id: "current",
-      name: VAULT_NAME,
-      path: "C:\\Users\\you\\Documents\\" + VAULT_NAME,
-    },
-    {
-      id: "corp",
-      name: "vijay's corp obsidian vault",
-      path: "C:\\Work\\corp-notes",
-    },
-    {
-      id: "boq",
-      name: "BoQ",
-      path: "C:\\Users\\you\\Documents\\BoQ",
-    },
-  ]);
+  const [knownVaults, setKnownVaults] = useState<Vault[]>(() => {
+    // Load known vaults from localStorage
+    try {
+      const stored = window.localStorage.getItem("lattice.knownVaults");
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return [];
+  });
+
+  // Persist known vaults to localStorage
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("lattice.knownVaults", JSON.stringify(knownVaults));
+    } catch { /* ignore */ }
+  }, [knownVaults]);
+
   const openManageVaults = useCallback(() => setVaultsOpen(true), []);
   const closeManageVaults = useCallback(() => setVaultsOpen(false), []);
-  const onOpenVault = useCallback((_id: string) => {
-    // Future: swap the in-memory vault for the selected one. For now
-    // we just close the modal so the click registers visually.
-    setVaultsOpen(false);
+
+  const doOpenVaultByPath = useCallback(async (path: string) => {
+    await useVaultStore.getState().openVault(path);
+    const name = path.split(/[/\\]/).filter(Boolean).pop() ?? "Vault";
+    // Add to known vaults if not already there
+    setKnownVaults((vs) => {
+      if (vs.some((v) => v.path === path)) return vs;
+      return [...vs, { id: `vault-${Date.now()}`, name, path }];
+    });
   }, []);
+
+  const onOpenVault = useCallback((id: string) => {
+    const v = knownVaults.find((vault) => vault.id === id);
+    if (v) {
+      doOpenVaultByPath(v.path);
+    }
+    setVaultsOpen(false);
+  }, [knownVaults, doOpenVaultByPath]);
+
   const onRemoveVault = useCallback((id: string) => {
     setKnownVaults((vs) => vs.filter((v) => v.id !== id));
   }, []);
-  const onCreateNewVault = useCallback(() => {
-    // Stub — would prompt the user for a name + folder via Tauri dialog.
-  }, []);
-  const onOpenFolderAsVault = useCallback(() => {
-    // Stub — would invoke the native folder picker.
-  }, []);
-  const onOpenExistingVault = useCallback(() => {
-    // Stub — same as open folder for now.
-  }, []);
+
+  const onCreateNewVault = useCallback(async () => {
+    const selected = await pickVaultFolder();
+    if (selected) {
+      try {
+        await createFolderOnDisk(selected);
+      } catch { /* folder might already exist, that's ok */ }
+      await doOpenVaultByPath(selected);
+      setVaultsOpen(false);
+    }
+  }, [doOpenVaultByPath]);
+
+  const onOpenFolderAsVault = useCallback(async () => {
+    const selected = await pickVaultFolder();
+    if (selected) {
+      await doOpenVaultByPath(selected);
+      setVaultsOpen(false);
+    }
+  }, [doOpenVaultByPath]);
+
+  const onOpenExistingVault = useCallback(async () => {
+    // Same as open folder for now
+    const selected = await pickVaultFolder();
+    if (selected) {
+      await doOpenVaultByPath(selected);
+      setVaultsOpen(false);
+    }
+  }, [doOpenVaultByPath]);
 
   // ---- Theme --------------------------------------------------------------
   type Theme = "dark" | "light";
@@ -355,9 +390,45 @@ export default function App() {
         leaf.id === activeLeafId ? openTabInLeaf(leaf, tab) : leaf,
       );
       if (next) setTree(next);
+      // Load file content from disk into editor store
+      useEditorStore.getState().loadFile(file.id).then((content) => {
+        // Also update the vault store so the file tree has content for
+        // backlinks/outgoing/tags computation
+        useVaultStore.getState().updateFileContent(file.id, content);
+      }).catch((err) => {
+        console.error("Failed to load file:", err);
+      });
     },
     [tree, activeLeafId],
   );
+
+  // ---- Wikilink navigation ------------------------------------------------
+  // The CodeMirror editor dispatches a custom event when a [[wikilink]] is
+  // clicked. We listen for it here and open the target file.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.target) return;
+      const linkTarget = detail.target as string;
+      // Search the vault tree for a file matching the link target
+      const flat = useVaultStore.getState().flatVault;
+      let found: FileNode | null = null;
+      flat.forEach((node) => {
+        if (found) return;
+        if (node.kind === "folder") return;
+        // Match by name (without extension)
+        const nameWithout = node.name.replace(/\.md$/i, "").replace(/\.canvas$/i, "");
+        if (nameWithout.toLowerCase() === linkTarget.toLowerCase()) {
+          found = node;
+        }
+      });
+      if (found) {
+        openFile(found);
+      }
+    };
+    window.addEventListener("lattice-open-wikilink", handler);
+    return () => window.removeEventListener("lattice-open-wikilink", handler);
+  }, [openFile]);
 
   // ---- Keyboard shortcuts -------------------------------------------------
   useEffect(() => {
@@ -416,7 +487,7 @@ export default function App() {
         <div className="col-header center" data-tauri-drag-region>
           {!isMac && (
             <button
-              className="icon-btn"
+              className="icon-btn tiny"
               title={leftCollapsed ? "Show left sidebar" : "Hide left sidebar"}
               onClick={toggleLeftSidebar}
             >
@@ -439,7 +510,7 @@ export default function App() {
       >
         <div className="sidebar-inner" style={{ width: leftWidth }}>
           <LeftSidebar
-            vaultName={VAULT_NAME}
+            vaultName={vaultName}
             view={leftView}
             onChangeView={setLeftView}
             files={vaultNodes}
@@ -537,7 +608,7 @@ export default function App() {
       <ManageVaultsModal
         open={vaultsOpen}
         vaults={knownVaults}
-        activeVaultName={VAULT_NAME}
+        activeVaultName={vaultName}
         onOpenVault={onOpenVault}
         onRemoveFromList={onRemoveVault}
         onCreateNewVault={onCreateNewVault}
