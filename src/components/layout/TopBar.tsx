@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { IcClose, IcMaximize, IcMinimize } from "./Icons";
+import { IcClose, IcMaximize, IcMinimize } from "../common/Icons";
 
 /**
  * Window control cluster (minimize / maximize / close).

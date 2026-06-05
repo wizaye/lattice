@@ -1,0 +1,375 @@
+/* ============================================================
+   Manage Vaults — two-pane window modeled on Obsidian's launcher.
+
+   Anatomy:
+     .vaults-overlay        fixed-position dim background
+     .vaults-dialog         the centered card (820 x 560)
+       └─ .vaults-close             absolute top-right close button
+       └─ .vaults-list-pane         LEFT (280px): vault rows
+       └─ .vaults-actions-pane      RIGHT (flex): actions card
+   ============================================================ */
+
+.vaults-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220; /* above settings (200) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 24px;
+  animation: vaults-fade 140ms ease-out;
+}
+
+:root[data-theme="light"] .vaults-overlay {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+@keyframes vaults-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.vaults-dialog {
+  position: relative;
+  display: flex;
+  width: min(820px, 100%);
+  height: min(560px, 100%);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow:
+    0 28px 60px rgba(0, 0, 0, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: vaults-pop 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* When there are no vaults, drop the list pane and shrink the dialog
+   so the actions card stays comfortable instead of swimming in an
+   820px-wide single-pane window. Height also tightens since there's
+   less content. */
+.vaults-dialog.empty {
+  width: min(520px, 100%);
+  height: auto;
+  max-height: min(560px, 100%);
+}
+
+@keyframes vaults-pop {
+  from { transform: translateY(10px) scale(0.985); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+/* ---- Floating close button (top-right corner) ---- */
+
+.vaults-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  transition:
+    background 110ms ease,
+    color 110ms ease,
+    transform 90ms ease;
+}
+.vaults-close:hover { background: var(--hover); color: var(--text-normal); }
+.vaults-close:active { transform: scale(0.94); }
+.vaults-close .codicon { font-size: var(--icon-sm); line-height: 1; }
+
+/* ============================================================
+   LEFT pane — vault list
+   ============================================================ */
+
+.vaults-list-pane {
+  width: 280px;
+  flex-shrink: 0;
+  /* Slightly darker shade than the action pane, like Obsidian's
+     two-tone background. In light mode we tint the other direction. */
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-soft);
+  overflow-y: auto;
+  /* Top padding leaves room for the floating close button so the first
+     vault row doesn't end up under it on the right pane only. */
+  padding: 14px 0 14px;
+}
+
+.vaults-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vault-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  padding: 4px 6px 4px 14px;
+  transition: background 120ms ease;
+}
+.vault-row:hover { background: var(--hover); }
+.vault-row.active {
+  background: var(--hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.vault-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 4px 10px 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+
+.vault-row-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+  /* Single-line truncation — the path below wraps for full context. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vault-row-path {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  /* Allow long Windows paths to wrap and break at any character — the
+     OneDrive paths in the screenshot wrap mid-word and that looks
+     correct in context. */
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Per-row overflow menu ---- */
+
+.vault-row-more {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 10px;
+}
+
+.vault-row-kebab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: transparent;
+  transition: background 110ms ease, color 110ms ease, opacity 110ms ease;
+  /* Stay subtle until you hover the row — Obsidian only shows the
+     kebab clearly on the focused/hovered row. */
+  opacity: 0.55;
+}
+.vault-row:hover .vault-row-kebab,
+.vault-row-kebab:hover,
+.vault-row-kebab[aria-expanded="true"] {
+  opacity: 1;
+}
+.vault-row-kebab:hover { background: var(--hover); color: var(--text-normal); }
+.vault-row-kebab .codicon {
+  font-size: var(--icon-sm);
+  line-height: 1;
+  /* Rotate the horizontal ellipsis to a vertical kebab. */
+  transform: rotate(90deg);
+}
+
+.vault-row-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 4px;
+  z-index: 4;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+  animation: vault-row-menu-pop 110ms ease-out;
+}
+
+@keyframes vault-row-menu-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.vault-row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--text-normal);
+  font-size: 13px;
+  text-align: left;
+  transition: background 110ms ease;
+}
+.vault-row-menu-item:hover { background: var(--hover); }
+.vault-row-menu-item .codicon {
+  font-size: var(--icon-sm);
+  line-height: 1;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.vault-row-menu-item.danger,
+.vault-row-menu-item.danger .codicon {
+  color: var(--text-error, #e36464);
+}
+.vault-row-menu-item.danger:hover {
+  background: rgba(227, 100, 100, 0.12);
+}
+
+.vault-row-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-soft);
+}
+
+/* ============================================================
+   RIGHT pane — actions card
+   ============================================================ */
+
+.vaults-actions-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 32px 40px;
+  min-width: 0;
+}
+
+/* Hero headline above the actions card when the dialog is in empty
+   state — gives the centered card something to anchor against and
+   spells out why the list pane is missing. */
+.vaults-empty-hero {
+  text-align: center;
+  max-width: 360px;
+}
+.vaults-empty-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.vaults-empty-desc {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.vaults-actions-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 4px 20px;
+}
+
+.vault-action {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.vault-action:first-child {
+  border-top: none;
+}
+
+.vault-action-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.vault-action-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.vault-action-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Neutral CTA — used for Open / Sign in. Light pill button on a
+   slightly lifted background so it reads as actionable without
+   stealing focus from the primary Create button. */
+.vault-action-cta {
+  flex-shrink: 0;
+  min-width: 80px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-normal);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  transition:
+    background 110ms ease,
+    border-color 110ms ease,
+    transform 90ms ease;
+}
+.vault-action-cta:hover {
+  background: var(--hover);
+  border-color: var(--border-tab);
+}
+.vault-action-cta:active { transform: scale(0.97); }
+
+/* Primary CTA — accent purple, matches Obsidian's Create button. */
+.vault-action-cta.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.vault-action-cta.primary:hover {
+  /* Lighten on hover — color-mix is supported in every webview
+     Tauri ships, so no fallback needed. */
+  background: color-mix(in srgb, var(--accent) 85%, white);
+  border-color: color-mix(in srgb, var(--accent) 85%, white);
+}
+
+/* ============================================================
+   Responsive — collapse to a single column on small windows so the
+   list pane doesn't dominate.
+   ============================================================ */
+
+@media (max-width: 640px) {
+  .vaults-dialog {
+    flex-direction: column;
+    height: min(680px, 100%);
+  }
+  .vaults-list-pane {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+    max-height: 240px;
+  }
+  .vaults-actions-pane {
+    padding: 20px;
+  }
+}

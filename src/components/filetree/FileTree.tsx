@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { FileNode } from "../state/types";
-import { IcChevronDown, IcChevronRight } from "./Icons";
-import { setDragImageBelowCursor } from "./dragGhost";
+import type { FileNode } from "../../state/types";
+import { IcChevronDown, IcChevronRight } from "../common/Icons";
+import { setDragImageBelowCursor } from "../common/dragGhost";
 import "./FileTree.css";
 
 type Props = {
@@ -35,7 +35,7 @@ function TreeRow({
   const selected = node.id === selectedId;
 
   const onDragStart = (e: React.DragEvent) => {
-    if (node.kind !== "file") return;
+    if (node.kind === "folder") return;
     e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("application/x-lattice-file-id", node.id);
     e.dataTransfer.setData("text/plain", node.name);

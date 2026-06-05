@@ -1,0 +1,17 @@
+# Bun configuration for lattice.
+#
+# Why this file exists:
+# Bun's default install backend on Windows is `hardlink`, which is fast
+# but unreliable on OneDrive-synced folders — OneDrive's filesystem
+# filter can drop files mid-extract, leaving packages (notably
+# `esbuild`) missing their `install.js` and crashing `postinstall`:
+#
+#   Error: Cannot find module '.../node_modules/esbuild/install.js'
+#
+# Switching to `copyfile` avoids hardlinks entirely. It's slightly
+# slower on first install but is the only backend that's safe inside
+# OneDrive / Dropbox / iCloud-synced project roots.
+#
+# Docs: https://bun.sh/docs/runtime/bunfig#install-backend
+[install]
+backend = "copyfile"

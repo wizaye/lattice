@@ -101,6 +101,79 @@ export const IcChevronLeft = codicon("chevron-left");
 export const IcChevronRight = codicon("chevron-right");
 export const IcChevronUp = codicon("chevron-up");
 export const IcPlus = codicon("add");
+export const IcMinus = codicon("dash");
+
+// Canvas
+export const IcStickyNote = codicon("note");
+export const IcLayout = codicon("layout");
+
+// Canvas toolbar — drawing + shape tools
+export const IcCursor = codicon("inspect"); // select / move tool
+export const IcHand = codicon("move"); // pan / hand tool
+export const IcPencil = codicon("pencil"); // freehand pen
+// Eraser — codicons doesn't ship a real eraser glyph (`discard` is a
+// revert-arrow), so we inline a Lucide-style eraser path. Color
+// inherits from currentColor so it matches the toolbar theme.
+export const IcEraser: React.FC<IProps> = ({ className, ...rest }) => (
+  <span
+    aria-hidden="true"
+    {...rest}
+    className={cx("lattice-icon", "lattice-icon-svg", className)}
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      ...(rest.style ?? {}),
+    }}
+  >
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+      <path d="M22 21H7" />
+      <path d="m5 11 9 9" />
+    </svg>
+  </span>
+);
+export const IcSquare = codicon("primitive-square"); // rectangle shape
+export const IcCircle = codicon("circle-outline"); // ellipse shape
+export const IcDiamond = codicon("symbol-misc"); // diamond shape (closest glyph)
+export const IcArrowTool = codicon("arrow-right"); // arrow / connector
+export const IcTextTool = codicon("text-size"); // text tool
+export const IcGroup = codicon("group-by-ref-type"); // group selection
+export const IcExport = codicon("export"); // export menu trigger
+export const IcKebab = codicon("kebab-vertical"); // generic more
+// Drag-grip handle (two vertical columns of dots). Used by the
+// movable canvas toolbar.
+export const IcGrip: React.FC<IProps> = ({ className, ...rest }) => (
+  <span
+    aria-hidden="true"
+    {...rest}
+    className={cx("lattice-icon", "lattice-icon-svg", className)}
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      ...(rest.style ?? {}),
+    }}
+  >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="9" cy="5" r="1.4" />
+      <circle cx="9" cy="12" r="1.4" />
+      <circle cx="9" cy="19" r="1.4" />
+      <circle cx="15" cy="5" r="1.4" />
+      <circle cx="15" cy="12" r="1.4" />
+      <circle cx="15" cy="19" r="1.4" />
+    </svg>
+  </span>
+);
 
 // Right rail (links / outgoing / tags / archive / outline)
 export const IcLink = codicon("link");
@@ -139,6 +212,7 @@ export const IcExtensions = codicon("extensions");
 export const IcHistory = codicon("history");
 export const IcPreview = codicon("preview");
 export const IcSync = codicon("sync");
+export const IcSyncIgnored = codicon("sync-ignored");
 export const IcMerge = codicon("git-merge");
 export const IcCheck = codicon("check");
 export const IcFileSubmodule = codicon("file-submodule");

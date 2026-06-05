@@ -21,7 +21,7 @@ import {
   IcSwap,
   IcSync,
   IcTerminal,
-} from "./Icons";
+} from "../common/Icons";
 import "./SettingsModal.css";
 
 type Props = {

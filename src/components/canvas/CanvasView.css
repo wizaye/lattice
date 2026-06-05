@@ -1,0 +1,751 @@
+/* ===================================================================
+ * CanvasView styles
+ *
+ * Layering (z stack, low → high):
+ *   .canvas-grid          static dotted background, never receives clicks
+ *   .canvas-world         pan/zoom container, holds edges + nodes
+ *     svg.canvas-edges    edges (pointer-events on individual paths)
+ *     .canvas-node        cards (draggable, focusable)
+ *       .canvas-connector side handles for drawing edges
+ *       .canvas-resize    resize grabbers (8 per selected card)
+ *     .canvas-marquee     selection rectangle (world space)
+ *   .canvas-hud           floating toolbars (screen space, non-pannable)
+ * =================================================================== */
+
+.canvas-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-app);
+  /* Default canvas cursor is the "open hand" feel only when Space is
+     held; otherwise we let nodes / handles set their own cursor. */
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+  outline: none;
+}
+.canvas-root.can-pan { cursor: grab; }
+.canvas-root.panning { cursor: grabbing; }
+
+/* Dotted grid — implemented as a tiled radial-gradient on a fixed
+   layer that gets repositioned/resized in JS to follow the viewport.
+   Keeps the grid feeling continuous as the world zooms. */
+.canvas-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-color: transparent;
+  background-image: radial-gradient(
+    circle,
+    var(--canvas-grid-dot, rgba(255, 255, 255, 0.06)) 1px,
+    transparent 1px
+  );
+  background-repeat: repeat;
+  pointer-events: none;
+}
+:root[data-theme="light"] .canvas-grid {
+  background-image: radial-gradient(
+    circle,
+    rgba(0, 0, 0, 0.08) 1px,
+    transparent 1px
+  );
+}
+
+/* World layer — every interactive piece lives inside here so it pans
+   and zooms with one transform. Origin is 0,0 (top-left). Children
+   use absolute positioning in world coordinates. */
+.canvas-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  z-index: 1;
+}
+
+/* ----- Edges (SVG) ---------------------------------------------------
+   The SVG element itself is positioned absolutely in world coords
+   (left/top/width/height come from inline style based on the bounds).
+   The viewBox uses world coordinates so paths can be drawn in raw
+   x/y without any extra math. */
+.canvas-edges {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+  color: var(--canvas-edge, var(--text-muted));
+}
+.canvas-edge {
+  pointer-events: none;
+}
+.canvas-edge-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-width 80ms ease;
+}
+.canvas-edge-line.drawing {
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+.canvas-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+.canvas-edge.selected .canvas-edge-line {
+  stroke-width: 3;
+  color: var(--accent, #8a6cd1);
+}
+.canvas-edge-label {
+  fill: var(--text-normal);
+  font-size: 11px;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg-app);
+  stroke-width: 4;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* ----- Nodes --------------------------------------------------------- */
+.canvas-node {
+  position: absolute;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  color: var(--text-normal);
+  display: flex;
+  overflow: hidden;
+  cursor: grab;
+  /* The accent color (when set via JSON Canvas color presets) shows
+     as a left-edge stripe so the body stays readable. */
+  --node-accent: transparent;
+  border-left: 3px solid var(--node-accent, transparent);
+  transition: box-shadow 100ms ease, border-color 100ms ease;
+}
+.canvas-node:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+.canvas-node.selected {
+  border-color: var(--accent, #8a6cd1);
+  box-shadow:
+    0 0 0 1px var(--accent, #8a6cd1),
+    0 4px 14px rgba(0, 0, 0, 0.32);
+}
+.canvas-node.editing {
+  cursor: text;
+}
+
+.canvas-node-text,
+.canvas-node-textarea {
+  flex: 1;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+.canvas-node-textarea {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  resize: none;
+  outline: none;
+}
+.canvas-node-placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Placeholder rendering for non-text node types until v2 ships
+   proper renderers (image preview for file nodes, etc.). */
+.canvas-node-stub {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.canvas-node-stub-type {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.canvas-node-stub-hint {
+  color: var(--text-normal);
+  word-break: break-all;
+}
+
+/* ----- Edge connectors (the little dots on a card's 4 sides) -------- */
+.canvas-connector {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent, #8a6cd1);
+  border: 2px solid var(--bg-app);
+  cursor: crosshair;
+  /* Inflate the hit target with a pseudo-element so users don't have
+     to land exactly on the visible 10px circle. */
+  z-index: 2;
+}
+.canvas-connector::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+.canvas-connector.top    { left: 50%; top: 0;     transform: translate(-50%, -50%); }
+.canvas-connector.bottom { left: 50%; bottom: 0;  transform: translate(-50%, 50%); }
+.canvas-connector.left   { top: 50%;  left: 0;    transform: translate(-50%, -50%); }
+.canvas-connector.right  { top: 50%;  right: 0;   transform: translate(50%, -50%); }
+
+/* ----- Resize handles (8 per selected card) ------------------------- */
+.canvas-resize {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+}
+.canvas-resize.n,
+.canvas-resize.s {
+  left: 6px;
+  right: 6px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.canvas-resize.n { top: -4px; }
+.canvas-resize.s { bottom: -4px; }
+.canvas-resize.e,
+.canvas-resize.w {
+  top: 6px;
+  bottom: 6px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.canvas-resize.e { right: -4px; }
+.canvas-resize.w { left: -4px; }
+.canvas-resize.ne,
+.canvas-resize.nw,
+.canvas-resize.se,
+.canvas-resize.sw {
+  width: 12px;
+  height: 12px;
+  z-index: 3;
+}
+.canvas-resize.ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.canvas-resize.nw { top: -6px; left: -6px;  cursor: nwse-resize; }
+.canvas-resize.se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.canvas-resize.sw { bottom: -6px; left: -6px;  cursor: nesw-resize; }
+
+/* ----- Marquee selection rect (lives in world space) ---------------- */
+.canvas-marquee {
+  position: absolute;
+  border: 1px dashed var(--accent, #8a6cd1);
+  background: color-mix(in srgb, var(--accent, #8a6cd1) 12%, transparent);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ----- Floating HUD (toolbars) -------------------------------------- */
+.canvas-hud {
+  position: absolute;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-header, var(--bg-sidebar));
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+  /* keep slight transparency so panning behind it stays visible */
+  backdrop-filter: blur(6px);
+}
+.canvas-hud.right {
+  top: 10px;
+  right: 10px;
+  /* Vertical stack, matches the look of the left tool palette. */
+  flex-direction: column;
+  align-items: stretch;
+}
+.canvas-hud.bottom {
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.canvas-hud-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+.canvas-hud-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.canvas-hud-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.canvas-hud-btn .codicon {
+  font-size: var(--icon-sm, 14px);
+  line-height: 1;
+}
+.canvas-hud-pct {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 6px;
+  min-width: 38px;
+  text-align: center;
+}
+
+/* ----- Standalone zoom chip (bottom-left, status-bar style) --------- */
+.canvas-zoom-chip {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 10;
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-header, var(--bg-sidebar));
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 5px 9px;
+  min-width: 44px;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(6px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.canvas-zoom-chip:hover {
+  color: var(--text-normal);
+  background: var(--hover, var(--bg-header));
+}
+
+/* =====================================================================
+ * Whiteboard v2 additions — tool palette, shape/group/draw nodes,
+ * alignment guides, export menu, tool-specific cursors.
+ *
+ * (Original `.canvas-root` / `.canvas-grid` / `.canvas-world` /
+ * `.canvas-edges` / `.canvas-hud` definitions live above; this block
+ * only adds NEW selectors needed by the rewritten CanvasView.tsx.)
+ * ===================================================================== */
+
+/* ----- Tool-specific cursors on the root element -------------------- */
+.canvas-root.can-draw  { cursor: crosshair; }
+.canvas-root.can-erase { cursor: cell; }
+.canvas-root.can-text  { cursor: text; }
+.canvas-root.can-shape { cursor: crosshair; }
+
+/* ----- Left tool palette (vertical, screen-pinned) ------------------ */
+.canvas-toolbar {
+  position: absolute;
+  /* left/top/right/bottom + transform are driven by inline style so
+     the dock position can switch at runtime (left|right|top|bottom|
+     float) without conflicting CSS overrides. */
+  z-index: 11;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-header, var(--bg-sidebar));
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(6px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.canvas-toolbar.vertical {
+  flex-direction: column;
+}
+.canvas-toolbar.horizontal {
+  flex-direction: row;
+}
+.canvas-toolbar.dragging {
+  opacity: 0.92;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+/* Separators auto-orient to be perpendicular to the bar's main axis. */
+.canvas-toolbar.vertical > .canvas-toolbar-sep {
+  height: 1px;
+  width: auto;
+  margin: 4px 4px;
+  background: var(--border-soft);
+}
+.canvas-toolbar.horizontal > .canvas-toolbar-sep {
+  width: 1px;
+  height: auto;
+  margin: 4px 4px;
+  background: var(--border-soft);
+}
+.canvas-toolbar-sep {
+  /* default (covers any stragglers without an orientation class) */
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--border-soft);
+}
+
+/* ----- Toolbar grip + dock menu ------------------------------------- */
+.canvas-toolbar-handle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.canvas-toolbar.vertical > .canvas-toolbar-handle {
+  flex-direction: column;
+}
+.canvas-toolbar.horizontal > .canvas-toolbar-handle {
+  flex-direction: row;
+}
+.canvas-toolbar-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: grab;
+  border-radius: 5px;
+  padding: 0;
+  touch-action: none;
+}
+.canvas-toolbar-grip:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.canvas-toolbar-grip:active,
+.canvas-toolbar.dragging .canvas-toolbar-grip {
+  cursor: grabbing;
+}
+.canvas-toolbar-dock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 0;
+}
+.canvas-toolbar-dock-btn:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.canvas-toolbar-dock-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 140px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+/* Default placement (used by float + left dock): drop below+left. */
+.canvas-toolbar-dock-menu {
+  top: calc(100% + 6px);
+  left: 0;
+}
+/* Right dock: keep the menu pinned to the bar's right edge so it
+   doesn't spill off the viewport. */
+.canvas-toolbar-dock-menu.dock-right {
+  top: calc(100% + 6px);
+  left: auto;
+  right: 0;
+}
+/* Top dock: bar sits at the top so the menu still drops down. */
+.canvas-toolbar-dock-menu.dock-top {
+  top: calc(100% + 6px);
+  left: 0;
+  right: auto;
+  bottom: auto;
+}
+/* Bottom dock: bar sits at the bottom of the canvas, so a drop-down
+   menu gets clipped — flip it to OPEN UPWARD instead. */
+.canvas-toolbar-dock-menu.dock-bottom {
+  top: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
+}
+.canvas-toolbar-dock-menu button {
+  appearance: none;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.canvas-toolbar-dock-menu button:hover {
+  background: var(--hover);
+}
+.canvas-toolbar-dock-menu button.active {
+  background: color-mix(in srgb, var(--accent, #8a6cd1) 14%, transparent);
+  color: var(--accent, #8a6cd1);
+  font-weight: 500;
+}
+.canvas-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+.canvas-tool-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.canvas-tool-btn.active {
+  background: color-mix(in srgb, var(--accent, #8a6cd1) 22%, transparent);
+  color: var(--accent, #8a6cd1);
+}
+.canvas-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.canvas-tool-btn .codicon {
+  font-size: var(--icon-md, 16px);
+  line-height: 1;
+}
+
+/* ----- HUD: zoom % + vertical divider between groups ---------------- */
+.canvas-hud-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--border-soft);
+}
+/* When the HUD itself stacks vertically (right-side dock), the separator
+   must flip to a horizontal rule. */
+.canvas-hud.right > .canvas-hud-sep {
+  width: auto;
+  height: 1px;
+  margin: 4px 2px;
+}
+.canvas-hud.right .canvas-export-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+/* ----- HUD: export dropdown ----------------------------------------- */
+.canvas-export-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.canvas-export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 160px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+/* Right-side vertical HUD: the bar hugs the screen edge, so a menu
+   that opens straight down would clip off-screen on the right. Open
+   it to the LEFT of the export button instead. */
+.canvas-hud.right .canvas-export-menu {
+  top: 0;
+  right: calc(100% + 6px);
+}
+.canvas-export-menu button {
+  appearance: none;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.canvas-export-menu button:hover {
+  background: var(--hover);
+}
+
+/* ----- Freehand strokes (drawn inside .canvas-edges SVG) ------------ */
+.canvas-stroke {
+  fill: none;
+  stroke: var(--text-normal);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+}
+.canvas-stroke.drawing {
+  opacity: 0.85;
+}
+.canvas-stroke.selected {
+  filter: drop-shadow(0 0 2px var(--accent, #8a6cd1));
+}
+
+/* ----- In-flight shape preview (rect/ellipse/diamond outline) ------- */
+.canvas-shape-preview {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
+/* ----- Alignment guides (short dashed segments at snap edges) ------- */
+/* Drawn inside the world-space SVG layer, so we use
+ * vector-effect:non-scaling-stroke to keep the stroke width and dash
+ * pattern visually consistent regardless of the current zoom. */
+.canvas-guide {
+  stroke: var(--accent, #8a6cd1);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 4;
+  opacity: 0.85;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ----- Shape node body (rect/ellipse/diamond) ----------------------- */
+/* The shape's own outline lives inside its embedded SVG; the wrapping
+ * .canvas-node should be transparent so the SVG geometry shows
+ * through. Selection still uses the standard outline/box-shadow from
+ * the base .canvas-node.selected rule. */
+.canvas-node.canvas-node-shape {
+  background: transparent;
+  border: 0;
+  border-left: 0;
+  box-shadow: none;
+  cursor: grab;
+}
+.canvas-node.canvas-node-shape.selected {
+  box-shadow: 0 0 0 1px var(--accent, #8a6cd1);
+}
+.canvas-node.canvas-node-shape:hover {
+  box-shadow: none;
+}
+.canvas-node.canvas-node-shape.selected:hover {
+  box-shadow: 0 0 0 1px var(--accent, #8a6cd1);
+}
+.canvas-shape-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.canvas-shape-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.canvas-shape-text {
+  position: relative;
+  z-index: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-normal);
+  text-align: center;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.canvas-node-textarea.center {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  background: transparent;
+}
+
+/* ----- Group node (labelled container, sits behind its members) ----- */
+.canvas-node.canvas-node-group {
+  background: rgba(140, 140, 160, 0.08);
+  border: 1px dashed var(--border, var(--border-soft));
+  border-left: 1px dashed var(--border, var(--border-soft));
+  border-radius: 10px;
+  box-shadow: none;
+  /* Don't grab pointer events for the group body so members underneath
+   * stay clickable; the label strip + a thin border are the only
+   * interactive surfaces. */
+  cursor: grab;
+}
+.canvas-node.canvas-node-group.selected {
+  border-color: var(--accent, #8a6cd1);
+  background: color-mix(in srgb, var(--accent, #8a6cd1) 10%, transparent);
+}
+.canvas-group-label,
+.canvas-group-label-input {
+  position: absolute;
+  top: 4px;
+  left: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-soft);
+  max-width: calc(100% - 20px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-group-label-input {
+  outline: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}

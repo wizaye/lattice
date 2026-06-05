@@ -59,3 +59,16 @@ button.sp-stat:hover { background: var(--hover); color: var(--text-normal); }
   stroke: currentColor; fill: none; stroke-width: 1.6;
 }
 .sp-icon .codicon { font-size: var(--icon-xs); line-height: 1; color: currentColor; }
+
+/* Sync status indicator at the trailing edge of the pill.
+ * - .ok  → connected / quiet — uses normal muted/hover colors above.
+ * - .off → no sync configured — paints red (and stays red on hover so
+ *          it keeps signaling that the vault isn't backed up). */
+button.sp-icon.sync { cursor: pointer; }
+.sp-icon.sync.off,
+.sp-icon.sync.off:hover {
+  color: var(--text-error, #e36464);
+}
+.sp-icon.sync.off:hover {
+  background: rgba(227, 100, 100, 0.12);
+}

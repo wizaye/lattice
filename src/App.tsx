@@ -9,18 +9,18 @@ import {
   openTabInLeaf,
   uid,
 } from "./state/splitTree";
-import { LeftSidebar, type LeftView } from "./components/LeftSidebar";
-import { RightSidebar } from "./components/RightSidebar";
-import { LeftActivityStrip } from "./components/ActivityStrip";
-import { EditorArea } from "./components/EditorArea";
-import { WindowControls } from "./components/TopBar";
-import { StatusPill } from "./components/StatusPill";
-import { SettingsModal } from "./components/SettingsModal";
+import { LeftSidebar, type LeftView } from "./components/layout/LeftSidebar";
+import { RightSidebar } from "./components/layout/RightSidebar";
+import { LeftActivityStrip } from "./components/layout/ActivityStrip";
+import { EditorArea } from "./components/editor/EditorArea";
+import { WindowControls } from "./components/layout/TopBar";
+import { StatusPill } from "./components/layout/StatusPill";
+import { SettingsModal } from "./components/modals/SettingsModal";
 import {
   ManageVaultsModal,
   type Vault,
-} from "./components/ManageVaultsModal";
-import { IcPanelLeft } from "./components/Icons";
+} from "./components/modals/ManageVaultsModal";
+import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
 
 const LEFT_MIN = 160;
@@ -130,8 +130,34 @@ function collectHeadings(content: string): HeadingRef[] {
 
 export default function App() {
   // ---- Vault & active file -------------------------------------------------
-  const [vaultNodes] = useState<FileNode[]>(initialVault);
+  // Vault is held in React state so canvas / future markdown edits can
+  // persist within the session. The tree is walked depth-first to apply
+  // a partial update to whichever node id matches — cheaper than a deep
+  // immutable update lib for the few-hundred-node mock vault.
+  const [vaultNodes, setVaultNodes] = useState<FileNode[]>(initialVault);
   const vault = useMemo(() => flattenVault(vaultNodes), [vaultNodes]);
+
+  /** Write back the new body for a file (markdown or canvas). No-op if
+   *  the id isn't a non-folder node. Used by CanvasView's save hook;
+   *  later the markdown editor will use this too. */
+  const onUpdateFileContent = useCallback(
+    (fileId: string, content: string) => {
+      setVaultNodes((prev) => {
+        const visit = (nodes: FileNode[]): FileNode[] =>
+          nodes.map((n) => {
+            if (n.id === fileId && n.kind !== "folder") {
+              return { ...n, content };
+            }
+            if (n.children) {
+              return { ...n, children: visit(n.children) };
+            }
+            return n;
+          });
+        return visit(prev);
+      });
+    },
+    [],
+  );
 
   // ---- Editor split-tree --------------------------------------------------
   const init = useMemo(makeInitialTree, []);
@@ -321,7 +347,7 @@ export default function App() {
   // ---- Open file from sidebar --------------------------------------------
   const openFile = useCallback(
     (file: FileNode) => {
-      if (file.kind !== "file") return;
+      if (file.kind === "folder") return;
       const tab: Tab = { id: uid("tab"), fileId: file.id, title: file.name };
       const next = mapLeaves(tree, (leaf) =>
         leaf.id === activeLeafId ? openTabInLeaf(leaf, tab) : leaf,
@@ -431,6 +457,7 @@ export default function App() {
           activeLeafId={activeLeafId}
           onChangeActiveLeaf={setActiveLeafId}
           onTreeChange={onTreeChange}
+          onUpdateFileContent={onUpdateFileContent}
           rightSidebarCollapsed={rightCollapsed}
           onToggleRightSidebar={toggleRightSidebar}
           topRightInsetPx={146 /* window-controls cluster width + small gap */}

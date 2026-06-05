@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { FileNode } from "../state/types";
+import type { FileNode } from "../../state/types";
 import {
   IcBookmark,
   IcChevronDown,
@@ -14,9 +14,9 @@ import {
   IcSearch,
   IcSortAZ,
   IcSun,
-} from "./Icons";
-import { FileTree } from "./FileTree";
-import { VaultPickerMenu } from "./VaultPickerMenu";
+} from "../common/Icons";
+import { FileTree } from "../filetree/FileTree";
+import { VaultPickerMenu } from "../modals/VaultPickerMenu";
 import "./LeftSidebar.css";
 
 export type LeftView = "files" | "search" | "bookmarks";

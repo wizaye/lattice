@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { DropEdge, FileNode, SplitTree, Tab } from "../state/types";
+import type { DropEdge, FileNode, SplitTree, Tab } from "../../state/types";
 import {
   findLeaf,
   insertTabAt,
@@ -17,10 +17,11 @@ import {
   setSplitRatio,
   splitLeaf,
   uid,
-} from "../state/splitTree";
+} from "../../state/splitTree";
 import { Markdown } from "./Markdown";
+import { CanvasView } from "../canvas/CanvasView";
 import { EmptyTab } from "./EmptyTab";
-import { setDragImageBelowCursor } from "./dragGhost";
+import { setDragImageBelowCursor } from "../common/dragGhost";
 import {
   IcArrowDown,
   IcArrowLeft,
@@ -56,7 +57,7 @@ import {
   IcStack,
   IcSwap,
   IcTrash,
-} from "./Icons";
+} from "../common/Icons";
 import "./EditorArea.css";
 
 type Props = {
@@ -65,6 +66,10 @@ type Props = {
   activeLeafId: string;
   onChangeActiveLeaf: (id: string) => void;
   onTreeChange: (next: SplitTree | null) => void;
+  /** Called by canvas / markdown editors when the user changes a file's
+   *  body. App-level state is the source of truth, so the editor area
+   *  doesn't hold its own mirror — it just forwards saves up. */
+  onUpdateFileContent?: (fileId: string, content: string) => void;
   rightSidebarCollapsed: boolean;
   onToggleRightSidebar: () => void;
   /** px of right padding to reserve in the topmost pane's tabbar so its
@@ -84,6 +89,7 @@ export function EditorArea(props: Props) {
     activeLeafId,
     onChangeActiveLeaf,
     onTreeChange,
+    onUpdateFileContent,
     rightSidebarCollapsed,
     onToggleRightSidebar,
     topRightInsetPx,
@@ -228,7 +234,7 @@ export function EditorArea(props: Props) {
       // file drag → open in target leaf (with optional split)
       if (data.kind === "file") {
         const file = vault.get(data.fileId);
-        if (!file || file.kind !== "file") return;
+        if (!file || file.kind === "folder") return;
         const newTab: Tab = {
           id: uid("tab"),
           fileId: file.id,
@@ -300,7 +306,7 @@ export function EditorArea(props: Props) {
     (leafId: string, index: number, data: DT) => {
       if (data.kind === "file") {
         const file = vault.get(data.fileId);
-        if (!file || file.kind !== "file") return;
+        if (!file || file.kind === "folder") return;
         const newTab: Tab = {
           id: uid("tab"),
           fileId: file.id,
@@ -362,6 +368,7 @@ export function EditorArea(props: Props) {
         onChangeActiveLeaf={onChangeActiveLeaf}
         onDropOnPane={handleDropOnPane}
         onDropOnTabbar={handleDropOnTabbar}
+        onUpdateFileContent={onUpdateFileContent}
         topLeftLeafId={topLeftLeafId}
         rightSidebarCollapsed={rightSidebarCollapsed}
         onToggleRightSidebar={onToggleRightSidebar}
@@ -405,6 +412,9 @@ type RenderProps = {
   onChangeActiveLeaf: (id: string) => void;
   onDropOnPane: (leafId: string, edge: DropEdge, data: DT) => void;
   onDropOnTabbar: (leafId: string, index: number, data: DT) => void;
+  /** Forwarded to Pane bodies so editors (canvas, future markdown
+   *  WYSIWYG) can persist edits without bouncing through context. */
+  onUpdateFileContent?: (fileId: string, content: string) => void;
   topLeftLeafId?: string;
   rightSidebarCollapsed: boolean;
   onToggleRightSidebar: () => void;
@@ -556,6 +566,7 @@ function Pane(props: PaneProps) {
     onChangeActiveLeaf,
     onDropOnPane,
     onDropOnTabbar,
+    onUpdateFileContent,
     topLeftLeafId,
     rightSidebarCollapsed,
     onToggleRightSidebar,
@@ -565,6 +576,12 @@ function Pane(props: PaneProps) {
   const isActive = leaf.id === activeLeafId;
   const isTopLeft = leaf.id === topLeftLeafId;
   const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
+  // The canvas tool has its own in-pane controls (export, zoom HUD,
+  // tool palette). Showing the markdown reading-mode + per-file More
+  // menu on top of it looks duplicative, so hide those entries
+  // whenever the active tab is a canvas document.
+  const activeFile = activeTab?.fileId ? vault.get(activeTab.fileId) : null;
+  const isCanvasTab = activeFile?.kind === "canvas";
 
   const paneRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -772,20 +789,22 @@ function Pane(props: PaneProps) {
           <SplitMenuButton
             onSplit={(edge) => onSplit(leaf.id, edge)}
           />
-          {activeTab?.fileId && (
+          {activeTab?.fileId && !isCanvasTab && (
             <button className="icon-btn tiny" title="Reading mode">
               <IcBook />
             </button>
           )}
-          <DocMoreMenu
-            hasFile={!!activeTab?.fileId}
-            onSplit={(edge) => onSplit(leaf.id, edge)}
-            onClose={
-              activeTab
-                ? () => onCloseTab(leaf.id, activeTab.id)
-                : undefined
-            }
-          />
+          {!isCanvasTab && (
+            <DocMoreMenu
+              hasFile={!!activeTab?.fileId}
+              onSplit={(edge) => onSplit(leaf.id, edge)}
+              onClose={
+                activeTab
+                  ? () => onCloseTab(leaf.id, activeTab.id)
+                  : undefined
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -795,7 +814,9 @@ function Pane(props: PaneProps) {
           activeTab.fileId ? (
             (() => {
               const file = vault.get(activeTab.fileId);
-              if (!file || file.kind !== "file") {
+              // Folder rows shouldn't be openable in tabs, and a stale
+              // tab pointing at a deleted file falls back to EmptyTab.
+              if (!file || file.kind === "folder") {
                 return (
                   <EmptyTab
                     onCreate={() => onNewTab(leaf.id)}
@@ -804,6 +825,20 @@ function Pane(props: PaneProps) {
                   />
                 );
               }
+              // JSON Canvas — interactive infinite-board editor.
+              // Persists by serializing back to the on-disk format
+              // (tab-indented per Obsidian's convention) on every edit.
+              if (file.kind === "canvas") {
+                return (
+                  <CanvasView
+                    source={file.content ?? ""}
+                    onChange={(json) =>
+                      onUpdateFileContent?.(file.id, json)
+                    }
+                  />
+                );
+              }
+              // Default: markdown reading view.
               return (
                 <div className="pane-doc">
                   <Markdown source={file.content ?? ""} />

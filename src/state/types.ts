@@ -1,11 +1,26 @@
 // Shared types for the editor split-tree, tabs, and vault.
 
+/**
+ * A node in the mock vault.
+ *
+ * `kind`:
+ *  - `"folder"`: contains `children`, no `content`.
+ *  - `"file"`:   markdown file. `content` holds the raw `.md` body.
+ *  - `"canvas"`: JSON Canvas file. `content` holds the serialized
+ *                `.canvas` JSON (see {@link state/canvas}). Treated
+ *                like a regular openable file everywhere except the
+ *                metrics/backlinks code (which is markdown-only).
+ *
+ * Anything that needs to know "is this an openable leaf?" should
+ * check `kind !== "folder"` rather than `kind === "file"` so canvas
+ * files don't get filtered out.
+ */
 export type FileNode = {
   id: string;
   name: string;
-  kind: "file" | "folder";
+  kind: "file" | "folder" | "canvas";
   children?: FileNode[];
-  /** Raw markdown content (mock) — only meaningful for files. */
+  /** Raw file body. Markdown for `"file"`, JSON for `"canvas"`. */
   content?: string;
 };
 

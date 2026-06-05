@@ -5,7 +5,7 @@ import {
   IcGrid,
   IcKanban,
   IcTerminal,
-} from "./Icons";
+} from "../common/Icons";
 
 /** Vertical icon column for the L-strip body. */
 export function LeftActivityStrip() {

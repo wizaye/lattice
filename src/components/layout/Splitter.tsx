@@ -1,4 +1,4 @@
-import { useDragResize } from "../hooks/useDragResize";
+import { useDragResize } from "../../hooks/useDragResize";
 import "./Splitter.css";
 
 type Props = {

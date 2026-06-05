@@ -5,7 +5,7 @@ import {
   IcLinkOff,
   IcList,
   IcTag,
-} from "./Icons";
+} from "../common/Icons";
 import "./RightSidebar.css";
 
 type Backlink = {

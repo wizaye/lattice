@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { IcCheck, IcFileSubmodule } from "./Icons";
+import { IcCheck, IcFileSubmodule } from "../common/Icons";
 import "./VaultPickerMenu.css";
 
 type Props = {
