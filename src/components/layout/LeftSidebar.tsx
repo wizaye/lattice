@@ -11,6 +11,7 @@ import {
   IcMoon,
   IcMore,
   IcNewFolder,
+  IcPanelLeft,
   IcSearch,
   IcSortAZ,
   IcSun,
@@ -36,6 +37,8 @@ type Props = {
    *  modal state lives in App so the modal can render at the top of
    *  the tree (above the sidebars). */
   onOpenManageVaults: () => void;
+  isMac: boolean;
+  onToggleSidebar: () => void;
 };
 
 /**
@@ -52,6 +55,8 @@ export function LeftSidebar({
   onToggleTheme,
   onOpenSettings,
   onOpenManageVaults,
+  isMac,
+  onToggleSidebar,
 }: Props) {
   // Vault picker is local state — it's a small popover anchored to the
   // vault button in the footer. The trigger ref is passed to
@@ -67,7 +72,7 @@ export function LeftSidebar({
   return (
     <>
       {/* Header — view switcher tabs */}
-      <div className="col-header ls-header" data-tauri-drag-region>
+      <div className="col-header ls-header" data-tauri-drag-region style={isMac ? { paddingLeft: 40 } : {}}>
         <button
           className={`icon-btn${view === "files" ? " active" : ""}`}
           title="Files"
@@ -90,6 +95,16 @@ export function LeftSidebar({
           <IcBookmark />
         </button>
         <div className="ls-header-drag" data-tauri-drag-region />
+        {isMac && (
+          <button
+            className="icon-btn ls-toggle-btn"
+            title="Hide left sidebar"
+            onClick={onToggleSidebar}
+            style={{ marginRight: 6 }}
+          >
+            <IcPanelLeft open={true} />
+          </button>
+        )}
       </div>
 
       {/* Body */}

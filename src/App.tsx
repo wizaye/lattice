@@ -164,6 +164,8 @@ export default function App() {
   const [tree, setTree] = useState<SplitTree>(init.tree);
   const [activeLeafId, setActiveLeafId] = useState(init.activeLeafId);
 
+  const isMac = typeof window !== "undefined" && navigator.userAgent.includes("Mac");
+
   // ensure activeLeafId stays valid when tree changes
   useEffect(() => {
     if (!findLeaf(tree, activeLeafId)) {
@@ -412,13 +414,15 @@ export default function App() {
       {/* ===== L strip column ===== */}
       <div className="col lstrip">
         <div className="col-header center" data-tauri-drag-region>
-          <button
-            className="icon-btn"
-            title={leftCollapsed ? "Show left sidebar" : "Hide left sidebar"}
-            onClick={toggleLeftSidebar}
-          >
-            <IcPanelLeft open={!leftCollapsed} />
-          </button>
+          {!isMac && (
+            <button
+              className="icon-btn"
+              title={leftCollapsed ? "Show left sidebar" : "Hide left sidebar"}
+              onClick={toggleLeftSidebar}
+            >
+              <IcPanelLeft open={!leftCollapsed} />
+            </button>
+          )}
         </div>
         <div className="col-body">
           <LeftActivityStrip />
@@ -445,6 +449,8 @@ export default function App() {
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}
             onOpenManageVaults={openManageVaults}
+            isMac={isMac}
+            onToggleSidebar={toggleLeftSidebar}
           />
         </div>
       </div>
@@ -458,9 +464,12 @@ export default function App() {
           onChangeActiveLeaf={setActiveLeafId}
           onTreeChange={onTreeChange}
           onUpdateFileContent={onUpdateFileContent}
+          leftSidebarCollapsed={leftCollapsed}
+          onToggleLeftSidebar={toggleLeftSidebar}
           rightSidebarCollapsed={rightCollapsed}
           onToggleRightSidebar={toggleRightSidebar}
-          topRightInsetPx={146 /* window-controls cluster width + small gap */}
+          topRightInsetPx={isMac ? 0 : 146 /* window-controls cluster width + small gap */}
+          topLeftInsetPx={isMac && leftCollapsed ? 40 : 0}
         />
       </div>
 

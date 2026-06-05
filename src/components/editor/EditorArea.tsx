@@ -49,6 +49,7 @@ import {
   IcMerge,
   IcMore,
   IcNewFile,
+  IcPanelLeft,
   IcPanelRight,
   IcPlus,
   IcReplace,
@@ -70,11 +71,15 @@ type Props = {
    *  body. App-level state is the source of truth, so the editor area
    *  doesn't hold its own mirror — it just forwards saves up. */
   onUpdateFileContent?: (fileId: string, content: string) => void;
+  leftSidebarCollapsed: boolean;
+  onToggleLeftSidebar: () => void;
   rightSidebarCollapsed: boolean;
   onToggleRightSidebar: () => void;
   /** px of right padding to reserve in the topmost pane's tabbar so its
    *  controls don't slide under the floating window-controls cluster. */
   topRightInsetPx: number;
+  /** px of left padding to reserve for macos traffic lights when left sidebar is collapsed. */
+  topLeftInsetPx: number;
 };
 
 /**
@@ -90,9 +95,12 @@ export function EditorArea(props: Props) {
     onChangeActiveLeaf,
     onTreeChange,
     onUpdateFileContent,
+    leftSidebarCollapsed,
+    onToggleLeftSidebar,
     rightSidebarCollapsed,
     onToggleRightSidebar,
     topRightInsetPx,
+    topLeftInsetPx,
   } = props;
 
   // ---- tab ops ---------------------------------------------------------
@@ -370,9 +378,12 @@ export function EditorArea(props: Props) {
         onDropOnTabbar={handleDropOnTabbar}
         onUpdateFileContent={onUpdateFileContent}
         topLeftLeafId={topLeftLeafId}
+        leftSidebarCollapsed={leftSidebarCollapsed}
+        onToggleLeftSidebar={onToggleLeftSidebar}
         rightSidebarCollapsed={rightSidebarCollapsed}
         onToggleRightSidebar={onToggleRightSidebar}
         topRightInsetPx={topRightInsetPx}
+        topLeftInsetPx={topLeftInsetPx}
       />
     </div>
   );
@@ -416,9 +427,12 @@ type RenderProps = {
    *  WYSIWYG) can persist edits without bouncing through context. */
   onUpdateFileContent?: (fileId: string, content: string) => void;
   topLeftLeafId?: string;
+  leftSidebarCollapsed: boolean;
+  onToggleLeftSidebar: () => void;
   rightSidebarCollapsed: boolean;
   onToggleRightSidebar: () => void;
   topRightInsetPx: number;
+  topLeftInsetPx: number;
 };
 
 function RenderTree(props: RenderProps) {
@@ -568,9 +582,12 @@ function Pane(props: PaneProps) {
     onDropOnTabbar,
     onUpdateFileContent,
     topLeftLeafId,
+    leftSidebarCollapsed,
+    onToggleLeftSidebar,
     rightSidebarCollapsed,
     onToggleRightSidebar,
     topRightInsetPx,
+    topLeftInsetPx,
   } = props;
 
   const isActive = leaf.id === activeLeafId;
@@ -716,14 +733,24 @@ function Pane(props: PaneProps) {
       <div
         className="pane-tabbar"
         style={
-          isTopLeft && rightSidebarCollapsed
-            ? { paddingRight: topRightInsetPx }
+          isTopLeft
+            ? { paddingRight: topRightInsetPx, paddingLeft: topLeftInsetPx }
             : undefined
         }
         onDragOver={onTabbarDragOver}
         onDragLeave={onTabbarDragLeave}
         onDrop={onTabbarDrop}
       >
+        {isTopLeft && leftSidebarCollapsed && topLeftInsetPx > 0 && (
+          <button
+            className="icon-btn tiny"
+            title="Show left sidebar"
+            onClick={onToggleLeftSidebar}
+            style={{ marginRight: 6 }}
+          >
+            <IcPanelLeft open={false} />
+          </button>
+        )}
         <div className="pane-tabs" ref={tabsRef}>
           {leaf.tabs.map((t) => (
             <TabButton

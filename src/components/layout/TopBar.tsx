@@ -22,6 +22,7 @@ function safeWindow() {
 }
 
 export function WindowControls() {
+  const isMac = typeof window !== "undefined" && navigator.userAgent.includes("Mac");
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -37,6 +38,8 @@ export function WindowControls() {
   }, []);
 
   const w = () => safeWindow();
+
+  if (isMac) return null;
 
   return (
     <div className="win-controls">
