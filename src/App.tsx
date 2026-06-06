@@ -193,6 +193,18 @@ export default function App() {
     }));
   }, []);
 
+  // Dev-only escape hatch so Playwright/manual scripts can swap the
+  // mock vault for a big synthetic dataset to stress-test the graph
+  // view. The window assignment is a no-op outside DEV (Vite replaces
+  // the import.meta.env.DEV check at build time).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as any).__lattice = {
+      vault: useVaultStore,
+      editor: useEditorStore,
+    };
+  }, []);
+
   // Debounce timer ref for auto-saving file content to disk
   /** Write back the new body for a file (markdown or canvas). Updates
    *  the in-memory vault tree + editor store, and marks it dirty. */

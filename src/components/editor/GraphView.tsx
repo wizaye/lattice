@@ -241,8 +241,8 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
           </button>
           <button
             className="icon-btn tiny"
-            title="Re-randomize layout"
-            onClick={() => canvasRef.current?.reseedLayout()}
+            title="Re-grow network from densest hub"
+            onClick={() => canvasRef.current?.growLayout()}
           >
             <IcWand />
           </button>

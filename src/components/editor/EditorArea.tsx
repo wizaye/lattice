@@ -1071,7 +1071,7 @@ type TabBtnProps = {
   tab: Tab;
   active: boolean;
   onActivate: () => void;
-  onClose: () => void;
+  onClose: () => void | Promise<void>;
 };
 
 function TabButton({ leafId, tab, active, onActivate, onClose }: TabBtnProps) {
@@ -1095,11 +1095,23 @@ function TabButton({ leafId, tab, active, onActivate, onClose }: TabBtnProps) {
 
   const triggerClose = useCallback(() => {
     if (closing) return;
+    // Dirty-tab gate: the parent's onClose runs the unsaved-changes
+    // dialog when the file has pending edits. We MUST let that dialog
+    // appear BEFORE the close animation — otherwise the tab visibly
+    // slides out a few frames before the prompt, which reads as "the
+    // close already happened and the popup is showing up too late."
+    // For dirty files we skip the slide animation entirely (the modal
+    // dialog itself is the visual transition); for clean files we
+    // keep the smooth 140 ms exit.
+    if (isDirty) {
+      void onClose();
+      return;
+    }
     setClosing(true);
     closeTimerRef.current = window.setTimeout(() => {
       onClose();
     }, 140);
-  }, [closing, onClose]);
+  }, [closing, onClose, isDirty]);
 
   const onDragStart = (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = "move";
