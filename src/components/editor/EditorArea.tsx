@@ -16,10 +16,12 @@ import {
   removeTabFromLeaf,
   setSplitRatio,
   splitLeaf,
+  topRightLeaf,
   uid,
 } from "../../state/splitTree";
 // Markdown component kept for future reading-mode toggle
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { CanvasView } from "../canvas/CanvasView";
 import { EmptyTab } from "./EmptyTab";
 import { setDragImageBelowCursor } from "../common/dragGhost";
@@ -30,6 +32,7 @@ import {
   IcArrowUp,
   IcBook,
   IcBookmark,
+  IcCamera,
   IcCheck,
   IcChevronDown,
   IcChevronLeft,
@@ -64,6 +67,45 @@ import { useEditorStore } from "../../state/editorStore";
 import { useVaultStore } from "../../state/vaultStore";
 import GraphView from "./GraphView";
 import "./EditorArea.css";
+
+/**
+ * Ask the user what to do with a dirty file before closing its tab.
+ * Returns `true` to proceed with the close, `false` to abort.
+ *
+ * Uses Tauri's native dialog when running inside the app shell
+ * (multi-button: Save, Don't Save, Cancel) and falls back to a plain
+ * `window.confirm` in browser preview — so plain `vite dev` at
+ * localhost still behaves sanely. We dynamically import the dialog
+ * plugin so the browser build doesn't choke on the Tauri module.
+ */
+async function confirmDiscardDirty(
+  paths: string[],
+  saveAll: (paths: string[]) => Promise<void>,
+): Promise<boolean> {
+  if (paths.length === 0) return true;
+  const summary =
+    paths.length === 1
+      ? `"${paths[0].split(/[/\\]/).pop()}" has unsaved changes.`
+      : `${paths.length} files have unsaved changes.`;
+  // Try Tauri's 3-button ask dialog first.
+  try {
+    const mod = await import("@tauri-apps/plugin-dialog");
+    // Tauri's `ask` is yes/no — it doesn't give us a third "Cancel"
+    // button, so we run it twice: first ask "Save before closing?"
+    // (Save | Don't Save), then if neither was chosen, escape.
+    const save = await mod.ask(
+      `${summary}\n\nSave changes before closing?`,
+      { title: "Unsaved changes", kind: "warning", okLabel: "Save", cancelLabel: "Don't Save" },
+    );
+    if (save) {
+      await saveAll(paths);
+    }
+    return true;
+  } catch {
+    // Browser fallback — single OK/Cancel prompt.
+    return window.confirm(`${summary}\n\nDiscard unsaved changes?`);
+  }
+}
 
 type Props = {
   tree: SplitTree;
@@ -139,7 +181,21 @@ export function EditorArea(props: Props) {
   );
 
   const onCloseTab = useCallback(
-    (leafId: string, tabId: string) => {
+    async (leafId: string, tabId: string) => {
+      // Dirty-tab check: if the file in this tab has unsaved edits,
+      // prompt the user to Save / Don't Save (Tauri) or confirm
+      // discard (browser fallback). Abort the close if they back out.
+      const leaf = findLeaf(tree, leafId);
+      const tab = leaf?.tabs.find((t) => t.id === tabId);
+      if (tab?.fileId) {
+        const es = useEditorStore.getState();
+        if (es.dirtyFiles.has(tab.fileId)) {
+          const ok = await confirmDiscardDirty([tab.fileId], async (paths) => {
+            for (const p of paths) await useEditorStore.getState().saveFile(p);
+          });
+          if (!ok) return;
+        }
+      }
       // If this pane belongs to a split, closing the last tab collapses
       // the split (the sibling pane takes over the space). Only the
       // root pane — when it is the entire tree — gets repopulated with
@@ -174,12 +230,48 @@ export function EditorArea(props: Props) {
     [setLeaf, onChangeActiveLeaf],
   );
 
+  // Flip a tab between source-mode (CodeMirror) and reading-mode
+  // (MarkdownPreview). Lives at the EditorArea root because it needs
+  // the split-tree mutator; the doc-header button in `Pane` just calls
+  // this through props.
+  const onToggleViewMode = useCallback(
+    (leafId: string, tabId: string) => {
+      setLeaf(leafId, (leaf) => ({
+        ...leaf,
+        tabs: leaf.tabs.map((t) =>
+          t.id === tabId
+            ? {
+                ...t,
+                viewMode: t.viewMode === "preview" ? "source" : "preview",
+              }
+            : t,
+        ),
+      }));
+    },
+    [setLeaf],
+  );
+
   // "Close all" from the tabbar's View-options menu. Mirrors onCloseTab's
   // root-vs-non-root rule: the root pane keeps a single fresh "New tab"
   // (the editor can never be completely empty); any other pane collapses
   // so its sibling absorbs the space.
   const onCloseAllInLeaf = useCallback(
-    (leafId: string) => {
+    async (leafId: string) => {
+      // Dirty-tab check across every tab in the pane.
+      const leaf = findLeaf(tree, leafId);
+      const dirty: string[] = [];
+      if (leaf) {
+        const es = useEditorStore.getState();
+        for (const t of leaf.tabs) {
+          if (t.fileId && es.dirtyFiles.has(t.fileId)) dirty.push(t.fileId);
+        }
+      }
+      if (dirty.length > 0) {
+        const ok = await confirmDiscardDirty(dirty, async (paths) => {
+          for (const p of paths) await useEditorStore.getState().saveFile(p);
+        });
+        if (!ok) return;
+      }
       const isRootLeaf = tree.kind === "leaf" && tree.id === leafId;
       setLeaf(leafId, (leaf) => {
         if (isRootLeaf) {
@@ -369,9 +461,13 @@ export function EditorArea(props: Props) {
     [tree, vault, setLeaf, onTreeChange, onChangeActiveLeaf],
   );
 
-  // ---- find the topmost-leftmost leaf so we know where to put the
-  //      panel-right toggle + window-controls inset ----------------------
+  // ---- find the topmost-leftmost / topmost-rightmost leaves -----------
+  // Top-LEFT pane owns the macOS traffic-light inset + the panel-LEFT
+  // toggle that shows when the left sidebar is collapsed.
+  // Top-RIGHT pane owns the Windows window-controls inset + the panel-
+  // RIGHT toggle. When there's no split, these are the same leaf.
   const topLeftLeafId = useMemo(() => leaves(tree)[0]?.id, [tree]);
+  const topRightLeafId = useMemo(() => topRightLeaf(tree).id, [tree]);
 
   return (
     <div className="editor-area">
@@ -389,7 +485,9 @@ export function EditorArea(props: Props) {
         onDropOnPane={handleDropOnPane}
         onDropOnTabbar={handleDropOnTabbar}
         onUpdateFileContent={onUpdateFileContent}
+        onToggleViewMode={onToggleViewMode}
         topLeftLeafId={topLeftLeafId}
+        topRightLeafId={topRightLeafId}
         leftSidebarCollapsed={leftSidebarCollapsed}
         onToggleLeftSidebar={onToggleLeftSidebar}
         rightSidebarCollapsed={rightSidebarCollapsed}
@@ -439,7 +537,12 @@ type RenderProps = {
   /** Forwarded to Pane bodies so editors (canvas, future markdown
    *  WYSIWYG) can persist edits without bouncing through context. */
   onUpdateFileContent?: (fileId: string, content: string) => void;
+  /** Toggle a tab between source (CodeMirror) and reading mode
+   *  (MarkdownPreview). Implemented at the EditorArea root because
+   *  that's where the split-tree mutator (setLeaf) lives. */
+  onToggleViewMode: (leafId: string, tabId: string) => void;
   topLeftLeafId?: string;
+  topRightLeafId?: string;
   leftSidebarCollapsed: boolean;
   onToggleLeftSidebar: () => void;
   rightSidebarCollapsed: boolean;
@@ -595,7 +698,9 @@ function Pane(props: PaneProps) {
     onDropOnPane,
     onDropOnTabbar,
     onUpdateFileContent,
+    onToggleViewMode,
     topLeftLeafId,
+    topRightLeafId,
     leftSidebarCollapsed,
     onToggleLeftSidebar,
     rightSidebarCollapsed,
@@ -607,6 +712,7 @@ function Pane(props: PaneProps) {
 
   const isActive = leaf.id === activeLeafId;
   const isTopLeft = leaf.id === topLeftLeafId;
+  const isTopRight = leaf.id === topRightLeafId;
   const activeTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
   // The canvas tool has its own in-pane controls (export, zoom HUD,
   // tool palette). Showing the markdown reading-mode + per-file More
@@ -614,6 +720,12 @@ function Pane(props: PaneProps) {
   // whenever the active tab is a canvas document.
   const activeFile = activeTab?.fileId ? vault.get(activeTab.fileId) : null;
   const isCanvasTab = activeFile?.kind === "canvas";
+  // Graph view is a virtual tab (`fileId === "__graph__"`) with no
+  // backing FileNode. It needs a graph-specific More menu (Split
+  // right / Split down / Copy screenshot / Bookmark) rather than the
+  // markdown DocMoreMenu, which is full of file-only items like
+  // Rename, Export to PDF, Find/Replace.
+  const isGraphTab = activeTab?.fileId === "__graph__";
 
   const paneRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -747,11 +859,14 @@ function Pane(props: PaneProps) {
       {/* Pane tabbar */}
       <div
         className="pane-tabbar"
-        style={
-          isTopLeft
-            ? { paddingRight: topRightInsetPx, paddingLeft: topLeftInsetPx }
-            : undefined
-        }
+        style={{
+          // Left inset (mac traffic-lights) only on the top-left pane.
+          paddingLeft: isTopLeft && topLeftInsetPx ? topLeftInsetPx : undefined,
+          // Right inset (Windows window-controls cluster) only on the
+          // top-right pane — so after a split-right the controls don't
+          // overlap the left pane's tabbar.
+          paddingRight: isTopRight && topRightInsetPx ? topRightInsetPx : undefined,
+        }}
         onDragOver={onTabbarDragOver}
         onDragLeave={onTabbarDragLeave}
         onDrop={onTabbarDrop}
@@ -804,7 +919,7 @@ function Pane(props: PaneProps) {
             onNewTab={() => onNewTab(leaf.id)}
             onCloseAll={() => onCloseAll(leaf.id)}
           />
-          {isTopLeft && (
+          {isTopRight && (
             <button
               className="icon-btn tiny"
               title={rightSidebarCollapsed ? "Show right sidebar" : "Hide right sidebar"}
@@ -831,21 +946,35 @@ function Pane(props: PaneProps) {
           <SplitMenuButton
             onSplit={(edge) => onSplit(leaf.id, edge)}
           />
-          {activeTab?.fileId && !isCanvasTab && (
-            <button className="icon-btn tiny" title="Reading mode">
-              <IcBook />
+          {activeTab?.fileId && !isCanvasTab && activeTab.fileId !== "__graph__" && (
+            <button
+              className="icon-btn tiny"
+              title={activeTab.viewMode === "preview" ? "Edit mode" : "Reading mode"}
+              aria-pressed={activeTab.viewMode === "preview"}
+              onClick={() => onToggleViewMode(leaf.id, activeTab.id)}
+            >
+              {activeTab.viewMode === "preview" ? <IcEdit /> : <IcBook />}
             </button>
           )}
-          {!isCanvasTab && (
-            <DocMoreMenu
-              hasFile={!!activeTab?.fileId}
-              onSplit={(edge) => onSplit(leaf.id, edge)}
+          {isGraphTab ? (
+            <GraphMoreMenu
               onClose={
                 activeTab
                   ? () => onCloseTab(leaf.id, activeTab.id)
                   : undefined
               }
             />
+          ) : (
+            !isCanvasTab && (
+              <DocMoreMenu
+                hasFile={!!activeTab?.fileId}
+                onClose={
+                  activeTab
+                    ? () => onCloseTab(leaf.id, activeTab.id)
+                    : undefined
+                }
+              />
+            )
           )}
         </div>
       </div>
@@ -883,7 +1012,17 @@ function Pane(props: PaneProps) {
                   />
                 );
               }
-              // Default: markdown editor view (CodeMirror).
+              // Default: markdown editor view. Tab-level `viewMode`
+              // toggles between source (CodeMirror) and reading mode
+              // (markdown-it rendered HTML via MarkdownPreview). The
+              // toggle button lives in the doc header above.
+              if (activeTab.viewMode === "preview") {
+                return (
+                  <div className="markdown-preview-host">
+                    <MarkdownPreview source={file.content ?? ""} />
+                  </div>
+                );
+              }
               return (
                 <CodeMirrorEditor
                   content={file.content ?? ""}
@@ -1219,11 +1358,9 @@ function TabbarOptionsMenu({
  */
 function DocMoreMenu({
   hasFile,
-  onSplit,
   onClose,
 }: {
   hasFile: boolean;
-  onSplit: (edge: Exclude<DropEdge, "center">) => void;
   onClose?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1291,22 +1428,11 @@ function DocMoreMenu({
             </>
           )}
 
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(() => onSplit("right"))}
-          >
-            <IcArrowRight className="split-menu-icon" />
-            <span>Split right</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(() => onSplit("bottom"))}
-          >
-            <IcArrowDown className="split-menu-icon" />
-            <span>Split down</span>
-          </button>
+          {/* NOTE: Split right / Split down are intentionally NOT in
+              this menu. The dedicated SplitMenuButton (icon to the
+              left of this More button) already exposes all 4 split
+              directions in its own flyout — duplicating them here was
+              redundant and confusing. */}
           <button role="menuitem" className="split-menu-item" onClick={stub}>
             <IcLinkExternal className="split-menu-icon" />
             <span>Open in new window</span>
@@ -1395,6 +1521,105 @@ function DocMoreMenu({
                   </button>
                 </>
               )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Graph view "More options" 3-dot menu (`.pane-doc-actions`).
+ *
+ * Mirrors Obsidian's graph-tab popup: just four entries \u2014 Split
+ * right, Split down, Copy screenshot, Bookmark. The markdown
+ * DocMoreMenu has dozens of file-only items (Rename, Export to PDF,
+ * Find/Replace, Open version history, etc.) which don't apply to a
+ * synthetic graph tab, so we render a separate slim menu here.
+ *
+ * Split actions live in the dedicated SplitMenuButton (icon to the
+ * left of this 3-dot button), NOT here — keeping them in both menus
+ * was confusing UX.
+ */
+function GraphMoreMenu({
+  onClose,
+}: {
+  onClose?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+      }
+    };
+    const onDown = (e: PointerEvent) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [open]);
+
+  const run = (fn?: () => void) => () => {
+    setOpen(false);
+    fn?.();
+  };
+  const stub = () => setOpen(false);
+
+  return (
+    <div className="split-menu-wrap" ref={wrapRef}>
+      <button
+        className={`icon-btn tiny${open ? " active" : ""}`}
+        title="More options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <IcMore />
+      </button>
+      {open && (
+        <div className="split-menu doc-more-menu" role="menu">
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={stub}
+          >
+            <IcCamera className="split-menu-icon" />
+            <span>Copy screenshot</span>
+          </button>
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={stub}
+          >
+            <IcBookmark className="split-menu-icon" />
+            <span>Bookmark…</span>
+          </button>
+          {onClose && (
+            <>
+              <div className="split-menu-divider" role="separator" />
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={run(onClose)}
+              >
+                <IcClose className="split-menu-icon" />
+                <span>Close</span>
+              </button>
             </>
           )}
         </div>

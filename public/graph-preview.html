@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Graph preview — zoom / pan / drag test</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #1a1a1a;
+        color: #ddd;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        overflow: hidden;
+      }
+      #app {
+        position: absolute;
+        inset: 0;
+      }
+      /* The same CSS rules we use in the real app. */
+      .force-graph-container,
+      .force-graph-container > canvas {
+        touch-action: none;
+        overscroll-behavior: contain;
+      }
+      #hud {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: rgba(0, 0, 0, 0.6);
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.45;
+        pointer-events: none;
+        z-index: 10;
+        max-width: 380px;
+      }
+      #hud b {
+        color: #7dd;
+      }
+      #log {
+        margin-top: 4px;
+        font-family: ui-monospace, Consolas, monospace;
+        color: #ccc;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <b>Tests:</b><br />
+      • Trackpad pinch (ctrl+wheel) → should zoom in/out smoothly<br />
+      • Trackpad two-finger drag → should PAN, not zoom<br />
+      • Click on a node and drag → should move just that node<br />
+      • Click+drag empty space → should PAN canvas<br />
+      <div id="log">wheel: —</div>
+    </div>
+
+    <!-- d3 + force-graph from CDN so this file works standalone in any
+         browser, including a tab opened by the agent's browser tools. -->
+    <script src="https://unpkg.com/d3@7"></script>
+    <script src="https://unpkg.com/force-graph@1.51.4"></script>
+
+    <script>
+      const N = 30;
+      const nodes = Array.from({ length: N }, (_, i) => ({
+        id: "n" + i,
+        label: "Node " + i,
+      }));
+      const links = [];
+      for (let i = 1; i < N; i++) {
+        // Connect every node to a random earlier one — guarantees
+        // one connected component so the layout looks like a real
+        // knowledge graph.
+        const target = Math.floor(Math.random() * i);
+        links.push({ source: "n" + i, target: "n" + target });
+      }
+      // Add a few extra cross-links for variety.
+      for (let k = 0; k < 8; k++) {
+        const a = Math.floor(Math.random() * N);
+        const b = Math.floor(Math.random() * N);
+        if (a !== b) links.push({ source: "n" + a, target: "n" + b });
+      }
+
+      const root = document.getElementById("app");
+      const Graph = ForceGraph()(root)
+        .graphData({ nodes, links })
+        .backgroundColor("#1a1a1a")
+        .nodeRelSize(6)
+        .nodeColor(() => "#7dd3fc")
+        .linkColor(() => "rgba(200,200,200,0.35)")
+        .linkWidth(1)
+        .nodeLabel("label")
+        .enableNodeDrag(true)
+        // Disable force-graph / d3-zoom's built-in wheel handling so
+        // our custom handler is the only thing zooming/panning. This
+        // matches what the real GraphView.tsx does: we suppress
+        // d3-zoom and drive zoom/pan ourselves.
+        .enableZoomInteraction(false)
+        .enablePanInteraction(true)
+        .minZoom(0.2)
+        .maxZoom(8);
+
+      // Expose Graph so playwright can probe state programmatically.
+      window.__graph = Graph;
+
+      // ===========================================================
+      // Custom wheel handler — IDENTICAL to GraphView.tsx effect 2b.
+      // Mirror this here so the preview validates the real handler.
+      // ===========================================================
+      const canvasEl = root.querySelector("canvas");
+      window.__lastEvent = null;
+      window.__lastAction = null;
+
+      canvasEl.addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+
+          const isPinch = e.ctrlKey;
+          const looksLikeTrackpadSwipe =
+            !e.ctrlKey &&
+            e.deltaMode === 0 &&
+            Math.abs(e.deltaY) < 50 &&
+            (Math.abs(e.deltaX) > 0 || !Number.isInteger(e.deltaY));
+
+          window.__lastEvent = {
+            dy: e.deltaY,
+            dx: e.deltaX,
+            ctrl: e.ctrlKey,
+            mode: e.deltaMode,
+          };
+
+          if (looksLikeTrackpadSwipe) {
+            const zoom = Graph.zoom();
+            const c = Graph.centerAt();
+            Graph.centerAt(c.x + e.deltaX / zoom, c.y + e.deltaY / zoom, 0);
+            window.__lastAction = "pan";
+          } else {
+            const delta =
+              -e.deltaY *
+              (e.deltaMode === 1 ? 0.05 : e.deltaMode ? 1 : 0.002) *
+              (isPinch ? 10 : 1);
+            const factor = Math.pow(2, delta);
+            const current = Graph.zoom();
+            const next = Math.min(8, Math.max(0.2, current * factor));
+            Graph.zoom(next, 0);
+            window.__lastAction = isPinch ? "zoom-pinch" : "zoom-mouse";
+          }
+
+          const tag = `${window.__lastAction}  dx=${e.deltaX.toFixed(1)}  dy=${e.deltaY.toFixed(1)}  ctrl=${e.ctrlKey}`;
+          document.getElementById("log").textContent = tag;
+        },
+        { capture: true, passive: false },
+      );
+    </script>
+  </body>
+</html>

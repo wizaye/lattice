@@ -278,6 +278,76 @@ function TreeRow({
       onDoubleClick={() => onOpen(node)}
       onContextMenu={(e) => onContextMenu(e, node)}
       title={node.name}
+      // ── Drop-on-file ────────────────────────────────────────────────
+      // File rows also accept drops so the user can "drag completely
+      // outside" a folder. Without this, the browser's default
+      // dragover behaviour cancels the drop (cursor goes to the
+      // not-allowed glyph) any time you hover over another file row,
+      // which meant items could only be dropped in folder gaps. A drop
+      // onto a file routes the move to THAT file's parent directory
+      // (or vault root for top-level files), making any sibling row a
+      // valid target.
+      onDragOver={(e) => {
+        e.preventDefault();
+        (e.currentTarget as HTMLElement).classList.add("drag-over-sibling");
+      }}
+      onDragLeave={(e) => {
+        (e.currentTarget as HTMLElement).classList.remove("drag-over-sibling");
+      }}
+      onDrop={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        (e.currentTarget as HTMLElement).classList.remove("drag-over-sibling");
+
+        const data = e.dataTransfer.getData("text/plain");
+        if (!data) return;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type !== "nexus-sidebar-item") return;
+          const { path: sourcePath, name: sourceName } = parsed;
+
+          // Resolve target dir = parent of THIS file row. Top-level
+          // files have no "/" in their id, so the parent is the vault
+          // root itself.
+          const lastSlash = node.id.lastIndexOf("/");
+          const targetDir =
+            lastSlash >= 0
+              ? node.id.substring(0, lastSlash)
+              : useVaultStore.getState().vaultPath ?? "";
+          if (!targetDir) return;
+
+          // Don't drop a folder into itself or one of its descendants.
+          if (sourcePath === targetDir || targetDir.startsWith(sourcePath + "/")) return;
+          // No-op when already in the same directory.
+          const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf("/"));
+          if (sourceParent === targetDir) return;
+
+          const newPath = `${targetDir}/${sourceName}`;
+          const targetLabel = targetDir.split(/[/\\]/).pop() || "root";
+          const doMove = await confirm(
+            `Are you sure you want to move '${sourceName}' into '${targetLabel}'?`,
+            { title: "Move Item", kind: "warning" },
+          );
+          if (!doMove) return;
+
+          const vaultPath = useVaultStore.getState().vaultPath;
+          const isMd = sourcePath.toLowerCase().endsWith(".md");
+
+          if (isMd && vaultPath) {
+            const doUpdate = await confirm(`Update all internal links to '${sourceName}'?`, { title: "Update Links" });
+            if (doUpdate) {
+              await renameAndUpdateLinks(sourcePath, newPath);
+            } else {
+              await renameEntry(sourcePath, newPath);
+            }
+          } else {
+            await renameEntry(sourcePath, newPath);
+          }
+          useVaultStore.getState().refreshTree();
+        } catch (err) {
+          console.error("Move failed:", err);
+        }
+      }}
     >
       <span className="tree-label">{node.name}</span>
     </div>

@@ -60,7 +60,31 @@ const SAMPLE_CANVAS = JSON.stringify(
 
 export const VAULT_NAME = "Az-Cim";
 
+/**
+ * The sentinel "file id" for the GraphView virtual tab. EditorArea
+ * checks `activeTab.fileId === GRAPH_TAB_FILE_ID` to decide whether
+ * to render GraphView instead of a markdown / canvas editor.
+ *
+ * Kept in sync with the literal used in EditorArea.tsx and App.tsx —
+ * if you change one, change them all. (We keep the literal in those
+ * files for readability instead of importing this constant
+ * everywhere.)
+ */
+export const GRAPH_TAB_FILE_ID = "__graph__";
+
 export const initialVault: FileNode[] = [
+  // Hard-coded graph entry pinned at the top of the file tree. It is
+  // NOT a real file — clicking it routes to the GraphView virtual tab
+  // (see `openFile` in App.tsx, which special-cases `kind === "graph"`).
+  // Living in the vault means the user has a visible, clickable entry
+  // point for the force-directed graph without needing the activity-
+  // strip button. The id matches the GraphView tab's `fileId` so the
+  // FileTree's "is the active tab this node?" highlight works.
+  {
+    id: GRAPH_TAB_FILE_ID,
+    name: "Graph View",
+    kind: "graph",
+  },
   {
     id: "folder-clippings",
     name: "Clippings",

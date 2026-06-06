@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorState, Transaction } from "@codemirror/state";
 import {
   EditorView,
@@ -25,9 +25,10 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import {
   syntaxHighlighting,
-  defaultHighlightStyle,
+  HighlightStyle,
   bracketMatching,
 } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import {
   closeBrackets,
   closeBracketsKeymap,
@@ -40,78 +41,171 @@ import { useEditorStore } from "../../state/editorStore";
 import type { FileNode } from "../../state/types";
 
 // ── Theme ──
-// Uses CSS variables so it works with lattice's dark/light theme toggle.
-const editorTheme = EditorView.theme(
-  {
-    "&": {
-      color: "var(--fg, #dcdcdc)",
-      backgroundColor: "transparent",
-      height: "100%",
-      fontFamily: "var(--font-mono, 'SF Mono', 'Fira Code', monospace)",
-      fontSize: "var(--editor-font-size, 15px)",
-      lineHeight: "1.7",
+// Uses the app's own CSS tokens (set in App.css for both `:root` and
+// `:root[data-theme="light"]`) so light / dark switch instantly without
+// re-creating the editor. The previous version referenced `--fg` /
+// `--bg-2` which weren't defined anywhere — that's why light-mode text
+// rendered as the fallback `#dcdcdc` (invisible on a white surface).
+const editorThemeBase = {
+  "&": {
+    color: "var(--text-normal)",
+    backgroundColor: "transparent",
+    height: "100%",
+    fontFamily: "var(--font-text)",
+    fontSize: "var(--editor-font-size, 16px)",
+    lineHeight: "1.7",
+  },
+  "&.cm-focused": { outline: "none" },
+  ".cm-scroller": {
+    fontFamily: "var(--font-text)",
+    overflow: "auto",
+  },
+  ".cm-content": {
+    caretColor: "var(--text-normal)",
+    fontFamily: "var(--font-text)",
+    padding: "16px 24px 80px 24px",
+    color: "var(--text-normal)",
+  },
+  ".cm-line": { color: "var(--text-normal)" },
+  ".cm-lineNumbers .cm-gutterElement": {
+    padding: "0 12px 0 8px",
+    color: "var(--text-faint)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--text-normal)",
+    borderLeftWidth: "2px",
+  },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+    {
+      backgroundColor: "var(--selection) !important",
     },
-    "&.cm-focused": {
-      outline: "none",
+  ".cm-panels": {
+    backgroundColor: "var(--bg-header)",
+    color: "var(--text-normal)",
+    borderTop: "1px solid var(--border-strong)",
+  },
+  ".cm-activeLine": { backgroundColor: "transparent" },
+  ".cm-selectionMatch": { backgroundColor: "var(--selection)" },
+  "&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket": {
+    backgroundColor: "var(--selection)",
+    outline: "1px solid var(--border-strong)",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    color: "var(--text-faint)",
+    border: "none",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "transparent",
+    color: "var(--text-muted)",
+  },
+  ".cm-foldPlaceholder": {
+    backgroundColor: "transparent",
+    border: "none",
+    color: "var(--text-faint)",
+  },
+  ".cm-tooltip": {
+    border: "1px solid var(--border-strong)",
+    backgroundColor: "var(--bg-header)",
+    color: "var(--text-normal)",
+    borderRadius: "6px",
+    boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+  },
+  ".cm-tooltip-autocomplete": {
+    "& > ul > li": {
+      color: "var(--text-normal)",
+      padding: "4px 8px",
     },
-    ".cm-content": {
-      caretColor: "var(--fg, #dcdcdc)",
-      fontFamily:
-        "var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif)",
-      padding: "4px 24px",
-    },
-    ".cm-lineNumbers .cm-gutterElement": {
-      padding: "0 16px 0 8px !important",
-    },
-    ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--fg, #dcdcdc)",
-    },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-      {
-        backgroundColor: "var(--selection-bg, rgba(255,255,255,0.15)) !important",
-      },
-    ".cm-panels": {
-      backgroundColor: "var(--bg-2, #252526)",
-      color: "var(--fg, #dcdcdc)",
-    },
-    ".cm-activeLine": { backgroundColor: "transparent" },
-    ".cm-selectionMatch": {
-      backgroundColor: "var(--selection-bg, rgba(255,255,255,0.15))",
-    },
-    "&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket": {
-      backgroundColor: "var(--selection-bg, rgba(255,255,255,0.15))",
-      outline: "1px solid var(--border, rgba(255,255,255,0.1))",
-    },
-    ".cm-gutters": {
-      backgroundColor: "transparent",
-      color: "var(--fg-3, #666)",
-      border: "none",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: "transparent",
-      color: "var(--fg-2, #999)",
-    },
-    ".cm-foldPlaceholder": {
-      backgroundColor: "transparent",
-      border: "none",
-      color: "var(--fg-3, #666)",
-    },
-    ".cm-tooltip": {
-      border: "1px solid var(--border, rgba(255,255,255,0.1))",
-      backgroundColor: "var(--bg-2, #252526)",
-    },
-    ".cm-tooltip-autocomplete": {
-      "& > ul > li": {
-        color: "var(--fg, #dcdcdc)",
-      },
-      "& > ul > li[aria-selected]": {
-        backgroundColor: "var(--accent-bg, rgba(100,149,237,0.3))",
-        color: "var(--fg, #dcdcdc)",
-      },
+    "& > ul > li[aria-selected]": {
+      backgroundColor: "var(--accent)",
+      color: "#fff",
     },
   },
-  { dark: true },
-);
+};
+
+const editorThemeDark = EditorView.theme(editorThemeBase, { dark: true });
+const editorThemeLight = EditorView.theme(editorThemeBase, { dark: false });
+
+// ── Syntax highlighting ──
+// PRINCIPLE: don't recolor body text. Only structural punctuation,
+// inline code, and code-block tokens get pigment; everything else
+// inherits `--text-normal`. Earlier versions tinted `t.list` and
+// `t.link`, which the Lezer-markdown grammar applies to the WHOLE
+// list item / link expression (not just the marker), turning every
+// numbered/bulleted line purple. Wikilinks already get their own
+// `--accent` color via the .cm-wikilink decoration class.
+const markdownHighlight = HighlightStyle.define([
+  // Markdown structure — keep body color, just weight/size/italic
+  {
+    tag: t.heading1,
+    color: "var(--text-normal)",
+    fontWeight: "700",
+    fontSize: "1.6em",
+    lineHeight: "1.3",
+  },
+  {
+    tag: t.heading2,
+    color: "var(--text-normal)",
+    fontWeight: "700",
+    fontSize: "1.35em",
+    lineHeight: "1.3",
+  },
+  {
+    tag: t.heading3,
+    color: "var(--text-normal)",
+    fontWeight: "600",
+    fontSize: "1.2em",
+  },
+  {
+    tag: t.heading4,
+    color: "var(--text-normal)",
+    fontWeight: "600",
+    fontSize: "1.08em",
+  },
+  {
+    tag: [t.heading5, t.heading6],
+    color: "var(--text-normal)",
+    fontWeight: "600",
+  },
+  { tag: t.strong, color: "var(--text-normal)", fontWeight: "700" },
+  { tag: t.emphasis, color: "var(--text-normal)", fontStyle: "italic" },
+  { tag: t.strikethrough, textDecoration: "line-through" },
+  // Inline code: mono font + slight accent — only spans `code`
+  {
+    tag: t.monospace,
+    fontFamily: "var(--font-mono)",
+    color: "var(--syn-mono)",
+  },
+  // Bare URLs (https://...) get the accent color; markdown `[text](url)`
+  // links get NO color override — `t.link` would tint the whole `[text]`
+  // span which is way too aggressive. Users can spot real wikilinks via
+  // the dedicated `.cm-wikilink` decoration plugin.
+  { tag: t.url, color: "var(--accent)" },
+  // Block quotes — italicized + muted
+  { tag: t.quote, color: "var(--text-muted)", fontStyle: "italic" },
+  // Markdown structural punctuation (heading `#`, list `-`/`1.`, fence
+  // markers, hr, etc.) sits in `processingInstruction` for lang-markdown.
+  // Render it faint so the markers don't shout but stay visible.
+  { tag: t.processingInstruction, color: "var(--text-faint)" },
+  { tag: t.contentSeparator, color: "var(--text-muted)" },
+  { tag: t.meta, color: "var(--text-muted)" },
+  // ─ Code-block tokens (only inside ```lang fences) ─
+  { tag: t.keyword, color: "var(--syn-keyword)" },
+  { tag: [t.string, t.special(t.string)], color: "var(--syn-string)" },
+  { tag: t.comment, color: "var(--syn-comment)", fontStyle: "italic" },
+  { tag: t.number, color: "var(--syn-number)" },
+  { tag: [t.atom, t.bool, t.null], color: "var(--syn-atom)" },
+  { tag: [t.typeName, t.className], color: "var(--syn-type)" },
+  { tag: t.function(t.variableName), color: "var(--syn-function)" },
+  { tag: t.variableName, color: "var(--syn-variable)" },
+  { tag: t.propertyName, color: "var(--syn-variable)" },
+  { tag: t.tagName, color: "var(--syn-tag)" },
+  { tag: t.attributeName, color: "var(--syn-attr)" },
+  { tag: [t.operator, t.derefOperator], color: "var(--text-muted)" },
+  { tag: t.punctuation, color: "var(--text-muted)" },
+  { tag: t.bracket, color: "var(--text-muted)" },
+  { tag: t.invalid, color: "#f97583" },
+]);
 
 // ── Wikilink decoration ──
 const wikilinkDecorator = new MatchDecorator({
@@ -146,7 +240,7 @@ const wikilinkPlugin = ViewPlugin.fromClass(
 
 const wikilinkStyle = EditorView.baseTheme({
   ".cm-wikilink": {
-    color: "var(--accent, cornflowerblue)",
+    color: "var(--accent)",
     cursor: "pointer",
     textDecoration: "underline",
     textDecorationColor: "transparent",
@@ -155,7 +249,8 @@ const wikilinkStyle = EditorView.baseTheme({
     padding: "0 2px",
   },
   ".cm-wikilink:hover": {
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    backgroundColor: "var(--hover)",
+    textDecorationColor: "var(--accent)",
   },
 });
 
@@ -242,9 +337,27 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
 
+  // Track active theme so we can pick the matching CodeMirror theme
+  // extension (the `{dark}` flag controls native scrollbar/color-scheme
+  // hints). Watching `<html data-theme>` keeps it in sync with the
+  // app-level toggle in App.tsx without prop drilling.
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof document === "undefined") return true;
+    return document.documentElement.dataset.theme !== "light";
+  });
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const sync = () => setIsDark(root.dataset.theme !== "light");
+    const obs = new MutationObserver(sync);
+    obs.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  }, []);
+
   useEffect(() => {
     if (!editorRef.current || !filePath) return;
-    // Don't re-create if we're already showing this file
+    // Already showing this file with a live view? Keep it \u2014 the content
+    // sync effect below will push any new prop value into the doc.
     if (loadedFileRef.current === filePath && viewRef.current) return;
 
     // Destroy previous instance
@@ -259,7 +372,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     let debounceTimer: ReturnType<typeof setTimeout>;
 
     const state = EditorState.create({
-      doc: content,
+      doc: content ?? "",
       extensions: [
         lineNumbers(),
         highlightActiveLineGutter(),
@@ -286,8 +399,8 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
           },
         ]),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
-        editorTheme,
-        syntaxHighlighting(defaultHighlightStyle),
+        isDark ? editorThemeDark : editorThemeLight,
+        syntaxHighlighting(markdownHighlight),
         wikilinkPlugin,
         wikilinkStyle,
         autocompletion({
@@ -339,23 +452,37 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
       viewRef.current = null;
       loadedFileRef.current = null;
     };
-    // Re-create when file path changes or when content first loads.
-    // `content !== undefined` ensures it runs once content is fetched.
+    // Re-create only when the file path or theme changes. Content
+    // updates (initial load, external edits) are handled by the sync
+    // effect below \u2014 NOT by destroying & rebuilding the editor, which
+    // would steal focus and wipe undo history.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, content !== undefined]);
+  }, [filePath, isDark]);
 
-  // Sync external content changes (e.g. from another pane editing the same file)
+  // Sync external content into the editor doc.
+  //
+  // Cases handled:
+  //   1. File was opened via drag-drop \u2014 editor mounts with `content=""`
+  //      while disk read is in flight; when the real content arrives we
+  //      replace the empty doc with it.
+  //   2. Another pane just edited the same file \u2014 mirror the change.
+  //   3. Theme switch recreated the view above \u2014 reseed the doc.
+  //
+  // We don't clobber the user's in-progress edits: if the editor is
+  // focused AND marked dirty, skip the overwrite. (Earlier this check
+  // also fired on initial load when nothing was dirty, blocking the
+  // first-paint sync \u2014 hence the explicit isDirty gate.)
   useEffect(() => {
-    if (!viewRef.current || content === undefined) return;
-    if (viewRef.current.hasFocus) return;
-
+    if (!viewRef.current) return;
+    const next = content ?? "";
     const currentDoc = viewRef.current.state.doc.toString();
-    if (content !== currentDoc) {
-      viewRef.current.dispatch({
-        changes: { from: 0, to: currentDoc.length, insert: content },
-      });
-    }
-  }, [content]);
+    if (next === currentDoc) return;
+    const isDirty = useEditorStore.getState().dirtyFiles.has(filePath);
+    if (viewRef.current.hasFocus && isDirty) return;
+    viewRef.current.dispatch({
+      changes: { from: 0, to: currentDoc.length, insert: next },
+    });
+  }, [content, filePath]);
 
   // Global Cmd+S handler (catches save even when editor isn't focused)
   useEffect(() => {

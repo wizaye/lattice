@@ -5,6 +5,11 @@ import { useVaultStore } from "./state/vaultStore";
 import { useEditorStore } from "./state/editorStore";
 import { pickVaultFolder, createFolder as createFolderOnDisk } from "./lib/tauriApi";
 import {
+  GRAPH_TAB_FILE_ID,
+  VAULT_NAME as MOCK_VAULT_NAME,
+  initialVault,
+} from "./state/mockVault";
+import {
   findLeaf,
   leaves,
   mapLeaves,
@@ -34,10 +39,14 @@ const RIGHT_DEFAULT = 280;
 const STRIP_W = 36;
 
 function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
+  // Open the GraphView by default so the user lands on something
+  // visual (and so the hard-coded "Graph View" entry in the file tree
+  // is highlighted on first paint). EditorArea recognises this special
+  // fileId and renders <GraphView/> instead of an editor.
   const tab: Tab = {
     id: uid("tab"),
-    fileId: null,
-    title: "New tab",
+    fileId: GRAPH_TAB_FILE_ID,
+    title: "Graph View",
   };
   const leafId = uid("leaf");
   return {
@@ -140,6 +149,49 @@ export default function App() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   void vaultPath; // reserved for future backend backlinks call
   const vaultName = useVaultStore((s) => s.vaultName) || "Lattice";
+
+  // ── Bootstrap a mock vault on first mount ─────────────────────────────
+  // Without this, the file tree is empty on startup (nobody has picked a
+  // real folder yet) and GraphView spins forever waiting for vaultPath.
+  // We populate the vault store with the hard-coded `initialVault` and
+  // seed the editor store with every markdown body so `loadFile(id)`
+  // resolves instantly without going to disk. Using the synthetic path
+  // `__mock__` signals "in-memory only" to GraphView, which then builds
+  // the graph from the in-memory wikilinks instead of calling the Rust
+  // backend (which would error out on a non-existent folder path).
+  // Skipped if the user has already opened a real vault.
+  useEffect(() => {
+    const state = useVaultStore.getState();
+    if (state.vaultPath || state.fileTree.length > 0) return;
+
+    const flat = new Map<string, FileNode>();
+    const walk = (n: FileNode) => {
+      flat.set(n.id, n);
+      n.children?.forEach(walk);
+    };
+    initialVault.forEach(walk);
+
+    useVaultStore.setState({
+      vaultPath: "__mock__",
+      vaultName: MOCK_VAULT_NAME,
+      fileTree: initialVault,
+      flatVault: flat,
+    });
+
+    // Pre-seed the editor store so loadFile resolves synchronously for
+    // every mock file (no disk call) and the graph indexer can read
+    // markdown bodies for wiki-link extraction.
+    const seeded: Record<string, string> = {};
+    flat.forEach((node) => {
+      if (node.kind === "folder" || node.kind === "graph") return;
+      if (typeof node.content === "string") {
+        seeded[node.id] = node.content;
+      }
+    });
+    useEditorStore.setState((prev) => ({
+      fileContents: { ...prev.fileContents, ...seeded },
+    }));
+  }, []);
 
   // Debounce timer ref for auto-saving file content to disk
   /** Write back the new body for a file (markdown or canvas). Updates
@@ -378,12 +430,47 @@ export default function App() {
   const openFile = useCallback(
     (file: FileNode) => {
       if (file.kind === "folder") return;
+      // The hard-coded "Graph View" entry in the vault opens the
+      // GraphView virtual tab, not a markdown editor. We route to the
+      // same logic as the activity-strip graph button so a single tab
+      // is reused when the graph is already open in this leaf.
+      if (file.kind === "graph") {
+        const newTab: Tab = {
+          id: uid("tab"),
+          fileId: GRAPH_TAB_FILE_ID,
+          title: "Graph View",
+        };
+        setTree((prev) => {
+          const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
+          if (!leaf) return prev;
+          const existing = leaf.tabs.find(
+            (t) => t.fileId === GRAPH_TAB_FILE_ID,
+          );
+          if (existing) {
+            if (leaf.activeTabId === existing.id) return prev;
+            return (
+              mapLeaves(prev, (l) =>
+                l.id === leaf.id ? { ...l, activeTabId: existing.id } : l,
+              ) || prev
+            );
+          }
+          return (
+            mapLeaves(prev, (l) =>
+              l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+            ) || prev
+          );
+        });
+        return;
+      }
       const tab: Tab = { id: uid("tab"), fileId: file.id, title: file.name };
       const next = mapLeaves(tree, (leaf) =>
         leaf.id === activeLeafId ? openTabInLeaf(leaf, tab) : leaf,
       );
       if (next) setTree(next);
-      // Load file content from disk into editor store
+      // Mock-vault files (vaultPath === "__mock__") already have their
+      // content seeded in editorStore by the bootstrap effect, so the
+      // loadFile call below short-circuits via the cache and never hits
+      // the (non-existent) Rust backend.
       useEditorStore.getState().loadFile(file.id).then((content) => {
         // Also update the vault store so the file tree has content for
         // backlinks/outgoing/tags computation
@@ -409,15 +496,27 @@ export default function App() {
     setTree((prev) => {
       const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
       if (!leaf) return prev;
-      
-      const existing = leaf.tabs.find(t => t.fileId === "__graph__");
+
+      const existing = leaf.tabs.find((t) => t.fileId === "__graph__");
       if (existing) {
-         return mapLeaves(prev, l => l.id === leaf.id ? { ...l, activeTabId: existing.id } : l) || prev;
+        // Already active in this pane — return prev unchanged so React
+        // doesn't reconcile EditorArea and force GraphView to remount.
+        // Remounting re-runs force-graph's zoomToFit, which is what
+        // made the graph "zoom itself" when the user clicked the
+        // sidebar graph button while the graph tab was already open.
+        if (leaf.activeTabId === existing.id) return prev;
+        return (
+          mapLeaves(prev, (l) =>
+            l.id === leaf.id ? { ...l, activeTabId: existing.id } : l,
+          ) || prev
+        );
       }
-      
-      return mapLeaves(prev, (l) =>
-        l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
-      ) || prev;
+
+      return (
+        mapLeaves(prev, (l) =>
+          l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+        ) || prev
+      );
     });
   }, [activeLeafId]);
 
@@ -539,7 +638,6 @@ export default function App() {
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}
             onOpenManageVaults={openManageVaults}
-            onOpenGraph={onOpenGraph}
             isMac={isMac}
             onToggleSidebar={toggleLeftSidebar}
           />
@@ -560,7 +658,7 @@ export default function App() {
           onToggleLeftSidebar={toggleLeftSidebar}
           rightSidebarCollapsed={rightCollapsed}
           onToggleRightSidebar={toggleRightSidebar}
-          topRightInsetPx={isMac ? 0 : 146 /* window-controls cluster width + small gap */}
+          topRightInsetPx={isMac || !rightCollapsed ? 0 : 146 /* only reserve room for the window-controls cluster when the right sidebar is hidden \u2014 otherwise the controls sit over the sidebar, not the editor */}
           topLeftInsetPx={isMac && leftCollapsed ? 40 : 0}
         />
       </div>

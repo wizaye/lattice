@@ -21,7 +21,7 @@
 }
 
 .tree-row:hover {
-  background: var(--hover-soft);
+  background: var(--hover);
 }
 
 .tree-row.selected {
@@ -67,12 +67,15 @@
 
 .context-menu {
   position: fixed;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  /* Use the dedicated floating-popup token so the menu reads as a
+     surface on top of the editor (not transparent against bg-app
+     which is the same colour as the sidebar/editor). */
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 4px;
   min-width: 160px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
   z-index: 1000;
 }
 .context-menu-item {
@@ -89,14 +92,14 @@
   text-align: left;
 }
 .context-menu-item:hover {
-  background: var(--hover-soft);
+  background: var(--hover);
 }
 .context-menu-danger {
   color: #ff5555;
 }
 .context-menu-separator {
   height: 1px;
-  background: var(--border);
+  background: var(--border-soft);
   margin: 4px 0;
 }
 .inline-input-wrapper {
@@ -104,9 +107,9 @@
 }
 .inline-input {
   width: 100%;
-  background: var(--bg-1);
+  background: var(--bg-app);
   color: var(--text-normal);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 13px;
@@ -117,4 +120,12 @@
 }
 .drag-over-folder {
   background: var(--hover) !important;
+}
+
+/* File rows accept drops too — they route the move to the parent
+   directory (or vault root). A thin top border serves as the
+   "insertion line" hint so the user knows the drop will land at the
+   sibling level, not inside the file. */
+.tree-row.file.drag-over-sibling {
+  box-shadow: inset 0 1px 0 0 var(--accent);
 }

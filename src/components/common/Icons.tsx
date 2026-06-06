@@ -231,3 +231,7 @@ export const IcCopy = codicon("copy");
 export const IcFolderOpened = codicon("folder-opened");
 export const IcLocation = codicon("location");
 export const IcTrash = codicon("trash");
+
+// Graph view overlay controls
+export const IcWand = codicon("wand"); // restart force simulation
+export const IcCamera = codicon("device-camera"); // copy screenshot

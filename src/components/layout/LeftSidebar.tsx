@@ -7,7 +7,6 @@ import {
   IcEdit,
   IcFolder,
   IcGear,
-  IcGraph,
   IcHelp,
   IcMoon,
   IcMore,
@@ -34,7 +33,7 @@ type Props = {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onOpenSettings: () => void;
-  onOpenGraph: () => void;
+
   /** Open the Manage Vaults modal — invoked from the vault picker's
    *  "Manage vaults\u2026" item. The sidebar only forwards the click;
    *  modal state lives in App so the modal can render at the top of
@@ -58,7 +57,6 @@ export function LeftSidebar({
   onToggleTheme,
   onOpenSettings,
   onOpenManageVaults,
-  onOpenGraph,
   isMac,
   onToggleSidebar,
 }: Props) {
@@ -213,25 +211,29 @@ export function LeftSidebar({
             />
           )}
         </div>
-        <span className="ls-footer-spacer" />
-        <button
-          className="icon-btn tiny"
-          title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-          aria-label="Toggle theme"
-          onClick={onToggleTheme}
-        >
-          {theme === "dark" ? <IcSun /> : <IcMoon />}
-        </button>
-        <button className="icon-btn tiny" title="Help">
-          <IcHelp />
-        </button>
-        <button
-          className="icon-btn tiny"
-          title="Settings"
-          onClick={onOpenSettings}
-        >
-          <IcGear />
-        </button>
+        {/* Trailing icons are grouped so they always sit at the right
+            and never get squeezed out — the vault label ellipsizes
+            instead. (See LeftSidebar.css `.ls-footer-icons`.) */}
+        <div className="ls-footer-icons">
+          <button
+            className="icon-btn tiny"
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            aria-label="Toggle theme"
+            onClick={onToggleTheme}
+          >
+            {theme === "dark" ? <IcSun /> : <IcMoon />}
+          </button>
+          <button className="icon-btn tiny" title="Help">
+            <IcHelp />
+          </button>
+          <button
+            className="icon-btn tiny"
+            title="Settings"
+            onClick={onOpenSettings}
+          >
+            <IcGear />
+          </button>
+        </div>
       </div>
     </>
   );

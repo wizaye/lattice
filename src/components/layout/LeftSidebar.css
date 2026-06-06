@@ -77,12 +77,23 @@
 /* Footer — vault picker + help/gear */
 .ls-footer { /* extends .col-footer */
   position: relative;
+  /* Use a 2-cell layout: vault label grows/shrinks (with ellipsis),
+     icons sit at the right and NEVER compress. Previously a flex:1
+     spacer pushed icons right but allowed the vault button to bully
+     them off-screen at narrow widths — the icons are accessibility
+     handles (theme, help, settings) so they have to stay clickable. */
 }
 
 .ls-vault-wrap {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  flex: 1 1 0;
+  /* min-width: 0 lets the child button actually shrink inside the
+     flex row; without it flex defaults to min-content, which
+     overflows the column at narrow widths. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .ls-vault {
@@ -94,13 +105,22 @@
   border-radius: 4px;
   color: var(--text-muted);
   font-size: 12px;
+  /* Fill the wrap so the inner name span can ellipsize. */
+  max-width: 100%;
+  min-width: 0;
 }
 .ls-vault:hover { background: var(--hover); color: var(--text-normal); }
 .ls-vault svg {
   width: 12px; height: 12px;
   stroke: currentColor; fill: none; stroke-width: 1.6;
+  flex-shrink: 0;
 }
-.ls-vault .codicon { font-size: var(--icon-xs); line-height: 1; color: currentColor; }
+.ls-vault .codicon {
+  font-size: var(--icon-xs);
+  line-height: 1;
+  color: currentColor;
+  flex-shrink: 0;
+}
 
 .ls-vault-name {
   font-weight: 500;
@@ -108,7 +128,19 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+  /* Take the rest of the button. No hard max-width — let the parent
+     wrap decide the actual budget so we ellipsize to whatever fits
+     and the trailing icons remain visible. */
+  min-width: 0;
+  flex: 1 1 0;
 }
 
-.ls-footer-spacer { flex: 1; }
+/* Group the trailing icon buttons so the gap rule applies uniformly
+   and they never get squeezed out of the row. */
+.ls-footer-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}

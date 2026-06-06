@@ -15,6 +15,20 @@ export function leaves(tree: SplitTree): Extract<SplitTree, { kind: "leaf" }>[] 
   return [...leaves(tree.a), ...leaves(tree.b)];
 }
 
+/**
+ * Topmost-rightmost leaf — the pane that visually owns the top-right
+ * corner of the editor area (where Windows window controls float and
+ * where the right-sidebar toggle should appear).
+ *
+ *   horizontal split (a | b)  → rightmost is in `b`
+ *   vertical split   (a / b)  → topmost is in `a`
+ */
+export function topRightLeaf(tree: SplitTree): Extract<SplitTree, { kind: "leaf" }> {
+  if (tree.kind === "leaf") return tree;
+  if (tree.direction === "horizontal") return topRightLeaf(tree.b);
+  return topRightLeaf(tree.a);
+}
+
 /** Map every leaf through `fn`. Splits with a child that becomes empty collapse to the other child. */
 export function mapLeaves(
   tree: SplitTree,

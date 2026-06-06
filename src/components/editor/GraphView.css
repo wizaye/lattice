@@ -1,0 +1,212 @@
+/* ===========================================================
+   Graph view — loader, floating controls, settings panel
+   -----------------------------------------------------------
+   Scoped to the graph tab. All colors reference existing
+   theme tokens from App.css so the panel flips correctly
+   with light/dark mode. Coordinates are absolute inside the
+   GraphView root container (which is position:relative).
+   =========================================================== */
+
+/* ---- Disable browser gesture handling on the canvas surface ----
+   CRITICAL for trackpad zoom on Windows / WebView2.
+
+   Without `touch-action: none` the browser intercepts two-finger
+   trackpad gestures (pan AND pinch) and turns them into either
+   page-level scroll or a synthetic ctrlKey-wheel that fights with
+   our zoom handler. Result: zooming silently fails on trackpads
+   even though our wheel listener is wired up.
+
+   Setting it on BOTH the .force-graph-container div force-graph
+   inserts AND its inner canvas covers every gesture source. The
+   GraphView root also sets `overscroll-behavior: contain` so wheel
+   events that fall through us don't scroll the surrounding editor
+   pane instead.  */
+.force-graph-container,
+.force-graph-container > canvas {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+/* ---- Loader (replaces the "Computing Network Topology..." text) ---- */
+.graph-loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.graph-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  /* 2px ring; the top quadrant uses --accent to give the
+     classic rotating spinner read. */
+  border: 2px solid var(--border-soft, rgba(255, 255, 255, 0.12));
+  border-top-color: var(--accent, #8a64ff);
+  animation: graph-spin 720ms linear infinite;
+}
+
+@keyframes graph-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Floating overlay controls (top-right inside canvas) ---- */
+.graph-overlay-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 20;
+  /* Each child icon-btn already handles its own hover/active state.
+     We don't want the container itself to swallow pointer events
+     in empty regions between buttons. */
+  pointer-events: none;
+}
+.graph-overlay-controls > * {
+  pointer-events: auto;
+}
+
+/* Slightly higher contrast hit-area than the inline icon-btn so it
+   reads as floating chrome on top of the dark canvas. Uses the
+   floating-popup token (--bg-menu) so the button reads as raised. */
+.graph-overlay-controls .icon-btn {
+  background: var(--bg-menu);
+  color: var(--text-normal);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
+}
+.graph-overlay-controls .icon-btn:hover {
+  background: var(--hover);
+}
+.graph-overlay-controls .icon-btn.active {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+/* ---- Settings panel (floating, top-right of graph) ---- */
+.graph-settings-panel {
+  position: absolute;
+  top: 12px;
+  /* Sits to the left of the gear/wand column. 12 (col right) + 22
+     (icon) + 4 (gap) + 12 (own gap) = 50; round to 56 for breathing
+     room. */
+  right: 56px;
+  width: 280px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  /* Opaque popup surface; --bg-menu is distinct from the editor bg
+     so the panel actually reads as floating. */
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  z-index: 25;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+
+.graph-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.graph-settings-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.graph-settings-header-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* ---- Collapsible sections ---- */
+.graph-settings-section {
+  border-bottom: 1px solid var(--border-soft);
+}
+.graph-settings-section:last-child {
+  border-bottom: none;
+}
+.graph-settings-section-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--text-normal);
+}
+.graph-settings-section-summary::-webkit-details-marker {
+  display: none;
+}
+.graph-settings-section-summary:hover {
+  background: var(--hover);
+}
+.graph-settings-chevron {
+  font-size: var(--icon-xs);
+  transition: transform 120ms ease;
+  color: var(--text-muted);
+}
+.graph-settings-section[open] > .graph-settings-section-summary .graph-settings-chevron {
+  transform: rotate(90deg);
+}
+.graph-settings-section-body {
+  padding: 4px 12px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---- Form rows inside sections ---- */
+.graph-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+}
+.graph-settings-row > span {
+  flex: 1;
+  font-size: 11px;
+}
+.graph-settings-row input[type="text"] {
+  flex: 0 0 50%;
+  background: var(--bg-app);
+  color: var(--text-normal);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  outline: none;
+}
+.graph-settings-row input[type="text"]:focus {
+  border-color: var(--accent);
+}
+.graph-settings-row input[type="range"] {
+  flex: 0 0 50%;
+  accent-color: var(--accent);
+}
+.graph-settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-normal);
+  font-size: 11px;
+  cursor: pointer;
+}
+.graph-settings-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+.graph-settings-empty {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-style: italic;
+  padding: 2px 0;
+}

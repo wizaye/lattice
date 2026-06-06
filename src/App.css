@@ -7,6 +7,11 @@
   --bg-sidebar: #1e1e1e;
   --bg-editor: #1e1e1e;
   --bg-header: #1a1a1a;
+  /* Floating popups (context menus, dropdowns, settings panels).
+     MUST be visually distinct from --bg-app/--bg-editor or menus
+     blend into the editor and read as transparent. Two steps lighter
+     than --bg-app on dark, two steps darker than white on light. */
+  --bg-menu: #2b2b2b;
 
   /* tabs */
   --tab-bg-active: #1e1e1e;
@@ -29,6 +34,23 @@
   --text-normal: #dcddde;
   --text-muted: #8b8b8b;
   --text-faint: #6a6a6a;
+
+  /* Editor syntax tokens (used by CodeMirror HighlightStyle).
+     Dark palette — VS Code Dark+ inspired, tuned for the dark surface.
+     Markdown body text uses --text-normal so headings/bold/italic
+     stay readable; --syn-* only colors code-block tokens + inline
+     monospace + a few accent glyphs. */
+  --syn-mono: #d7c4f5;
+  --syn-keyword: #c586c0;
+  --syn-string: #ce9178;
+  --syn-comment: #6a9955;
+  --syn-number: #b5cea8;
+  --syn-atom: #569cd6;
+  --syn-type: #4ec9b0;
+  --syn-function: #dcdcaa;
+  --syn-variable: #9cdcfe;
+  --syn-tag: #569cd6;
+  --syn-attr: #9cdcfe;
 
   /* dims */
   --header-h: 36px;
@@ -73,6 +95,7 @@
   --bg-sidebar: #fafaf8;
   --bg-editor: #ffffff;
   --bg-header: #f3f3f1;
+  --bg-menu: #ffffff;
 
   --tab-bg-active: #ffffff;
   --tab-bg-hover: #ececea;
@@ -90,6 +113,21 @@
   --text-normal: #2e2e2e;
   --text-muted: #6b6b6b;
   --text-faint: #909090;
+
+  /* Editor syntax tokens — light palette inspired by GitHub Light /
+     VS Code Light+. Designed for high contrast on the #ffffff editor
+     surface so code blocks don't wash out. */
+  --syn-mono: #6f42c1;
+  --syn-keyword: #d73a49;
+  --syn-string: #032f62;
+  --syn-comment: #6a737d;
+  --syn-number: #005cc5;
+  --syn-atom: #005cc5;
+  --syn-type: #6f42c1;
+  --syn-function: #6f42c1;
+  --syn-variable: #24292e;
+  --syn-tag: #22863a;
+  --syn-attr: #6f42c1;
 
   color-scheme: light;
 }
@@ -387,12 +425,17 @@ a:hover { text-decoration: underline; }
 }
 .win-btn:hover { background: var(--hover); color: var(--text-normal); }
 .win-btn.close:hover { background: #c42b1c; color: #fff; }
+/* Native Windows 11 caption glyphs render at 10x10 logical pixels
+   inside a 46x32 button, hairline stroke. We size the inline SVG to
+   match so it reads identically to the stock chrome on any DPI. */
 .win-btn svg {
-  width: 14px; height: 14px;
+  width: 10px; height: 10px;
   stroke: currentColor; fill: none;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-width: 1;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  shape-rendering: crispEdges;
+  display: block;
 }
 .win-btn .codicon { font-size: var(--icon-xs); line-height: 1; color: currentColor; }
 
