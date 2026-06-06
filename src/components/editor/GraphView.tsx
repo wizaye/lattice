@@ -95,7 +95,7 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
           id: f.id,
           name: f.name.replace(/\.md$/i, "").replace(/\.canvas$/i, ""),
           path: f.id,
-          val: Math.max(1, Math.min(10, 1 + degree)),
+          val: 1 + degree,
         };
       });
       return { nodes, links: edges };
@@ -120,16 +120,9 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
             id: n.id,
             name: n.label,
             path: n.path,
-            val: Math.max(
-              1,
-              Math.min(
-                10,
-                1 +
-                  data.edges.filter(
-                    (e) => e.target === n.id || e.source === n.id,
-                  ).length,
-              ),
-            ),
+            val: 1 + data.edges.filter(
+              (e) => e.target === n.id || e.source === n.id,
+            ).length,
           }));
 
           const nodeMap = new Map(nodes.map((n) => [n.id, n]));

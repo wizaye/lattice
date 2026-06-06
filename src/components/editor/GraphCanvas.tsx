@@ -5,6 +5,7 @@ import {
   useRef,
 } from "react";
 import ForceGraph from "force-graph";
+import { forceCollide, forceX, forceY } from "d3-force";
 
 /**
  * GraphCanvas
@@ -99,17 +100,13 @@ const NODE_SIZE = 3;
 // reads), large enough that overlapping shapes merge into a single
 // out-of-focus cloud. Higher values (6+) dilute small shapes below
 // visibility against a dark background.
-const DIM_BLUR_PX = 3;
+// 8px provides a much stronger blur effect, so the out-of-focus
+// elements are visibly blurred even on high-DPI (Retina) screens.
+const DIM_BLUR_PX = 8;
 
-// Multiplier applied to the dimmed layer when compositing it back
-// onto the main canvas. Blur already reduces per-pixel intensity
-// (energy spread over more area) — a small shape blurred by 3px
-// loses ~70% of its peak brightness. So we composite at high alpha
-// to keep the dimmed cloud actually visible. The result still reads
-// as "background atmosphere" because each individual dimmed shape
-// is too soft/blurry to compete for attention with the crisp
-// focused subgraph drawn on top.
-const DIM_LAYER_ALPHA = 0.9;
+// Lowered to 0.35 so that the dimmed cloud actually fades out,
+// making the highlighted nodes stand out much more clearly.
+const DIM_LAYER_ALPHA = 0.35;
 
 /**
  * Read the active theme. App.tsx stores it on `<html data-theme="...">`.
@@ -129,14 +126,14 @@ function readThemeColors() {
     // the "out of focus" work, so the underlying color needs to be
     // visible enough that the blurred silhouette still reads.
     nodeDim: light ? "rgba(34,34,34,0.30)" : "rgba(255,255,255,0.30)",
-    nodeHighlight: light ? "#0c8ce9" : "#7ab8ff",
+    nodeHighlight: "#8b5cf6",
     // Bumped from #cfcfcf / #3a3a3a — old values were so close to the
     // canvas background that links were nearly invisible. New values
     // give a clear edge contrast in both themes without overpowering
     // the nodes themselves.
-    link: light ? "#9a9a9a" : "#6a6a6a",
-    linkDim: light ? "rgba(154,154,154,0.45)" : "rgba(106,106,106,0.55)",
-    linkHighlight: light ? "#0c8ce9" : "#7ab8ff",
+    link: light ? "#b3b3b3" : "#555555",
+    linkDim: light ? "rgba(154,154,154,0.25)" : "rgba(106,106,106,0.35)",
+    linkHighlight: "#8b5cf6",
   };
 }
 
@@ -172,6 +169,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     // canvas render loop — read the latest value without forcing a
     // React re-render. `connectedNodeIdsRef` is the 1-hop neighborhood
     // of the selected node (plus the selected node itself).
+    const lockedNodeIdRef = useRef<string | null>(null);
     const selectedNodeIdRef = useRef<string | null>(null);
     const connectedNodeIdsRef = useRef<Set<string>>(new Set());
     // Offscreen canvas used to compose the dimmed ("out of focus")
@@ -244,8 +242,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       // under DPR/zoom). No-op in production.
       if (import.meta.env.DEV) {
         (window as any).__latticeGraphInst = inst;
-        (window as any).__latticeApplySelection = (id: string | null) =>
+        (window as any).__latticeApplySelection = (id: string | null) => {
+          lockedNodeIdRef.current = id;
           applySelection(id);
+        };
       }
 
       inst
@@ -265,10 +265,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         .enablePointerInteraction(true)
         .enableNodeDrag(true)
         // Fluid feel: lower velocity decay (default 0.4) makes nodes
-        // glide a bit instead of snapping into place; lower alpha
-        // decay lets the sim breathe longer after a perturbation.
-        .d3VelocityDecay(0.25)
-        .d3AlphaDecay(0.02)
+        // glide and bounce elastically instead of snapping into place; 
+        // lower alpha decay lets the sim breathe longer.
+        .d3VelocityDecay(0.15)
+        .d3AlphaDecay(0.01)
         // Custom link renderer. When focus is active we ONLY draw
         // the incident (focused-neighborhood) links here — every
         // dimmed link is rendered into the offscreen blur layer by
@@ -298,10 +298,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           if (selectedId && !incident) return;
           if (incident) {
             ctx.strokeStyle = c.linkHighlight;
-            ctx.lineWidth = 2.4;
+            ctx.lineWidth = 1.5;
           } else {
             ctx.strokeStyle = c.link;
-            ctx.lineWidth = 1.4;
+            ctx.lineWidth = 0.8;
           }
           ctx.beginPath();
           ctx.moveTo(s.x, s.y);
@@ -319,7 +319,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           return sId === selectedId || tId === selectedId ? 2 : 0;
         })
         .linkDirectionalParticleSpeed(0.006)
-        .linkDirectionalParticleWidth(2)
+        .linkDirectionalParticleWidth(1.5)
         .linkDirectionalParticleColor(() => readThemeColors().linkHighlight)
         // ── Two-pass focus blur (the Obsidian look) ──────────────
         // When a node is selected, draw every DIMMED node + link to
@@ -380,7 +380,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
             // 1) All DIMMED links into the offscreen layer.
             offCtx.strokeStyle = c.link;
-            offCtx.lineWidth = 1.4;
+            offCtx.lineWidth = 0.8;
             for (const link of data.links as any[]) {
               const s = link.source;
               const t = link.target;
@@ -485,13 +485,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         )
         .onNodeClick((node: any) => {
           // Toggle: clicking the already-selected node clears focus.
-          const same = selectedNodeIdRef.current === node?.id;
-          applySelection(same ? null : node?.id ?? null);
+          const same = lockedNodeIdRef.current === node?.id;
+          const nextLock = same ? null : (node?.id ?? null);
+          lockedNodeIdRef.current = nextLock;
+          applySelection(nextLock);
           // Still fire the parent's open-file handler so the editor
           // navigates as usual.
           if (!same) onNodeClickRef.current?.(node);
         })
         .onBackgroundClick(() => {
+          lockedNodeIdRef.current = null;
           applySelection(null);
         })
         // Hover swaps the cursor between grab (background) and
@@ -500,6 +503,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         .onNodeHover((node: any) => {
           if (draggingRef.current) return;
           el.style.cursor = node ? "pointer" : "grab";
+          if (!lockedNodeIdRef.current) {
+            applySelection(node?.id ?? null);
+          }
         })
         .onNodeDrag((node: any) => {
           // First tick of a drag: latch focus onto the grabbed node
@@ -510,7 +516,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           if (!draggingRef.current) {
             draggingRef.current = true;
             el.style.cursor = "grabbing";
-            dragPriorSelectionRef.current = selectedNodeIdRef.current;
+            dragPriorSelectionRef.current = lockedNodeIdRef.current;
+            lockedNodeIdRef.current = node?.id ?? null;
             if (selectedNodeIdRef.current !== node?.id) {
               applySelection(node?.id ?? null);
             }
@@ -526,6 +533,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           // doesn't compete with the existing click-to-focus model.
           const prior = dragPriorSelectionRef.current;
           dragPriorSelectionRef.current = null;
+          lockedNodeIdRef.current = prior;
           if (prior !== selectedNodeIdRef.current) {
             applySelection(prior);
           }
@@ -545,15 +553,23 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       //     much larger; 26 would jam edges through node centers.
       //   • center: strong pull toward (0,0) so disconnected nodes
       //     and isolated components don't drift off-camera.
-      // All three are no-ops on builds that don't expose d3Force, so
-      // the optional-chain keeps this safe.
+      //   • collide: prevent nodes from overlapping (space constraint)
+      inst.d3VelocityDecay(0.15); // lowered for elasticity
+      inst.d3AlphaDecay(0.01);
       const charge = inst.d3Force?.("charge");
-      if (charge?.strength) charge.strength(-120);
-      if (charge?.distanceMax) charge.distanceMax(400);
+      if (charge?.strength) charge.strength(-160);
+      if (charge?.distanceMax) charge.distanceMax(500);
       const link = inst.d3Force?.("link");
-      if (link?.distance) link.distance(60);
+      if (link?.distance) link.distance(70);
       const center = inst.d3Force?.("center");
       if (center?.strength) center.strength(0.3);
+      if (inst.d3Force) {
+        // Add weak X/Y forces to pull orphans toward the center
+        // since forceCenter only moves the center of mass.
+        inst.d3Force("x", forceX(0).strength(0.015));
+        inst.d3Force("y", forceY(0).strength(0.015));
+        inst.d3Force("collide", forceCollide((node: any) => Math.sqrt(node.val ?? 1) * NODE_SIZE + 10).iterations(2));
+      }
 
       // ── Custom wheel routing ───────────────────────────────────
       // Three input devices generate `wheel` events and we route each
@@ -696,6 +712,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       if (selectedNodeIdRef.current) {
         const stillThere = nodes.some((n) => n.id === selectedNodeIdRef.current);
         if (!stillThere) {
+          lockedNodeIdRef.current = null;
           selectedNodeIdRef.current = null;
           connectedNodeIdsRef.current = new Set();
         }
@@ -816,6 +833,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
           // Clear focus before animating; otherwise the dimmer kicks
           // in mid-grow and the build is confusing to watch.
+          lockedNodeIdRef.current = null;
           selectedNodeIdRef.current = null;
           connectedNodeIdsRef.current = new Set();
 
