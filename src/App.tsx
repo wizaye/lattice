@@ -29,6 +29,11 @@ import {
 } from "./components/modals/ManageVaultsModal";
 import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
+import { OnboardingShell } from "./components/onboarding/OnboardingShell";
+import {
+  shouldShowOnboarding,
+  useOnboardingStore,
+} from "./components/onboarding/state/onboardingStore";
 
 const LEFT_MIN = 160;
 const LEFT_MAX = 520;
@@ -67,77 +72,18 @@ function countWords(md: string): { words: number; characters: number } {
   return { words, characters };
 }
 
-type BacklinkRef = { fileId: string; fileName: string };
-type OutgoingRef = { name: string };
-type HeadingRef = { level: number; text: string };
-
-function collectBacklinks(
-  target: string,
-  vault: Map<string, FileNode>,
-): BacklinkRef[] {
-  const t = target.toLowerCase();
-  const out: BacklinkRef[] = [];
-  vault.forEach((node) => {
-    if (node.kind !== "file" || !node.content) return;
-    const re = /\[\[([^\]]+)\]\]/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(node.content))) {
-      if (m[1].toLowerCase() === t) {
-        out.push({ fileId: node.id, fileName: node.name });
-        break; // count each file at most once in the backlinks list
-      }
-    }
-  });
-  return out;
-}
-
-function collectOutgoing(content: string): OutgoingRef[] {
-  const re = /\[\[([^\]]+)\]\]/g;
-  const seen = new Set<string>();
-  const out: OutgoingRef[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content))) {
-    const name = m[1].split("|")[0].trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ name });
-  }
-  return out;
-}
-
-function collectTags(content: string): string[] {
-  // strip fenced code blocks so #foo inside ``` ``` isn't picked up
-  const stripped = content.replace(/```[\s\S]*?```/g, "");
-  const re = /(?:^|\s)#([A-Za-z0-9_\-/]+)/g;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(stripped))) {
-    const key = m[1].toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(m[1]);
-  }
-  return out;
-}
-
-function collectHeadings(content: string): HeadingRef[] {
-  const out: HeadingRef[] = [];
-  let inFence = false;
-  for (const raw of content.split(/\r?\n/)) {
-    if (/^```/.test(raw)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(raw);
-    if (!m) continue;
-    out.push({ level: m[1].length, text: m[2] });
-  }
-  return out;
-}
+// Backlinks engine + companion collectors live in `src/lib/backlinks.ts`.
+// Inlining them here turned out to be a footgun — the old `collectBacklinks`
+// compared the raw wikilink body to the target name, so `[[Foo|Alias]]`
+// and `[[Foo#anchor]]` never matched. The new module also surfaces snippets
+// + occurrence counts + unlinked-mentions, which the right sidebar uses.
+import {
+  collectHeadings,
+  collectOutgoing,
+  collectTags,
+  computeBacklinks,
+  computeUnlinkedMentions,
+} from "./lib/backlinks";
 
 export default function App() {
   // ---- Vault & active file -------------------------------------------------
@@ -149,6 +95,14 @@ export default function App() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   void vaultPath; // reserved for future backend backlinks call
   const vaultName = useVaultStore((s) => s.vaultName) || "Lattice";
+
+  // ── Onboarding wizard mount flag ──────────────────────────────────────
+  // Shows the fullscreen onboarding shell on first launch (or any time
+  // `onboarding.completedAt` is null). The shell mounts on top of the
+  // rest of the app; the existing UI still renders underneath so users
+  // can faintly see what they're setting up — matches the design in
+  // docs/onboarding-journey.md §5.4.
+  const onboardingVisible = useOnboardingStore(shouldShowOnboarding);
 
   // ── Bootstrap a mock vault on first mount ─────────────────────────────
   // Without this, the file tree is empty on startup (nobody has picked a
@@ -407,12 +361,17 @@ export default function App() {
     return f && f.kind === "file" ? f : null;
   }, [tree, activeLeafId, vault]);
 
-  const backlinks = useMemo<BacklinkRef[]>(() => {
+  const backlinks = useMemo(() => {
     if (!activeFile) return [];
-    return collectBacklinks(activeFile.name, vault);
+    return computeBacklinks(activeFile, vault);
   }, [activeFile, vault]);
 
-  const outgoing = useMemo<OutgoingRef[]>(() => {
+  const unlinked = useMemo(() => {
+    if (!activeFile) return [];
+    return computeUnlinkedMentions(activeFile, vault);
+  }, [activeFile, vault]);
+
+  const outgoing = useMemo(() => {
     if (!activeFile || !activeFile.content) return [];
     return collectOutgoing(activeFile.content);
   }, [activeFile]);
@@ -422,7 +381,7 @@ export default function App() {
     return collectTags(activeFile.content);
   }, [activeFile]);
 
-  const headings = useMemo<HeadingRef[]>(() => {
+  const headings = useMemo(() => {
     if (!activeFile || !activeFile.content) return [];
     return collectHeadings(activeFile.content);
   }, [activeFile]);
@@ -431,8 +390,14 @@ export default function App() {
     if (!activeFile)
       return { backlinks: 0, words: 0, characters: 0 } as const;
     const { words, characters } = countWords(activeFile.content ?? "");
+    // Status pill shows total mention count (not just file count) so
+    // it matches the number a user actually sees in the right sidebar.
+    const totalMentions = backlinks.reduce(
+      (n, g) => n + g.snippets.length,
+      0,
+    );
     return {
-      backlinks: backlinks.length,
+      backlinks: totalMentions,
       words,
       characters,
     };
@@ -498,6 +463,35 @@ export default function App() {
     const file = vault.get(path);
     if (file) openFile(file);
   }, [vault, openFile]);
+
+  /** Open a file by its node id — used by the right sidebar backlink list. */
+  const openFileById = useCallback(
+    (fileId: string) => {
+      const f = vault.get(fileId);
+      if (f && f.kind === "file") openFile(f);
+    },
+    [vault, openFile],
+  );
+
+  /**
+   * Open a file by its display name (without extension). Used by the
+   * outgoing-links panel — clicking `[[Some Note]]` should land in
+   * that note even though the panel only knows the name.
+   */
+  const openFileByName = useCallback(
+    (name: string) => {
+      const needle = name.toLowerCase().replace(/\.(md|markdown)$/i, "");
+      let found: FileNode | null = null;
+      vault.forEach((node) => {
+        if (found) return;
+        if (node.kind !== "file") return;
+        const base = node.name.toLowerCase().replace(/\.(md|markdown)$/i, "");
+        if (base === needle) found = node;
+      });
+      if (found) openFile(found);
+    },
+    [vault, openFile],
+  );
 
   const onOpenGraph = useCallback(() => {
     const newTab: Tab = {
@@ -686,10 +680,18 @@ export default function App() {
         <div className="sidebar-inner" style={{ width: rightWidth }}>
           <RightSidebar
             hasOpenFile={activeFile !== null}
+            activeFileName={
+              activeFile
+                ? activeFile.name.replace(/\.(md|markdown)$/i, "")
+                : null
+            }
             backlinks={backlinks}
+            unlinked={unlinked}
             outgoing={outgoing}
             tags={tags}
             headings={headings}
+            onOpenFile={openFileById}
+            onOpenByName={openFileByName}
           />
         </div>
       </div>
@@ -747,6 +749,9 @@ export default function App() {
         onOpenExistingVault={onOpenExistingVault}
         onClose={closeManageVaults}
       />
+
+      {/* ===== Onboarding wizard (fullscreen, only on first launch) ===== */}
+      {onboardingVisible && <OnboardingShell />}
     </div>
   );
 }

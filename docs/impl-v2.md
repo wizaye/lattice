@@ -16,15 +16,22 @@ Last updated: 2026-06-06
 
 > **One offline-first PKM that is delightful for students, trustworthy for enterprises, and hackable for senior engineers.**
 
-Three personas drive every decision:
+Three personas drive every decision — but **the feature set is universal**. Persona only changes *defaults* in the onboarding wizard; every user gets every feature.
 
-| Persona | Default workflow | Must-have batteries |
+| Persona | Default workflow | Persona-default batteries |
 |---|---|---|
-| **Student / normal user** | Notes + journaling + Google Calendar + canvas + PDF export | Onboarding wizard, IEEE/APA export, daily-notes plugin, Google Calendar sync |
-| **Enterprise / M365** | Notes + Outlook/Teams meeting capture + secure vault | Entra-ID sign-in, Teams transcript ingest, E2E encryption, MDM-friendly settings |
-| **OSS dev / senior engineer** | Same vault from CLI, BYOM AI in Ollama, BYOC sync to GitHub | `lattice` CLI (ratatui), BYOM, plugin API, Cal.com integration |
+| **Student / normal user** | Notes + journaling + Google Calendar + canvas + paper scaffolding + PDF export | Onboarding wizard, IEEE/APA export, daily-notes plugin, Google Calendar sync, **paper scaffolder (§8.5)** |
+| **Enterprise / M365** | Notes + Outlook/Teams meeting capture + secure vault | Entra-ID sign-in, Teams transcript ingest, E2E encryption ON, MDM-friendly settings |
+| **OSS dev / senior engineer** | Same vault from CLI, BYOM AI in Ollama | `lattice` CLI (ratatui), BYOM, plugin API, Cal.com integration |
 
-A feature ships only when *one* persona is fully unblocked by it.
+**Universal across all personas (no upsell, no plan gate):**
+- **BYOC** — every user picks at least one sync provider during onboarding (GitHub for devs, Drive for students, OneDrive for enterprise — but any of them is available to anyone). BYOC is *the* sync model; there is no "Lattice Sync" SaaS to compete with it.
+- **BYOM** — every user can attach an AI provider (local Ollama default; cloud keys optional).
+- **E2E encryption** — available everywhere; opt-in for personal, opt-out for enterprise.
+- **Default VCS** — every vault is version-controlled from day one.
+- **Paper scaffolder, canvas, graph, importers, plugins** — all available to all personas.
+
+A feature ships only when *one* persona is fully unblocked by it, but it is then exposed to *all* personas.
 
 ---
 
@@ -467,6 +474,279 @@ The graph view already exists. Academic-specific add-ons:
 ### 8.4 Journaling
 Same as §2 — the academic preset just enables it by default and adds a "Lab notebook" template (date, hypothesis, method, observations, next steps).
 
+### 8.5 Paper scaffolder — `Cmd+P → New Paper`
+
+This is **the** student feature. One command spins up an entire opinionated paper project that compiles end-to-end on first try, with sane defaults a thesis advisor would approve of.
+
+#### 8.5.1 Goal — beat the field
+
+| Tool | What they do well | What we do better |
+|---|---|---|
+| **Overleaf** | Polished cloud LaTeX, real-time co-edit, every journal template | Offline-first; native graph view + PKM context for literature review; integrated Zotero/BibTeX without a paid tier; Typst speed (~50× faster builds); your notes + your paper live in the same vault |
+| **Notion / Confluence** | Easy editing, structured DB | Real publication-ready output (camera-ready PDF), citation graphs, math typesetting, no vendor lock-in (plain markdown + plain BibTeX on disk) |
+| **Obsidian** | Vault + plugins | First-class paper structure (no "figure out which 4 community plugins to chain"); built-in compile pipeline; canvas→TikZ/SVG without a separate Excalidraw export dance |
+| **Typst web app / studio** | Typst syntax, fast | Markdown-native (you write `# Heading` not `= Heading`); integrated with notes/graph/calendar; works offline with full template library bundled |
+| **Authorea, Manubot** | Markdown-to-paper | Local-first, no GitHub Actions dependency, full GUI, includes the whole research workflow not just typesetting |
+
+#### 8.5.2 Folder scaffold (what gets created)
+
+User runs **Command Palette → `New Paper…`** → picks a template (IEEE Conf / IEEE Journal / Springer LNCS / ACM / APA / Thesis / Lab Report / Blank) → picks title + author(s) + parent folder. We then create:
+
+```text
+<Parent>/My Paper Title/
+├── paper.typ                  ← compile entry (or paper.tex for Tectonic templates)
+├── README.md                  ← "how to use this folder" — author-facing
+├── title.md                   ← title, authors, affiliations, keywords (frontmatter)
+├── abstract.md                ← single ~250-word paragraph
+├── sections/
+│   ├── 01-introduction.md
+│   ├── 02-related-work.md
+│   ├── 03-method.md
+│   ├── 04-results.md
+│   ├── 05-discussion.md
+│   └── 06-conclusion.md
+├── figures/
+│   ├── README.md              ← naming convention reminder
+│   └── _.gitkeep
+├── tables/
+│   └── _.gitkeep
+├── bibliography.bib           ← BibTeX (also accepts .yaml CSL-JSON)
+├── citations.md               ← human-readable index of every cited work (auto-maintained)
+├── notes.md                   ← scratchpad / reviewer comments (excluded from build)
+├── .lattice/
+│   ├── paper.toml             ← template id, build config, target venue
+│   └── checklist.md           ← submission checklist (auto-checked when possible)
+└── build/                     ← .gitignored output: paper.pdf + diff.pdf
+```
+
+Every file is pre-populated with **real, working content** (not lorem ipsum) — placeholder headings, illustrative `\cite{example2024}` usage, a stub figure include, a stub table. The user can compile it the moment it's created and get a 6-page PDF that looks like a real paper.
+
+#### 8.5.3 `paper.typ` (compile entry point)
+
+For Typst templates the root file imports everything in order, applies the template, and resolves bibliography:
+
+```typst
+#import "@templates/ieee-conf:0.4.0": ieee-conf, affiliation
+#import "sections/_loader.typ": load-section
+
+#show: ieee-conf.with(
+  title: include "title.md",
+  authors: include "_authors.typ",
+  abstract: include "abstract.md",
+  index-terms: ("PKM", "local-first", "E2EE"),
+  bibliography: bibliography("bibliography.bib", style: "ieee"),
+)
+
+#load-section("01-introduction.md")
+#load-section("02-related-work.md")
+#load-section("03-method.md")
+#load-section("04-results.md")
+#load-section("05-discussion.md")
+#load-section("06-conclusion.md")
+```
+
+`load-section` is a tiny helper we ship in every template that runs each `.md` through our markdown→Typst converter (handles `[@key]` citations, `[[wikilinks]]` to other notes in the vault, math, code, figures). **The author never has to write Typst syntax** — every section file is plain markdown.
+
+#### 8.5.4 Build pipeline
+
+- **Compile button** in the editor toolbar when any file inside a `.lattice/paper.toml` folder is active.
+- One click → background `typst compile paper.typ build/paper.pdf` (or Tectonic for `.tex`).
+- Inline PDF preview panel (right split, optional auto-show on first compile).
+- **Live preview** mode: re-compile on save with debounced 250 ms. Typst is fast enough that this feels instant on a 20-page paper.
+- Errors surface inline in the offending markdown file as red squiggles with the Typst/LaTeX error message.
+- Output: `build/paper.pdf` + `build/paper.tagged.pdf` (PDF/A-1a for journals that require it) + `build/diff.pdf` (visual diff vs the last commit — see §8.5.7).
+
+#### 8.5.5 Citation management
+
+- **Zotero integration:** auto-discover `~/Zotero/storage/` (or user-set path) → watch `Better BibTeX` exports → live-merge into `bibliography.bib` on change.
+- **Inline picker:** type `[@` in any section file → fuzzy autocomplete drops down from `bibliography.bib`. Selecting an entry inserts `[@smith2024]` and adds the work to `citations.md`.
+- **Hover preview:** hover any `[@key]` in source mode → popup shows full reference + abstract + first 200 chars of any notes in the vault tagged with that citation key.
+- **DOI import:** paste a DOI → fetches CSL-JSON from crossref.org → appends BibTeX entry → done.
+- **Cite-while-you-read:** when reading a PDF in the vault, the right rail offers "Cite this in active paper" — adds the BibTeX entry and inserts `[@…]` at the cursor in the paper.
+
+#### 8.5.6 Figure & table management
+
+- Drag any image into the editor → auto-saved into `figures/` with a kebab-case name → inserts a labeled figure block: `![Pipeline overview](figures/pipeline-overview.png){#fig:pipeline}`.
+- Drag a `.canvas` file → exports the canvas as PDF (vector) AND PNG @ 2× into `figures/` → inserts the labeled block. Canvas remains live-editable — re-compile re-exports automatically.
+- Drag a `.lattice-db` table view → exports as a `\begin{table}` / `#table` block.
+- **`Cmd+R F`** → "Refer to figure…" — fuzzy picker of every labeled figure/table/equation, inserts `Fig.~\ref{fig:pipeline}` (or `@fig:pipeline` in Typst).
+
+#### 8.5.7 Version diff for papers (the killer feature reviewers love)
+
+- Every commit (§4) carries a per-file diff. For papers we additionally generate a **visual PDF diff** using `latexdiff`/equivalent: text additions in blue, deletions struck-through in red.
+- One click in the Changes panel: "Generate diff vs commit X" → outputs `build/diff.pdf`.
+- Submission workflow: tag a commit `submitted-v1`. After reviews, generate diff vs that tag → upload alongside the resubmission. Journals love this.
+
+#### 8.5.8 Submission checklist
+
+`.lattice/checklist.md` is template-specific and auto-checked where possible:
+
+```markdown
+- [x] All authors listed with ORCID iDs (3/3 ORCIDs found in title.md)
+- [x] Abstract under 250 words (currently 217)
+- [x] All figures have captions
+- [ ] All figures have alt-text (2 of 5 missing — see fig-results.png, fig-arch.png)
+- [x] All cited works present in bibliography.bib (0 missing)
+- [ ] Page count under conference limit (currently 9, limit is 8)
+- [x] No \todo or TODO markers in body text
+- [ ] Anonymous submission: author names removed (IEEE TPDS double-blind)
+```
+
+Auto-checks run on every compile; manual checks have a button to mark them done.
+
+#### 8.5.9 Collaboration story
+
+- Vaults already sync via BYOC (§5.2). A paper folder is just a sub-tree, so **send your co-author the folder via OneDrive/Drive share + a BibTeX file** and they edit alongside you using their own Lattice install.
+- Conflicts on `bibliography.bib` and `sections/*.md` use the standard 3-way merge from §4.5.
+- **Track-changes mode** (later): per-author colored decorations sourced from the VCS blame; one-click accept/reject in the gutter.
+- **For Overleaf-style live co-editing:** v3 feature behind Automerge — not in v2 scope, but the data model already supports it (CRDT per-section, see [`impl.md`](impl.md) phase-2.3).
+
+#### 8.5.10 Templates package (`@templates/...`)
+
+Shipped in `crates/templates/` and copied into the vault as Typst packages at first use:
+- `ieee-conf` (IEEEtran conference)
+- `ieee-journal` (IEEEtran transactions)
+- `springer-lncs` / `springer-svjour3`
+- `acm-sigconf`
+- `apa-7` (papers + theses)
+- `thesis-generic` (parameterizable for most universities — chapters/abstract/declaration/etc.)
+- `lab-report` (cs/eng undergraduate)
+- `cv-resume` (because the same engine should do the CV you submit *with* the paper)
+- `posters-a0` (conference posters)
+- `slides-beamer-like` (Polylux-based Typst slides)
+
+Community templates land via the same plugin marketplace (§5.4) — drop a `.typ` package, declare it in `manifest.toml`, ship.
+
+#### 8.5.11 "Resume an existing paper"
+
+- **Import from Overleaf:** paste a Overleaf project zip → we detect the main `.tex` file → split into `sections/` if multi-file already, otherwise leave as-is → wrap in a Lattice paper folder. Native compile continues via Tectonic.
+- **Import from arXiv source:** `lattice paper import-arxiv 2403.12345` → downloads source bundle → scaffolds.
+- **Import a published PDF for replication/extension:** drop the PDF → "Create paper from this" → auto-extracts title, authors, abstract, BibTeX entry into a new paper folder where you write your response/extension.
+
+#### 8.5.12 AI assist (gated behind BYOM, opt-in per scope)
+
+- "Suggest related work for §2" — runs vault search + arXiv search + Semantic Scholar API, drops candidate citations into a side panel.
+- "Tighten this paragraph" — selection → BYOM call → diff suggestion (accept/reject like Copilot inline).
+- "Translate Methods section to plain English (cover letter / press release)" — drafts a `cover-letter.md` companion file.
+- All AI features OFF by default for academic preset because journals' AI-use disclosure rules are still evolving. Author has to enable per-paper.
+
+#### 8.5.13 BYOF — Bring Your Own Format (conference-supplied LaTeX bundles)
+
+> **The student-killer extension to §8.5.10.** Real conferences don't ship to our 10 built-in templates; they ship a `.zip` with `IEEEtran.cls`, `bare_conf.tex`, `IEEEbib.bst`, sometimes a 12-page "Submission instructions" PDF. The student must produce a PDF that looks **exactly** like that bundle expects — wrong class, wrong margins, wrong font, desk-reject. The student should never have to abandon Lattice + markdown and re-learn LaTeX just because the conference is a snowflake.
+>
+> BYOF = "drop the conference zip in, keep writing markdown, get the conference-exact PDF out."
+
+##### What "BYOF" means concretely
+
+1. Student gets `ieee-tpds-2026.zip` (or `acm-chi-2026.zip`, or a journal-supplied `.tex` template) from the conference's call-for-papers page.
+2. Drag-drops it onto Lattice → `Paper → Import format bundle…`
+3. Lattice extracts it to `<vault>/.lattice/byof-templates/<id>/`, parses the main `.tex` for structure (class + class options + bibliography style + section skeleton + author/title commands + figure/table macro signatures + special package requirements), and writes a `byof.toml` adapter that maps **the student's markdown sections** (`sections/01-intro.md`, `sections/02-related.md`, …) into the right LaTeX placeholders.
+4. From this point on the student keeps writing pure markdown in `sections/*.md`. Build (`Cmd+B`) compiles via bundled **Tectonic** using the imported `.cls/.sty/.bst` files. Output PDF is byte-pattern indistinguishable from what `pdflatex bare_conf.tex` would produce against the conference template.
+5. Submit-day: `Paper → Export → Conference bundle` zips up the rendered `.tex` (markdown re-converted via pandoc-equivalent) + the conference's `.cls`/`.bst` + the bibliography + figures, ready to upload to HotCRP / EasyChair / CMT.
+
+##### What the importer actually parses
+
+- **Class file (`.cls`):** name + options (e.g. `\documentclass[conference,a4paper,10pt]{IEEEtran}`) → recorded verbatim in `byof.toml [class]`.
+- **Style files (`.sty`):** every `\usepackage{...}` from the sample document is recorded → preserved on every build (no silent drops).
+- **Bibliography style (`.bst`):** captured from `\bibliographystyle{...}` → routed to `biber`/`bibtex` automatically based on file presence.
+- **Section skeleton:** parse the sample `.tex` between `\begin{document}` and `\end{document}` for `\section{…}`, `\subsection{…}`, `\IEEEPARstart{…}`, custom macros (`\IEEEauthorblockN`, `\acmauthor`, etc.). Build a placeholder map: `intro` → `\section{Introduction}`, `methods` → `\section{Methods}`, etc.
+- **Custom macros:** detect non-standard commands (e.g. `\threeauthors`, `\ChairOfTheConference`) → either auto-fill from `paper.toml [authors]` if the signature matches, or surface a "this template requires `\foo{}` — fill in here" panel in the editor.
+- **Required packages / missing fonts:** Tectonic auto-downloads from TeX Live mirror; anything that can't be auto-resolved (proprietary fonts, e.g. `MinionPro`) is flagged **up front**, not at build time. The pre-flight check is what saves the student from a 3 a.m. deadline panic.
+
+##### The `byof.toml` adapter (generated, hand-editable)
+
+```toml
+[meta]
+id         = "ieee-tpds-2026"
+imported   = "2026-01-12T11:02:00Z"
+source_zip = "ieee-tpds-2026.zip"
+
+[class]
+file    = "IEEEtran.cls"
+name    = "IEEEtran"
+options = ["conference", "a4paper", "10pt"]
+
+[bibliography]
+style = "IEEEtran"
+file  = "IEEEbib.bst"
+backend = "bibtex"      # or "biber"
+
+[packages]
+required = ["graphicx", "amsmath", "amssymb", "cite", "url"]
+optional = ["microtype"]
+
+[macros]
+title   = "\\title{{{ title }}}"
+authors = "\\IEEEauthorblockN{{{ name }}}\n\\IEEEauthorblockA{{{ affiliation }}}"
+
+[sections]
+# Markdown filename in sections/  →  LaTeX heading command + level
+"01-introduction.md"     = { command = "\\section",    title = "Introduction" }
+"02-related-work.md"     = { command = "\\section",    title = "Related Work" }
+"03-methods.md"          = { command = "\\section",    title = "Methods" }
+"04-results.md"          = { command = "\\section",    title = "Results" }
+"05-discussion.md"       = { command = "\\section",    title = "Discussion" }
+"06-conclusion.md"       = { command = "\\section",    title = "Conclusion" }
+
+[figure_macro]
+single   = "\\begin{figure}[t]\n\\includegraphics[width=\\linewidth]{{{ path }}}\n\\caption{{{ caption }}}\n\\label{{{ label }}}\n\\end{figure}"
+twocol   = "\\begin{figure*}[t]\n... \n\\end{figure*}"
+
+[preflight]
+missing_fonts   = []     # populated by the importer; non-empty blocks build
+missing_packages = []
+warnings = [
+  "Template uses \\IEEEPARstart in the intro — first paragraph will be auto-rewrapped."
+]
+```
+
+##### Build pipeline (BYOF mode)
+
+```
+sections/*.md  →  pandoc-ast (or in-house md→tex via comrak + custom writer)
+                  →  apply [macros] + [sections] substitutions from byof.toml
+                  →  emit  build/main.tex
+                  +  symlink imported .cls/.sty/.bst into build/
+                  →  tectonic build/main.tex
+                  →  build/main.pdf
+```
+
+Same Tectonic build pipeline as §8.5.4 — we just swap `.typ` for `.tex` and the template files come from `.lattice/byof-templates/<id>/` instead of `@templates/`.
+
+##### UX surface
+
+- `Paper → New Paper → Import conference template…` is a peer of the 10 built-in templates from §8.5.10. After import, the conference appears in the template picker like any other.
+- `Paper → Validate against template` runs the preflight check from `[preflight]` whenever the user opens the paper — it catches missing-package issues before the build does.
+- The right sidebar shows a **"Format: IEEE TPDS 2026"** chip; clicking it opens `byof.toml` for hand-edits.
+- Status pill turns yellow if `[preflight]` has unresolved warnings.
+
+##### Edge cases we explicitly cover
+
+| Case | Behavior |
+|---|---|
+| Template ships only a PDF "instructions" file (no `.tex`) | Importer says *"Need a `.tex` skeleton — please drop one in too, or paste the page-formatting commands."* No silent guess. |
+| Template uses proprietary fonts (MinionPro, Charter Pro) | Preflight flag; we offer "substitute with closest free font (TeX Gyre Termes)" with a one-click toggle. PDF will visually differ — we warn loudly. |
+| Multi-author template with N-author macro (`\authorblockN`) | We populate from `paper.toml [authors]` array; if the macro arity doesn't match, we open the macro panel and let the user map by hand once — the mapping persists. |
+| Template requires a non-LaTeX tool (e.g. `bibexport`, `gnuplot`) | Recorded in `[preflight].external_tools`; we shell out via the same sandbox as §5.1 plugins, with a "you'll be prompted to allow X" confirmation on first build. |
+| Conference changes the template mid-cycle | `Paper → Re-import template` swaps the bundle; `byof.toml` is regenerated and the user's hand-edits are preserved via a 3-way merge against the previous `byof.toml`. |
+| User writes `\latex{...}` inline (escape hatch) | Markdown→TeX pass-through respects raw-LaTeX fences (` ```latex ` and `$...$`); we never round-trip these through pandoc's smart-quote rewriter. |
+
+##### BYOF for non-LaTeX formats (forward-looking)
+
+Same adapter shape works for any "conference ships their format" case:
+
+- **Word `.docx` templates** (CHI/UIST late-breaking, many medical journals): convert markdown → `.docx` via pandoc using the conference template as `--reference-doc`. Same `byof.toml`, different `[backend]`.
+- **Springer LNCS official package**: identical to LaTeX BYOF, special-cased only because Springer ships a `.zip` with two skeleton files.
+- **ACM Submission System Word template**: pandoc reference-doc path.
+
+The principle is the same: **the user keeps writing markdown; the format adapter handles everything else.**
+
+##### Why this belongs in v1 (and not behind §8.5.10)
+
+- Built-in templates (§8.5.10) cover the 10 most common cases but conferences are a long tail of weird snowflakes; without BYOF the student has to leave Lattice for Overleaf the moment they submit to anything non-standard.
+- The whole "academic killer" pitch from §8.5.1 collapses if "but you have to use one of our 10 templates" is the asterisk. BYOF makes the pitch unconditional.
+- Implementation is largely **reuse** — Tectonic + comrak + pandoc are already in the §8.5.4 build pipeline; BYOF is mostly the `.tex` parser + the adapter writer + a UX panel for the preflight warnings.
+
 ---
 
 ## 9. End-to-end encryption (researched)
@@ -582,34 +862,26 @@ We do not protect against:
 
 ## 10. Onboarding journey
 
-### 10.1 Installer (Windows + macOS)
-- **Windows:** WiX-built MSI. Per-user install (no admin needed), auto-update via [Velopack](https://github.com/velopack/velopack). Optional silent install args (`/quiet VAULT_PATH=...`) for MDM.
-- **macOS:** signed + notarized DMG. Drag-to-Applications. Auto-update via Sparkle. Universal binary (x86_64 + arm64).
-- **Linux** (later): AppImage + Flatpak + DEB/RPM via `cargo-packager`.
+> **Onboarding is universal** — every user, on every platform, sees the same 9-step flow on first launch. It is not gated by persona, not behind a paywall, and not optional in v1. Persona pick (Step 2) only changes *defaults*; every feature stays available to every user afterward.
+>
+> **Full design lives in its own doc:** [`onboarding-journey.md`](onboarding-journey.md) — 11 sections covering principles, per-step UX, state schema, IPC contract, React component layout, accessibility checklist, telemetry events, edge cases, open questions, and an engineer-sized build sequence.
 
-Installer collects nothing beyond accepting the EULA + picking install path.
+Quick recap (the long version is in the dedicated doc):
 
-### 10.2 First-boot wizard
-Six steps, skippable at any point ("I'll set this up later").
+| # | Step | Skippable? | Purpose |
+|---|---|---|---|
+| 0 | Splash + EULA | No (legal) | Boot + auto-detect existing Obsidian/Logseq vaults + local Ollama |
+| 1 | Welcome | Yes (one-click *"Skip all"* → 45-second path) | Honest data-handling promise |
+| 2 | Persona | Yes (defaults to Student) | Sets defaults only; never gates features |
+| 3 | Vault | No (need *some* vault) | Create / Open / Import |
+| 4 | Theme + density | Yes | Live preview, zero stakes |
+| 5 | Sync (BYOC) | Yes | OAuth in system browser; non-blocking |
+| 6 | Encryption (E2EE) | Yes | Default Off for Student/Dev, On for Enterprise; recovery passphrase forced |
+| 7 | AI (BYOM) | Yes | Local Ollama auto-detect or BYOK; privacy matrix locked to strictest preset |
+| 8 | Calendar + extras | Yes | Daily journal, calendar, CLI, web clipper, telemetry (always-default-off) |
+| 9 | Tour + "You're ready" | — | `Welcome.md` + status-bar background jobs (initial push, imports) |
 
-1. **Welcome + persona pick.** Three cards: *Student / Personal · OSS Developer · Enterprise / M365*. Picks default presets (templates, enabled plugins, sync defaults).
-2. **Vault choice.** *Open existing folder* · *Create new vault* · *Import from another tool* (→ §11).
-3. **Theme + density.** Dark / Light / System; Comfortable / Compact / Cozy spacing.
-4. **Sync.** Connect a BYOC provider now, or skip. Persona presets recommend one (Student → Drive, Dev → GitHub, Enterprise → OneDrive).
-5. **Encryption.** *Off* (default for Student) · *On with passphrase* (default for Enterprise). If On, walk through passphrase entry → recovery passphrase entry → forced confirm.
-6. **AI assistant.** Pick a BYOM provider or skip. Defaults to Ollama if detected locally. Otherwise *Skip — I'll set this up later*.
-
-Final screen: "You're ready" + a one-line cheatsheet (`Ctrl+P` palette, `Ctrl+O` quick switcher) + a "Take the tour" button that opens an in-app guide note.
-
-### 10.3 In-app guide note
-- New file `Welcome.md` in the vault root (`<vault>/Welcome.md`).
-- Real markdown with embedded screenshots; the user can edit/delete it freely.
-- Section anchors: Editor, Graph, Backlinks, Canvas, Sync, Plugins, AI.
-
-### 10.4 Telemetry
-- **Off by default.** A single boolean in Settings → General → "Send anonymous usage data."
-- If on: counts of feature uses (no content, no paths, no IPs) batched daily to a self-hosted Plausible instance.
-- Crash reports: explicit per-crash prompt; never auto-sent.
+Re-runnable any time from *Settings → Help → Re-run onboarding* without destroying data. Headless / MDM install bypasses the UI by reading prefill JSON written by the installer. Wizard always completes offline (steps that need the network degrade gracefully). See [`onboarding-journey.md`](onboarding-journey.md) for the full state schema, IPC commands, accessibility checklist, telemetry payloads, edge cases, and per-step build sequence.
 
 ---
 
@@ -670,28 +942,31 @@ petgraph analytics is officially an **opt-in panel**, not part of the default gr
 
 This is the v2 build queue, built **on top of** the work already finished + the v1 next steps captured in [`current-state.md`](current-state.md#8-recommended-next-step-order).
 
-1. **Backlinks render (v1 carry-over).** Already half-done; finish the frontend first.
-2. **Default VCS layer + Changes panel (§4).** Foundation for both BYOC and AI commit messages.
-3. **Onboarding wizard + Welcome.md (§10).** Anything we ship after this point benefits from being introduced in the wizard.
-4. **Importers — Obsidian + Logseq (§11.1, §11.2).** Cheapest, highest-value imports for the persona we already attract.
-5. **BYOC plugin host + first adapter (GitHub) (§5.1, §5.2).** Establishes the plugin contract.
-6. **E2EE phase 1 (§9.1–9.4, §9.9 step 1).** Has to land with BYOC so privacy-conscious users adopt sync.
-7. **Calendar tier C (Google Calendar) + Journaling (§1.4, §2).** Largest user-base, most-requested feature for the Student persona.
-8. **BYOM + Ollama default + privacy matrix (§5.3).** Unlocks AI commit messages (§4.2) and the agentic features in §5.3.
-9. **Canvas extras phase 1 (§3.1 items 1-5).** Closes the gap to Excalidraw without a dependency.
-10. **Databases v1 — Table + Kanban + embedded-row mode (§7).** Big effort, big payoff.
-11. **Calendar tier A (Outlook + Teams) + Meeting note generation (§1.2).** Enterprise tier opens up.
-12. **Importers — Notion + Siyuan (§11.3, §11.4).** Now that we have databases, Notion import is finally lossless.
-13. **CLI — `lattice` ratatui (§6).** Senior-engineer love letter; can be developed in parallel from step 5 onward.
-14. **Academic bundle (§8) + Stats for nerds (§12).** Polish for the Student persona; sets us apart from "Obsidian but newer."
-15. **Web clipper (already in [`current-state.md`](current-state.md#6-web-clipper-browser-extension) §6).** Independent track, fold into shipping whenever it's ready.
-16. **Remaining BYOC providers (Drive, OneDrive, Dropbox, iCloud, WebDAV).** Each one is a new file once the trait stabilizes.
-17. **Calendar tier B (Cal.com) + Apple Calendar.** Long tail.
-18. **Canvas extras phase 2 (§3.1 items 6-10) + research-paper exports (§3.2, §8.1–8.2).**
-19. **E2EE phases 2-5 (§9.9 steps 2-5).**
-20. **Community plugin marketplace (§5.4).**
+> **Reorder rationale (this revision):** VCS is foundational — every sync/encryption/web-clipper path writes to a vault that must already be version-controlled. The **web clipper** has been promoted from step 16 to step 4 because (a) it is independent enough to be developed in parallel by a different track, (b) it produces immediate visible value for every persona, and (c) BYOC is much easier to dogfood once we have a steady stream of clipped notes flowing in. **BYOC** sits right after web clipper for that reason: it's the natural "now I want this on my other devices" payoff. **Onboarding** stays at step 3 so the introductions for steps 4+ all hang off the wizard. **BYOF** (§8.5.13) is grouped with the paper scaffolder since both share the same Tectonic build pipeline.
 
-Anything past step 20 is "v3" — Iroh P2P, MS Teams AI insights deep integration, real-time Automerge collaboration, full agentic AI flows.
+1. **Backlinks v2 — engine + sidebar stats panel (§ done this session, see `src/lib/backlinks.ts`).** ✅ Shipped: alias/anchor-aware engine, grouped snippets with line numbers + highlight, mentions/files/unlinked stats strip, unlinked-mention detector. Status pill now reports total mention count.
+2. **Default VCS layer + Changes panel (§4).** Foundation for both BYOC and AI commit messages. Nothing else on this list assumes a known-good vault history until this lands.
+3. **Onboarding wizard + Welcome.md (§10, [`onboarding-journey.md`](onboarding-journey.md)).** Every feature shipped after this point gets introduced through the wizard, so it has to come before BYOC/E2EE/calendar etc.
+4. **Web clipper (browser extension + IPC handshake, [`current-state.md`](current-state.md#6-web-clipper-browser-extension) §6).** Promoted: independent track, immediate-value, fills the vault with content that step 5+ then syncs. Can be built in parallel from step 2 onward.
+5. **BYOC plugin host + first adapter (GitHub) (§5.1, §5.2).** Once the vault is version-controlled (step 2) and is filling up with clips (step 4), users want it on their other devices. Establishes the plugin contract.
+6. **E2EE phase 1 (§9.1–9.4, §9.9 step 1).** Lands with BYOC so privacy-conscious users adopt sync from day one.
+7. **Importers — Obsidian + Logseq (§11.1, §11.2).** Cheapest, highest-value imports for the persona we already attract; intentionally after BYOC so an imported vault syncs out of the box.
+8. **Calendar tier C (Google Calendar) + Journaling (§1.4, §2).** Largest user-base, most-requested feature for the Student persona.
+9. **BYOM + Ollama default + privacy matrix (§5.3).** Unlocks AI commit messages (§4.2) and the agentic features in §5.3.
+10. **Paper scaffolder + BYOF + Typst compile pipeline (§8.5, §8.5.13, §8.1).** Headline differentiator vs Overleaf/Notion/Obsidian; BYOF lands together so the very first paper a student writes can target any conference, not just our 10 built-in templates.
+11. **Canvas extras phase 1 (§3.1 items 1-5).** Closes the gap to Excalidraw without a dependency.
+12. **Databases v1 — Table + Kanban + embedded-row mode (§7).** Big effort, big payoff.
+13. **Calendar tier A (Outlook + Teams) + Meeting note generation (§1.2).** Enterprise tier opens up.
+14. **Importers — Notion + Siyuan (§11.3, §11.4).** Now that we have databases, Notion import is finally lossless.
+15. **CLI — `lattice` ratatui (§6).** Senior-engineer love letter; can be developed in parallel from step 5 onward.
+16. **Academic bundle polish — citation graph, lab-notebook template, AI assist (§8.3, §8.4, §8.5.12) + Stats for nerds (§12).** Builds on the §8.5 scaffolder shipped in step 10.
+17. **Remaining BYOC providers (Drive, OneDrive, Dropbox, iCloud, WebDAV).** Each one is a new file once the trait stabilizes.
+18. **Calendar tier B (Cal.com) + Apple Calendar.** Long tail.
+19. **Canvas extras phase 2 (§3.1 items 6-10) + research-paper exports (§3.2, §8.1–8.2).**
+20. **E2EE phases 2-5 (§9.9 steps 2-5).**
+21. **Community plugin marketplace (§5.4).**
+
+Anything past step 21 is "v3" — Iroh P2P, MS Teams AI insights deep integration, real-time Automerge collaboration, full agentic AI flows.
 
 ---
 

@@ -24,7 +24,6 @@
     "@tauri-apps/plugin-os": "^2.3.2",
     "@types/markdown-it": "^14.1.2",
     "@vscode/codicons": "^0.0.45",
-    "d3-force": "^3.0.0",
     "force-graph": "^1.51.4",
     "markdown-it": "^14.2.0",
     "react": "^19.1.0",
@@ -33,7 +32,6 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@types/d3-force": "^3.0.10",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",

@@ -149,3 +149,180 @@
 .rs-outline-item[data-level="4"] { padding-left: 38px; color: var(--text-muted); }
 .rs-outline-item[data-level="5"] { padding-left: 48px; color: var(--text-faint); }
 .rs-outline-item[data-level="6"] { padding-left: 58px; color: var(--text-faint); }
+
+/* ===== Backlinks: stats strip ============================
+   Sits between the section header and the body. Three mini
+   stat cells separated by 1px vertical hairlines. Numbers
+   stay aligned with the header's title text (12px left pad).
+*/
+.rs-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 12px 8px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.rs-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.rs-stat-num {
+  color: var(--text-normal);
+  font-weight: 600;
+  font-size: 12px;
+}
+.rs-stat-muted .rs-stat-num { color: var(--text-muted); }
+.rs-stat-lbl { color: var(--text-faint); }
+.rs-stat-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border-strong);
+  opacity: 0.6;
+}
+
+/* ===== Backlinks: grouped list with snippets =================
+   <ul.rs-bl-list>
+     <li.rs-bl-group>
+       <div.rs-bl-head>
+         <button.rs-bl-chevron/>
+         <button.rs-bl-title>
+           <span.rs-bl-name/><span.rs-bl-badge/>
+         </button>
+       </div>
+       <ul.rs-bl-snippets>
+         <li.rs-bl-snip>
+           <span.rs-bl-line/><span.rs-bl-text>...<mark.rs-bl-mark/>...</span>
+         </li>
+       </ul>
+     </li>
+   </ul>
+*/
+.rs-bl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rs-bl-group {
+  display: flex;
+  flex-direction: column;
+  border-radius: 4px;
+}
+.rs-bl-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.rs-bl-head:hover { background: var(--hover); }
+.rs-bl-chevron {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: transform 80ms ease;
+}
+.rs-bl-chevron:hover { color: var(--text-normal); }
+.rs-bl-group:not(.expanded) .rs-bl-chevron {
+  transform: rotate(-90deg);
+}
+.rs-bl-title {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  text-align: left;
+  min-width: 0;
+}
+.rs-bl-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-bl-badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rs-bl-snippets {
+  list-style: none;
+  margin: 0 0 4px 0;
+  padding: 0 4px 0 22px; /* indent past the chevron column */
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rs-bl-snip {
+  display: flex;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.rs-bl-snip:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.rs-bl-line {
+  flex-shrink: 0;
+  width: 22px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-faint);
+  text-align: right;
+  padding-top: 1px;
+}
+.rs-bl-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.rs-bl-mark {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--text-normal);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+.rs-bl-mark.unlinked {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text-muted);
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 1px;
+  padding: 0 1px;
+}

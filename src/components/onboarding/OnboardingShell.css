@@ -1,0 +1,236 @@
+/* Onboarding wizard — fullscreen overlay that mounts above the editor
+   when `onboarding_completed_at` is null. Visually a dim translucent
+   panel so the editor is faintly visible underneath; that's the cue
+   that "you're setting up the thing you can already see."
+
+   Sized to comfortably read on any window ≥ 720 × 480. Inside, every
+   step renders into `.ob-content`; the persistent footer stays glued
+   to the bottom. The shell never scrolls; only content does. */
+
+.ob-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg-editor) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  /* The frosted look is the visual cue; we keep the cursor normal so
+     the user knows they can click around. */
+}
+
+.ob-card {
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  width: min(720px, calc(100vw - 64px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.ob-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.ob-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.ob-header-step {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.ob-progress {
+  height: 2px;
+  background: var(--hover);
+  position: relative;
+}
+.ob-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  transition: width 220ms ease-out;
+}
+
+.ob-content {
+  padding: 24px 24px 12px 24px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.ob-h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-normal);
+  margin: 0 0 8px;
+}
+.ob-h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin: 16px 0 6px;
+}
+.ob-p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+.ob-p strong { color: var(--text-normal); font-weight: 600; }
+
+.ob-bullets {
+  margin: 8px 0 16px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ob-bullets li {
+  font-size: 13px;
+  color: var(--text-normal);
+  line-height: 1.5;
+}
+
+.ob-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+.ob-checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Persona cards — three equally-weighted, no "recommended" badge. */
+.ob-persona-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+@media (max-width: 640px) {
+  .ob-persona-grid { grid-template-columns: 1fr; }
+}
+.ob-persona-card {
+  appearance: none;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-normal);
+  transition: border-color 100ms ease, transform 100ms ease;
+}
+.ob-persona-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.ob-persona-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.ob-persona-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.ob-persona-tag {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.ob-persona-defaults {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Stubbed steps just show a TODO panel that links back to the design
+   doc so a casual contributor knows where to fill in the screen. */
+.ob-stub {
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  background: var(--bg-editor);
+}
+.ob-stub code {
+  background: var(--hover);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text-normal);
+}
+
+/* Footer: persistent across all steps. */
+.ob-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-strong);
+  background: var(--bg-menu);
+}
+.ob-footer-spacer { flex: 1; }
+.ob-footer-step {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ob-btn {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-editor);
+  color: var(--text-normal);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+.ob-btn:hover { background: var(--hover); }
+.ob-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ob-btn.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.ob-btn.primary:hover {
+  filter: brightness(1.05);
+}
+.ob-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.ob-btn.ghost:hover {
+  color: var(--text-normal);
+  background: var(--hover);
+}

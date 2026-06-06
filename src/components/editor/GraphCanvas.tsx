@@ -5,7 +5,6 @@ import {
   useRef,
 } from "react";
 import ForceGraph from "force-graph";
-import { forceCollide, forceX, forceY } from "d3-force";
 
 /**
  * GraphCanvas
@@ -100,13 +99,17 @@ const NODE_SIZE = 3;
 // reads), large enough that overlapping shapes merge into a single
 // out-of-focus cloud. Higher values (6+) dilute small shapes below
 // visibility against a dark background.
-// 8px provides a much stronger blur effect, so the out-of-focus
-// elements are visibly blurred even on high-DPI (Retina) screens.
-const DIM_BLUR_PX = 8;
-
-// Lowered to 0.35 so that the dimmed cloud actually fades out,
-// making the highlighted nodes stand out much more clearly.
-const DIM_LAYER_ALPHA = 0.35;
+// Alpha applied to dimmed ("out of focus") nodes and links when a
+// focus selection is active. We previously achieved the soft-focus
+// look with a two-pass offscreen-canvas + `ctx.filter = "blur(Npx)"`
+// composite, but that was expensive on Windows + WebView2 (the
+// gaussian filter is software-rasterised at DPR-scaled buffer size)
+// and the macOS branch shipped without it. We now draw dimmed
+// shapes directly on the main canvas at low alpha — less
+// "atmospheric" than blur but matches the macOS look the user
+// already approved, and stays smooth on every platform.
+const DIM_NODE_ALPHA = 0.18;
+const DIM_LINK_ALPHA = 0.12;
 
 /**
  * Read the active theme. App.tsx stores it on `<html data-theme="...">`.
@@ -172,15 +175,6 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const lockedNodeIdRef = useRef<string | null>(null);
     const selectedNodeIdRef = useRef<string | null>(null);
     const connectedNodeIdsRef = useRef<Set<string>>(new Set());
-    // Offscreen canvas used to compose the dimmed ("out of focus")
-    // layer during focus mode. We draw every dimmed node + link to
-    // this buffer with the same transform as the main canvas, then
-    // composite the WHOLE buffer onto main inside one
-    // `ctx.filter = "blur(Npx)"` drawImage call. This is what gives
-    // the true Obsidian look — overlapping dimmed shapes blur INTO
-    // each other, producing one continuous soft cloud rather than
-    // N independent blurred sprites. See DIM_BLUR_PX docs above.
-    const dimLayerCanvasRef = useRef<HTMLCanvasElement | null>(null);
     // True while the wand's progressive-grow animation is running.
     // Suppresses the parent-data useEffect so a mid-animation render
     // doesn't snap straight to the full graph and abort the build-up.
@@ -269,13 +263,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         // lower alpha decay lets the sim breathe longer.
         .d3VelocityDecay(0.15)
         .d3AlphaDecay(0.01)
-        // Custom link renderer. When focus is active we ONLY draw
-        // the incident (focused-neighborhood) links here — every
-        // dimmed link is rendered into the offscreen blur layer by
-        // `onRenderFramePre` below. This split is what makes the
-        // out-of-focus look continuous: blurring per-shape produces
-        // discrete halos; blurring one composited layer produces a
-        // single soft cloud (Obsidian behavior).
+        // Custom link renderer. With focus active, "incident" links
+        // (those touching the selected node) draw bright on top while
+        // every other link draws at very low alpha — fade-only, no
+        // gaussian-blur composite. This matches the macOS branch's
+        // look and stays fast under WebView2 where ctx.filter is
+        // software-rasterised.
         // Mode "replace" means force-graph skips its built-in line
         // draw and uses ours.
         .linkCanvasObjectMode(() => "replace")
@@ -293,10 +286,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           const incident = selectedId
             ? sId === selectedId || tId === selectedId
             : false;
-          // Dimmed links already drew into the offscreen blur layer
-          // during onRenderFramePre — skip them here.
-          if (selectedId && !incident) return;
-          if (incident) {
+          const prevAlpha = ctx.globalAlpha;
+          if (selectedId && !incident) {
+            ctx.strokeStyle = c.link;
+            ctx.lineWidth = 0.8;
+            ctx.globalAlpha = prevAlpha * DIM_LINK_ALPHA;
+          } else if (incident) {
             ctx.strokeStyle = c.linkHighlight;
             ctx.lineWidth = 1.5;
           } else {
@@ -307,6 +302,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           ctx.moveTo(s.x, s.y);
           ctx.lineTo(t.x, t.y);
           ctx.stroke();
+          ctx.globalAlpha = prevAlpha;
         })
         .linkDirectionalParticles((link: any) => {
           // Particles ONLY on the selected node's edges — gives a
@@ -321,117 +317,22 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         .linkDirectionalParticleSpeed(0.006)
         .linkDirectionalParticleWidth(1.5)
         .linkDirectionalParticleColor(() => readThemeColors().linkHighlight)
-        // ── Two-pass focus blur (the Obsidian look) ──────────────
-        // When a node is selected, draw every DIMMED node + link to
-        // a hidden offscreen canvas, then composite the whole layer
-        // back onto the main canvas inside a SINGLE blur filter call.
-        // Because the filter is applied during drawImage, the blur
-        // smears across the entire layer at once — overlapping
-        // shapes merge into one continuous soft cloud. This is the
-        // key difference from a per-shape blur (which produces
-        // discrete blurry sprites with no inter-shape merging) and
-        // is why this finally matches Obsidian's soft-focus look.
-        //
-        // onRenderFramePre fires AFTER the main canvas is cleared
-        // and the world→pixel transform is set, but BEFORE any
-        // node/link draws — so anything we composite here lands at
-        // the bottom of the frame, ready for the crisp focused
-        // subgraph (drawn by linkCanvasObject + nodeCanvasObject)
-        // to overlay it on top.
-        .onRenderFramePre(
-          (mainCtx: CanvasRenderingContext2D, _globalScale: number) => {
-            const selectedId = selectedNodeIdRef.current;
-            if (!selectedId) return;
-            const inst2 = instanceRef.current;
-            if (!inst2) return;
-            const data = inst2.graphData?.();
-            if (!data) return;
-            const connected = connectedNodeIdsRef.current;
-            const c = readThemeColors();
-            const mainCanvas = mainCtx.canvas;
-
-            // Lazily create + size the offscreen buffer to match the
-            // main canvas's device-pixel dimensions. We re-check size
-            // every frame because force-graph resizes the main canvas
-            // on container resize / DPR change.
-            let off = dimLayerCanvasRef.current;
-            if (!off) {
-              off = document.createElement("canvas");
-              dimLayerCanvasRef.current = off;
-            }
-            if (
-              off.width !== mainCanvas.width ||
-              off.height !== mainCanvas.height
-            ) {
-              off.width = mainCanvas.width;
-              off.height = mainCanvas.height;
-            }
-            const offCtx = off.getContext("2d");
-            if (!offCtx) return;
-
-            // Copy the main canvas's CURRENT transform (zoom + pan +
-            // DPR baked in by force-graph) to the offscreen so we
-            // can pass world coordinates directly to offCtx — no
-            // manual world→screen math needed.
-            offCtx.setTransform(1, 0, 0, 1, 0, 0);
-            offCtx.clearRect(0, 0, off.width, off.height);
-            const m = mainCtx.getTransform();
-            offCtx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-
-            // 1) All DIMMED links into the offscreen layer.
-            offCtx.strokeStyle = c.link;
-            offCtx.lineWidth = 0.8;
-            for (const link of data.links as any[]) {
-              const s = link.source;
-              const t = link.target;
-              if (typeof s !== "object" || typeof t !== "object") continue;
-              if (s.x == null || s.y == null || t.x == null || t.y == null) {
-                continue;
-              }
-              if (s.id === selectedId || t.id === selectedId) continue;
-              offCtx.beginPath();
-              offCtx.moveTo(s.x, s.y);
-              offCtx.lineTo(t.x, t.y);
-              offCtx.stroke();
-            }
-
-            // 2) All DIMMED nodes into the offscreen layer.
-            offCtx.fillStyle = c.node;
-            for (const node of data.nodes as any[]) {
-              if (node.x == null || node.y == null) continue;
-              if (node.id === selectedId || connected.has(node.id)) continue;
-              const radius = Math.sqrt(node.val ?? 1) * NODE_SIZE;
-              offCtx.beginPath();
-              offCtx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
-              offCtx.fill();
-            }
-
-            // 3) Composite the WHOLE offscreen layer back onto the
-            // main canvas with a single gaussian-blur filter. Reset
-            // main's transform to identity first so drawImage uses
-            // pixel coordinates (the offscreen already has the same
-            // pixel content as a non-blurred main render would).
-            mainCtx.save();
-            mainCtx.setTransform(1, 0, 0, 1, 0, 0);
-            mainCtx.filter = `blur(${DIM_BLUR_PX}px)`;
-            mainCtx.globalAlpha = DIM_LAYER_ALPHA;
-            mainCtx.drawImage(off, 0, 0);
-            mainCtx.restore();
-          },
-        )
         .nodeCanvasObject(
           (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
             const c = readThemeColors();
             const selectedId = selectedNodeIdRef.current;
             const connected = connectedNodeIdsRef.current;
 
-            // Dimmed nodes are drawn into the offscreen blur layer
-            // by onRenderFramePre — skip them here entirely so we
-            // don't double-paint a crisp version on top of the soft
-            // backdrop.
-            if (selectedId && node.id !== selectedId && !connected.has(node.id)) {
-              return;
-            }
+            // Dim state: focus is active AND this node is neither the
+            // selected node nor a 1-hop neighbor. Draw the node + its
+            // label at a very low alpha so the focused subgraph pops
+            // off the page. (Earlier versions blurred dimmed shapes
+            // via an offscreen composite — removed in favor of pure
+            // alpha-dim to match the macOS branch and avoid the
+            // ctx.filter perf cost on Windows / WebView2.)
+            const dimmed = !!selectedId
+              && node.id !== selectedId
+              && !connected.has(node.id);
 
             // Resolve fill + label colors:
             //   - no selection         → normal
@@ -447,12 +348,18 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               fillColor = c.nodeHighlight;
               labelColor = c.nodeHighlight;
               forceLabel = true;
-            } else {
+            } else if (!dimmed) {
               // 1-hop neighbor of the selected node.
               fillColor = c.node;
               labelColor = c.nodeMuted;
               forceLabel = true;
+            } else {
+              fillColor = c.node;
+              labelColor = c.nodeMuted;
             }
+
+            const prevAlpha = ctx.globalAlpha;
+            if (dimmed) ctx.globalAlpha = prevAlpha * DIM_NODE_ALPHA;
 
             const radius = Math.sqrt(node.val ?? 1) * NODE_SIZE;
             ctx.beginPath();
@@ -467,9 +374,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               ctx.stroke();
             }
 
-            if (scale > 1.2 || forceLabel) {
+            if (!dimmed && (scale > 1.2 || forceLabel)) {
               // Font scales inversely with zoom so labels stay a
-              // consistent on-screen size.
+              // consistent on-screen size. Dimmed nodes never get
+              // labels — they're meant to recede into the backdrop.
               const fontSize = Math.max(10, 14 / scale);
               ctx.font = `${fontSize}px Inter, sans-serif`;
               ctx.textAlign = "center";
@@ -481,6 +389,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
                 node.y + radius + fontSize * 0.9,
               );
             }
+
+            ctx.globalAlpha = prevAlpha;
           },
         )
         .onNodeClick((node: any) => {
@@ -553,7 +463,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       //     much larger; 26 would jam edges through node centers.
       //   • center: strong pull toward (0,0) so disconnected nodes
       //     and isolated components don't drift off-camera.
-      //   • collide: prevent nodes from overlapping (space constraint)
+      //
+      // We use ONLY the forces force-graph already wires up (charge,
+      // link, center) — no `d3-force` factory imports. Adding
+      // forceX/forceY/forceCollide would pull in the whole d3-force
+      // package just to tune two strengths; instead we lean on a
+      // tighter charge + a stronger center pull to keep the layout
+      // compact, and accept that very dense hubs may overlap slightly
+      // (force-graph's built-in collide is good enough for the node
+      // counts a personal vault produces).
       inst.d3VelocityDecay(0.15); // lowered for elasticity
       inst.d3AlphaDecay(0.01);
       const charge = inst.d3Force?.("charge");
@@ -563,13 +481,6 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       if (link?.distance) link.distance(70);
       const center = inst.d3Force?.("center");
       if (center?.strength) center.strength(0.3);
-      if (inst.d3Force) {
-        // Add weak X/Y forces to pull orphans toward the center
-        // since forceCenter only moves the center of mass.
-        inst.d3Force("x", forceX(0).strength(0.015));
-        inst.d3Force("y", forceY(0).strength(0.015));
-        inst.d3Force("collide", forceCollide((node: any) => Math.sqrt(node.val ?? 1) * NODE_SIZE + 10).iterations(2));
-      }
 
       // ── Custom wheel routing ───────────────────────────────────
       // Three input devices generate `wheel` events and we route each
