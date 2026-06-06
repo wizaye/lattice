@@ -232,6 +232,16 @@ export const IcFolderOpened = codicon("folder-opened");
 export const IcLocation = codicon("location");
 export const IcTrash = codicon("trash");
 
+// Tab context menu — pin / unpin / unlink (Obsidian's tab right-click).
+// VS Code's `pin` codicon is a thumbtack glyph; `pinned` is the same
+// glyph slightly emphasized. We map both to the same name so a future
+// theme swap doesn't break visual parity.
+export const IcPin = codicon("pin");
+export const IcPinned = codicon("pinned");
+export const IcUnlink = codicon("link-external"); // closest match — Obsidian's "Unlink tab" detaches a tab from its history
+export const IcSplitH = codicon("split-horizontal");
+export const IcSplitV = codicon("split-vertical");
+
 // Graph view overlay controls
 export const IcWand = codicon("wand"); // restart force simulation
 export const IcCamera = codicon("device-camera"); // copy screenshot

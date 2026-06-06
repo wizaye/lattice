@@ -28,6 +28,7 @@ import {
   type Vault,
 } from "./components/modals/ManageVaultsModal";
 import { IcPanelLeft } from "./components/common/Icons";
+import { HoverPreview } from "./components/common/HoverPreview";
 import { useDragResize } from "./hooks/useDragResize";
 import { OnboardingShell } from "./components/onboarding/OnboardingShell";
 import {
@@ -554,6 +555,21 @@ export default function App() {
     return () => window.removeEventListener("lattice-open-wikilink", handler);
   }, [openFile]);
 
+  // ---- Open file by id (hover-preview expand button, etc.) ---------------
+  // HoverPreview dispatches this when the user clicks the expand icon
+  // in the popover header. Same pattern as `lattice-open-wikilink` so
+  // the singleton doesn't need a prop-drilled opener.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const id = detail?.fileId as string | undefined;
+      if (!id) return;
+      openFileById(id);
+    };
+    window.addEventListener("lattice-open-file-by-id", handler);
+    return () => window.removeEventListener("lattice-open-file-by-id", handler);
+  }, [openFileById]);
+
   // ---- Keyboard shortcuts -------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -752,6 +768,12 @@ export default function App() {
 
       {/* ===== Onboarding wizard (fullscreen, only on first launch) ===== */}
       {onboardingVisible && <OnboardingShell />}
+
+      {/* ===== Obsidian-style Ctrl+hover preview popover (singleton).
+              Mounts once near the root and uses delegated mousemove
+              + data-file-id attributes on tabs / tree rows to find
+              its hover targets. See HoverPreview.tsx for the contract. */}
+      <HoverPreview />
     </div>
   );
 }

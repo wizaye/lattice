@@ -41,6 +41,13 @@ export type Tab = {
    * so existing serialized layouts keep working unchanged.
    */
   viewMode?: "source" | "preview";
+  /**
+   * When `true` the tab is pinned: the X button is replaced with a
+   * pin icon, "Close all" / "Close others" skip it, and pinned tabs
+   * sort to the left of unpinned ones. Mirrors Obsidian behaviour.
+   * Undefined ≡ false so older serialized layouts keep working.
+   */
+  isPinned?: boolean;
 };
 
 /**

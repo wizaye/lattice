@@ -33,6 +33,18 @@
   background: var(--hover);
 }
 
+/* "Reveal file in navigation" briefly flashes the row so the user's
+   eye lands on it after the smooth scroll. The class is added by the
+   FileTree's lattice-reveal-file listener and removed 700 ms later. */
+.tree-row.reveal-flash {
+  animation: tree-reveal-flash 700ms ease-out;
+}
+@keyframes tree-reveal-flash {
+  0%   { background: rgba(127, 109, 242, 0.45); }
+  60%  { background: rgba(127, 109, 242, 0.28); }
+  100% { background: transparent; }
+}
+
 .tree-chev {
   width: 14px;
   height: 14px;

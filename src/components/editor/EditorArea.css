@@ -343,6 +343,26 @@
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 0.9; }
 .tab-close:hover { background: var(--hover); opacity: 1 !important; }
 
+/* ---- Pinned tabs ---------------------------------------------------
+   Obsidian replaces the close (×) button with a pin icon on pinned
+   tabs. The pin is always visible (full opacity) regardless of
+   hover/active state — that's the whole point of the marker.
+   Clicking the pin unpins (in TabButton).                                 */
+.tab-close.pinned {
+  opacity: 0.85;
+  color: var(--accent);
+}
+.tab.pinned .tab-close.pinned { opacity: 0.95; }
+.tab-close.pinned:hover {
+  background: var(--hover);
+  opacity: 1 !important;
+}
+.tab-close.pinned .codicon {
+  /* The "pinned" codicon is slightly chunkier than the X — bump down
+     a hair so it doesn't overpower the tab title. */
+  font-size: 12px;
+}
+
 /* "+" new tab — lives OUTSIDE `.pane-tabs` as a sibling so it stays
    pinned next to the last tab even when the tab list overflows. */
 .tab-new {
@@ -635,6 +655,31 @@
   min-width: 240px;
   max-height: 70vh;
   overflow-y: auto;
+}
+
+/* Tab right-click menu — cursor-positioned via createPortal so it
+   floats above .pane-tabs (which has overflow:hidden). Slightly
+   narrower than .doc-more-menu because it has fewer items. */
+.tab-context-menu {
+  min-width: 220px;
+  /* Position is set inline by TabContextMenu (left/top/zIndex). The
+     animation transform interferes with our viewport-clamp math
+     because getBoundingClientRect runs while the scale(0.98) is
+     mid-flight — disable the entry animation for the portaled
+     variant so the first measurement matches the final rect. */
+  animation: none;
+}
+
+/* Disabled menu items (e.g. "Close" on a pinned tab, "Close others"
+   when there's only one tab). Subtle — half opacity, no hover. */
+.split-menu-item:disabled,
+.split-menu-item[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.split-menu-item:disabled:hover,
+.split-menu-item[disabled]:hover {
+  background: transparent;
 }
 
 /* Danger item ("Delete file") — red text + matching icon. */

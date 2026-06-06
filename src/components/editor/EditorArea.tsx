@@ -1,10 +1,12 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import type { DropEdge, FileNode, SplitTree, Tab } from "../../state/types";
 import {
   findLeaf,
@@ -55,13 +57,18 @@ import {
   IcNewFile,
   IcPanelLeft,
   IcPanelRight,
+  IcPin,
+  IcPinned,
   IcPlus,
   IcReplace,
   IcSearch,
   IcSplit,
+  IcSplitH,
+  IcSplitV,
   IcStack,
   IcSwap,
   IcTrash,
+  IcUnlink,
 } from "../common/Icons";
 import { useEditorStore } from "../../state/editorStore";
 import { useVaultStore } from "../../state/vaultStore";
@@ -334,6 +341,179 @@ export function EditorArea(props: Props) {
     [tree, onTreeChange],
   );
 
+  // ---- pin / unpin a tab ---------------------------------------------
+  // Pinned tabs:
+  //   - skip the "Close all" / "Close others" sweep
+  //   - render a pin icon in place of the X close button
+  // We don't reorder pinned-first here (Obsidian leaves the tab where
+  // the user placed it); the visual marker is enough.
+  const onTogglePinTab = useCallback(
+    (leafId: string, tabId: string) => {
+      setLeaf(leafId, (leaf) => ({
+        ...leaf,
+        tabs: leaf.tabs.map((t) =>
+          t.id === tabId ? { ...t, isPinned: !t.isPinned } : t,
+        ),
+      }));
+    },
+    [setLeaf],
+  );
+
+  // ---- "Close others" — close every tab in this leaf except `tabId`,
+  // honouring pin state. Pinned tabs survive (Obsidian behaviour).
+  // Runs the dirty-file gate across the soon-to-close set so the user
+  // gets a single combined save/discard prompt instead of one per tab.
+  const onCloseOthersInLeaf = useCallback(
+    async (leafId: string, tabId: string) => {
+      const leaf = findLeaf(tree, leafId);
+      if (!leaf) return;
+      const victims = leaf.tabs.filter(
+        (t) => t.id !== tabId && !t.isPinned,
+      );
+      if (victims.length === 0) return;
+      const dirty: string[] = [];
+      const es = useEditorStore.getState();
+      for (const t of victims) {
+        if (t.fileId && es.dirtyFiles.has(t.fileId)) dirty.push(t.fileId);
+      }
+      if (dirty.length > 0) {
+        const ok = await confirmDiscardDirty(dirty, async (paths) => {
+          for (const p of paths) await useEditorStore.getState().saveFile(p);
+        });
+        if (!ok) return;
+      }
+      setLeaf(leafId, (leaf) => ({
+        ...leaf,
+        tabs: leaf.tabs.filter(
+          (t) => t.id === tabId || t.isPinned,
+        ),
+        activeTabId: tabId,
+      }));
+    },
+    [tree, setLeaf],
+  );
+
+  // ---- "Copy path" — write the tab's fileId (== absolute path for
+  // real vaults) to the system clipboard.
+  const onCopyFilePath = useCallback(async (fileId: string) => {
+    try {
+      await navigator.clipboard.writeText(fileId);
+    } catch (err) {
+      console.warn("Copy path failed:", err);
+    }
+  }, []);
+
+  // ---- "Reveal file in navigation" — fire a global event the file
+  // tree listens for; it expands ancestors + scrolls the row into
+  // view + flashes a highlight. Keeps EditorArea decoupled from
+  // FileTree's internal expand-state machine.
+  const onRevealFileInNav = useCallback((fileId: string) => {
+    window.dispatchEvent(
+      new CustomEvent("lattice-reveal-file", { detail: { fileId } }),
+    );
+  }, []);
+
+  // ---- "Show in system explorer" / "Open in default app" — both go
+  // through @tauri-apps/plugin-opener. We dynamic-import so plain
+  // `vite dev` (no Tauri) doesn't blow up at module-eval time.
+  const onShowInExplorer = useCallback(async (fileId: string) => {
+    try {
+      const mod = await import("@tauri-apps/plugin-opener");
+      await mod.revealItemInDir(fileId);
+    } catch (err) {
+      console.warn("Show in explorer failed:", err);
+    }
+  }, []);
+
+  const onOpenInDefaultApp = useCallback(async (fileId: string) => {
+    try {
+      const mod = await import("@tauri-apps/plugin-opener");
+      await mod.openPath(fileId);
+    } catch (err) {
+      console.warn("Open in default app failed:", err);
+    }
+  }, []);
+
+  // ---- "Rename" — kicks the file tree's inline-rename UI by firing
+  // a global event the FileTree component listens for. This way all
+  // rename + link-rewrite logic stays in one place.
+  const onRenameFile = useCallback((fileId: string) => {
+    window.dispatchEvent(
+      new CustomEvent("lattice-rename-file", { detail: { fileId } }),
+    );
+  }, []);
+
+  // ---- "Delete file" — confirms, removes the file from disk via the
+  // existing tauri command, refreshes the vault, then closes every tab
+  // that was pointing at it.
+  const onDeleteFile = useCallback(
+    async (fileId: string) => {
+      // Lazy-import the dialog so vite dev (no Tauri) still works.
+      let ok = false;
+      try {
+        const dlg = await import("@tauri-apps/plugin-dialog");
+        const name = fileId.split(/[/\\]/).pop() ?? fileId;
+        ok = await dlg.confirm(`Delete "${name}"?`, {
+          title: "Delete file",
+          kind: "warning",
+        });
+      } catch {
+        ok = window.confirm(`Delete "${fileId}"?`);
+      }
+      if (!ok) return;
+      try {
+        const { deleteFile } = await import("../../lib/tauriApi");
+        await deleteFile(fileId);
+        await useVaultStore.getState().refreshTree();
+      } catch (err) {
+        console.error("Delete failed:", err);
+        return;
+      }
+      // Close any tabs that were pointing at this file. We walk the
+      // tree once and produce a new tree with every matching tab
+      // removed in one shot — avoids cascading async confirmDiscardDirty
+      // prompts that the per-tab onCloseTab path would trigger.
+      const next = mapLeaves(tree, (leaf) => {
+        const kept = leaf.tabs.filter((t) => t.fileId !== fileId);
+        if (kept.length === leaf.tabs.length) return leaf;
+        if (kept.length === 0) {
+          // Root pane gets a fresh New tab so the editor is never
+          // completely empty; non-root collapses (sibling absorbs).
+          const isRootLeaf = tree.kind === "leaf" && tree.id === leaf.id;
+          if (isRootLeaf) {
+            const fresh: Tab = {
+              id: uid("tab"),
+              fileId: null,
+              title: "New tab",
+            };
+            return {
+              kind: "leaf",
+              id: leaf.id,
+              tabs: [fresh],
+              activeTabId: fresh.id,
+            };
+          }
+          return null;
+        }
+        const activeStillThere = kept.some((t) => t.id === leaf.activeTabId);
+        return {
+          ...leaf,
+          tabs: kept,
+          activeTabId: activeStillThere ? leaf.activeTabId : kept[0].id,
+        };
+      });
+      if (next) onTreeChange(next);
+      // Also drop any cached dirty bit / content for the deleted file.
+      const es = useEditorStore.getState();
+      const dirty = new Set(es.dirtyFiles);
+      dirty.delete(fileId);
+      const contents = { ...es.fileContents };
+      delete contents[fileId];
+      useEditorStore.setState({ dirtyFiles: dirty, fileContents: contents });
+    },
+    [tree, onTreeChange],
+  );
+
   // ---- drag and drop ---------------------------------------------------
   const handleDropOnPane = useCallback(
     (leafId: string, edge: DropEdge, data: DT) => {
@@ -478,6 +658,8 @@ export function EditorArea(props: Props) {
         onActivateTab={onActivateTab}
         onCloseTab={onCloseTab}
         onCloseAll={onCloseAllInLeaf}
+        onCloseOthers={onCloseOthersInLeaf}
+        onTogglePinTab={onTogglePinTab}
         onNewTab={onNewTabInLeaf}
         onSplit={onSplitInLeaf}
         onResizeSplit={onResizeSplit}
@@ -486,6 +668,12 @@ export function EditorArea(props: Props) {
         onDropOnTabbar={handleDropOnTabbar}
         onUpdateFileContent={onUpdateFileContent}
         onToggleViewMode={onToggleViewMode}
+        onCopyFilePath={onCopyFilePath}
+        onRevealFileInNav={onRevealFileInNav}
+        onShowInExplorer={onShowInExplorer}
+        onOpenInDefaultApp={onOpenInDefaultApp}
+        onRenameFile={onRenameFile}
+        onDeleteFile={onDeleteFile}
         topLeftLeafId={topLeftLeafId}
         topRightLeafId={topRightLeafId}
         leftSidebarCollapsed={leftSidebarCollapsed}
@@ -528,6 +716,8 @@ type RenderProps = {
   onActivateTab: (leafId: string, tabId: string) => void;
   onCloseTab: (leafId: string, tabId: string) => void;
   onCloseAll: (leafId: string) => void;
+  onCloseOthers: (leafId: string, tabId: string) => void;
+  onTogglePinTab: (leafId: string, tabId: string) => void;
   onNewTab: (leafId: string) => void;
   onSplit: (leafId: string, edge: Exclude<DropEdge, "center">) => void;
   onResizeSplit: (splitId: string, ratio: number) => void;
@@ -541,6 +731,16 @@ type RenderProps = {
    *  (MarkdownPreview). Implemented at the EditorArea root because
    *  that's where the split-tree mutator (setLeaf) lives. */
   onToggleViewMode: (leafId: string, tabId: string) => void;
+  /** File-action callbacks used by both DocMoreMenu (3-dot in the
+   *  doc header) and the tab right-click TabContextMenu. They live
+   *  at the root because they need access to the split tree and the
+   *  vault store. */
+  onCopyFilePath: (fileId: string) => void;
+  onRevealFileInNav: (fileId: string) => void;
+  onShowInExplorer: (fileId: string) => void;
+  onOpenInDefaultApp: (fileId: string) => void;
+  onRenameFile: (fileId: string) => void;
+  onDeleteFile: (fileId: string) => void;
   topLeftLeafId?: string;
   topRightLeafId?: string;
   leftSidebarCollapsed: boolean;
@@ -692,6 +892,8 @@ function Pane(props: PaneProps) {
     onActivateTab,
     onCloseTab,
     onCloseAll,
+    onCloseOthers,
+    onTogglePinTab,
     onNewTab,
     onSplit,
     onChangeActiveLeaf,
@@ -699,6 +901,12 @@ function Pane(props: PaneProps) {
     onDropOnTabbar,
     onUpdateFileContent,
     onToggleViewMode,
+    onCopyFilePath,
+    onRevealFileInNav,
+    onShowInExplorer,
+    onOpenInDefaultApp,
+    onRenameFile,
+    onDeleteFile,
     topLeftLeafId,
     topRightLeafId,
     leftSidebarCollapsed,
@@ -888,8 +1096,22 @@ function Pane(props: PaneProps) {
               leafId={leaf.id}
               tab={t}
               active={t.id === leaf.activeTabId}
+              tabCount={leaf.tabs.length}
               onActivate={() => onActivateTab(leaf.id, t.id)}
               onClose={() => onCloseTab(leaf.id, t.id)}
+              onCloseOthers={() => onCloseOthers(leaf.id, t.id)}
+              onCloseAll={() => onCloseAll(leaf.id)}
+              onTogglePin={() => onTogglePinTab(leaf.id, t.id)}
+              onToggleViewMode={() => onToggleViewMode(leaf.id, t.id)}
+              onSplit={(edge) => onSplit(leaf.id, edge)}
+              onCopyPath={() => t.fileId && onCopyFilePath(t.fileId)}
+              onRevealInNav={() => t.fileId && onRevealFileInNav(t.fileId)}
+              onShowInExplorer={() => t.fileId && onShowInExplorer(t.fileId)}
+              onOpenInDefaultApp={() =>
+                t.fileId && onOpenInDefaultApp(t.fileId)
+              }
+              onRename={() => t.fileId && onRenameFile(t.fileId)}
+              onDelete={() => t.fileId && onDeleteFile(t.fileId)}
             />
           ))}
           {tabInsert && (
@@ -971,6 +1193,42 @@ function Pane(props: PaneProps) {
                 onClose={
                   activeTab
                     ? () => onCloseTab(leaf.id, activeTab.id)
+                    : undefined
+                }
+                onToggleViewMode={
+                  activeTab
+                    ? () => onToggleViewMode(leaf.id, activeTab.id)
+                    : undefined
+                }
+                viewMode={activeTab?.viewMode ?? "source"}
+                onCopyPath={
+                  activeTab?.fileId
+                    ? () => onCopyFilePath(activeTab.fileId!)
+                    : undefined
+                }
+                onRevealInNav={
+                  activeTab?.fileId
+                    ? () => onRevealFileInNav(activeTab.fileId!)
+                    : undefined
+                }
+                onShowInExplorer={
+                  activeTab?.fileId
+                    ? () => onShowInExplorer(activeTab.fileId!)
+                    : undefined
+                }
+                onOpenInDefaultApp={
+                  activeTab?.fileId
+                    ? () => onOpenInDefaultApp(activeTab.fileId!)
+                    : undefined
+                }
+                onRename={
+                  activeTab?.fileId
+                    ? () => onRenameFile(activeTab.fileId!)
+                    : undefined
+                }
+                onDelete={
+                  activeTab?.fileId
+                    ? () => onDeleteFile(activeTab.fileId!)
                     : undefined
                 }
               />
@@ -1070,11 +1328,45 @@ type TabBtnProps = {
   leafId: string;
   tab: Tab;
   active: boolean;
+  /** Total tabs in the parent leaf — used by the right-click menu to
+   *  grey out "Close others" when there's only one tab. */
+  tabCount: number;
   onActivate: () => void;
   onClose: () => void | Promise<void>;
+  onCloseOthers: () => void | Promise<void>;
+  onCloseAll: () => void | Promise<void>;
+  onTogglePin: () => void;
+  onToggleViewMode: () => void;
+  onSplit: (edge: Exclude<DropEdge, "center">) => void;
+  /** File-action callbacks. All no-op for empty (fileId==null) tabs;
+   *  the menu greys them out in that case. */
+  onCopyPath: () => void;
+  onRevealInNav: () => void;
+  onShowInExplorer: () => void;
+  onOpenInDefaultApp: () => void;
+  onRename: () => void;
+  onDelete: () => void;
 };
 
-function TabButton({ leafId, tab, active, onActivate, onClose }: TabBtnProps) {
+function TabButton({
+  leafId,
+  tab,
+  active,
+  tabCount,
+  onActivate,
+  onClose,
+  onCloseOthers,
+  onCloseAll,
+  onTogglePin,
+  onToggleViewMode,
+  onSplit,
+  onCopyPath,
+  onRevealInNav,
+  onShowInExplorer,
+  onOpenInDefaultApp,
+  onRename,
+  onDelete,
+}: TabBtnProps) {
   // Exit animation: when the user clicks ×, flip `closing` true so the
   // CSS animation plays in place (subtle fade + horizontal collapse),
   // then call the parent's onClose once it finishes. Keep this fast
@@ -1125,32 +1417,99 @@ function TabButton({ leafId, tab, active, onActivate, onClose }: TabBtnProps) {
     setDragImageBelowCursor(e, tab.title);
   };
 
+  // Cursor-positioned right-click menu state. We store the click x/y
+  // and let TabContextMenu portal itself to document.body so the menu
+  // can overflow the tab bar (which has overflow: hidden).
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Activate the tab on right-click as well — matches VS Code /
+    // Obsidian behaviour and avoids the surprise where you act on a
+    // tab that isn't visible in the editor body.
+    if (!active) onActivate();
+    setMenuAt({ x: e.clientX, y: e.clientY });
+  };
+
+  // Pinned tabs swap the close (×) button for a pin icon, and clicking
+  // the pin unpins (rather than closes). This matches Obsidian's
+  // affordance — the pin icon is the same target zone the close button
+  // used to occupy so muscle memory still works.
+  const isPinned = !!tab.isPinned;
+
   return (
-    <div
-      className={`tab${active ? " active" : ""}${closing ? " closing" : ""}`}
-      draggable={!closing}
-      onDragStart={onDragStart}
-      onMouseDown={closing ? undefined : onActivate}
-      onAuxClick={(e) => {
-        if (e.button === 1) triggerClose();
-      }}
-      title={tab.title}
-    >
-      <span className="tab-title">{tab.title}</span>
-      <button
-        className={`tab-close ${isDirty ? "dirty" : ""}`}
-        title="Close"
-        onClick={(e) => {
-          e.stopPropagation();
-          triggerClose();
+    <>
+      <div
+        className={`tab${active ? " active" : ""}${closing ? " closing" : ""}${
+          isPinned ? " pinned" : ""
+        }`}
+        data-file-id={tab.fileId ?? undefined}
+        draggable={!closing}
+        onDragStart={onDragStart}
+        onMouseDown={closing ? undefined : onActivate}
+        onAuxClick={(e) => {
+          if (e.button === 1 && !isPinned) triggerClose();
         }}
+        onContextMenu={onContextMenu}
+        // aria-label, not title — native OS tooltip would otherwise
+        // overlap the Ctrl+hover preview popover.
+        aria-label={tab.title}
       >
-        {isDirty && <div className="dirty-dot" />}
-        <div className="close-icon">
-          <IcClose />
-        </div>
-      </button>
-    </div>
+        <span className="tab-title">{tab.title}</span>
+        {isPinned ? (
+          <button
+            className="tab-close pinned"
+            title="Unpin"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin();
+            }}
+          >
+            <div className="close-icon">
+              <IcPinned />
+            </div>
+          </button>
+        ) : (
+          <button
+            className={`tab-close ${isDirty ? "dirty" : ""}`}
+            title="Close"
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerClose();
+            }}
+          >
+            {isDirty && <div className="dirty-dot" />}
+            <div className="close-icon">
+              <IcClose />
+            </div>
+          </button>
+        )}
+      </div>
+      {menuAt && (
+        <TabContextMenu
+          x={menuAt.x}
+          y={menuAt.y}
+          tab={tab}
+          tabCount={tabCount}
+          onDismiss={() => setMenuAt(null)}
+          onClose={triggerClose}
+          onCloseOthers={onCloseOthers}
+          onCloseAll={onCloseAll}
+          onTogglePin={onTogglePin}
+          onToggleViewMode={onToggleViewMode}
+          onSplit={onSplit}
+          onCopyPath={onCopyPath}
+          onRevealInNav={onRevealInNav}
+          onShowInExplorer={onShowInExplorer}
+          onOpenInDefaultApp={onOpenInDefaultApp}
+          onRename={onRename}
+          onDelete={onDelete}
+        />
+      )}
+    </>
   );
 }
 
@@ -1359,21 +1718,44 @@ function TabbarOptionsMenu({
  * Obsidian's per-file context menu (Backlinks, Reading view, Split,
  * Rename, Export, Find, Copy path, Delete, etc.).
  *
- * Only a few items are wired to real handlers:
- *   - Split right / Split down \u2192 onSplit(edge)
- *   - Delete file \u2192 onClose (closes the tab \u2014 the vault is mock so
- *     we treat "delete" as "remove from view")
+ * Wired items:
+ *   - Reading view / Source mode → onToggleViewMode (current state
+ *     read from `viewMode` prop so the highlighted row matches reality)
+ *   - Rename… → onRename (opens the file-tree inline-rename UI)
+ *   - Copy path → onCopyPath (writes the absolute path to clipboard)
+ *   - Open in default app → onOpenInDefaultApp
+ *   - Show in system explorer → onShowInExplorer
+ *   - Reveal file in navigation → onRevealInNav
+ *   - Delete file → onDelete (confirms + removes from disk + closes tabs)
  *
- * The rest are visual-only entries that match Obsidian's menu so the
- * UI feels complete even though the underlying ops are not yet built.
+ * Still visual-only (no backing implementation yet): Backlinks in
+ * document, Open in new window, Move file to, Bookmark, Merge,
+ * Add file property, Export to PDF, Find, Replace,
+ * Open version history, Open linked view.
  * `hasFile=false` (empty "New tab") hides the file-only items.
  */
 function DocMoreMenu({
   hasFile,
   onClose,
+  onToggleViewMode,
+  viewMode,
+  onCopyPath,
+  onRevealInNav,
+  onShowInExplorer,
+  onOpenInDefaultApp,
+  onRename,
+  onDelete,
 }: {
   hasFile: boolean;
   onClose?: () => void;
+  onToggleViewMode?: () => void;
+  viewMode?: "source" | "preview";
+  onCopyPath?: () => void;
+  onRevealInNav?: () => void;
+  onShowInExplorer?: () => void;
+  onOpenInDefaultApp?: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -1428,13 +1810,35 @@ function DocMoreMenu({
                 <IcLink className="split-menu-icon" />
                 <span>Backlinks in document</span>
               </button>
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={
+                  onToggleViewMode && viewMode === "source"
+                    ? run(onToggleViewMode)
+                    : stub
+                }
+              >
                 <IcEye className="split-menu-icon" />
                 <span>Reading view</span>
+                {viewMode === "preview" && (
+                  <IcCheck className="split-menu-trailing" />
+                )}
               </button>
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={
+                  onToggleViewMode && viewMode === "preview"
+                    ? run(onToggleViewMode)
+                    : stub
+                }
+              >
                 <IcCode className="split-menu-icon" />
                 <span>Source mode</span>
+                {viewMode === "source" && (
+                  <IcCheck className="split-menu-trailing" />
+                )}
               </button>
               <div className="split-menu-divider" role="separator" />
             </>
@@ -1453,7 +1857,11 @@ function DocMoreMenu({
           {hasFile && (
             <>
               <div className="split-menu-divider" role="separator" />
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={onRename ? run(onRename) : stub}
+              >
                 <IcEdit className="split-menu-icon" />
                 <span>Rename…</span>
               </button>
@@ -1491,10 +1899,13 @@ function DocMoreMenu({
               </button>
 
               <div className="split-menu-divider" role="separator" />
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={onCopyPath ? run(onCopyPath) : stub}
+              >
                 <IcCopy className="split-menu-icon" />
                 <span>Copy path</span>
-                <IcChevronRight className="split-menu-trailing" />
               </button>
               <button role="menuitem" className="split-menu-item" onClick={stub}>
                 <IcHistory className="split-menu-icon" />
@@ -1507,26 +1918,38 @@ function DocMoreMenu({
               </button>
 
               <div className="split-menu-divider" role="separator" />
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={onOpenInDefaultApp ? run(onOpenInDefaultApp) : stub}
+              >
                 <IcLinkExternal className="split-menu-icon" />
                 <span>Open in default app</span>
               </button>
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={onShowInExplorer ? run(onShowInExplorer) : stub}
+              >
                 <IcFolderOpened className="split-menu-icon" />
                 <span>Show in system explorer</span>
               </button>
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={onRevealInNav ? run(onRevealInNav) : stub}
+              >
                 <IcLocation className="split-menu-icon" />
                 <span>Reveal file in navigation</span>
               </button>
 
-              {onClose && (
+              {(onDelete || onClose) && (
                 <>
                   <div className="split-menu-divider" role="separator" />
                   <button
                     role="menuitem"
                     className="split-menu-item danger"
-                    onClick={run(onClose)}
+                    onClick={run(onDelete ?? onClose!)}
                   >
                     <IcTrash className="split-menu-icon" />
                     <span>Delete file</span>
@@ -1538,6 +1961,304 @@ function DocMoreMenu({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Tab right-click context menu — the cursor-positioned twin of
+ * DocMoreMenu, scoped to ONE tab (the one the user right-clicked).
+ *
+ * Mirrors Obsidian's tab popup. Items wired here:
+ *   - Close
+ *   - Close others (skips pinned tabs)
+ *   - Close all (skips pinned tabs)
+ *   - Pin / Unpin
+ *   - Reading view / Edit mode
+ *   - Split right / Split down
+ *   - Copy path
+ *   - Reveal file in navigation
+ *   - Show in system explorer
+ *   - Open in default app
+ *   - Rename
+ *   - Delete file
+ *
+ * Positioning: we portal into document.body and place at fixed
+ * (x, y) = click coords, then nudge so the popup stays in viewport
+ * (flip-left if it would clip the right edge, push up if it would
+ * clip the bottom).
+ *
+ * Close behaviour (mirrors DocMoreMenu):
+ *   - Esc
+ *   - Outside pointerdown
+ *   - Selecting an item
+ *   - Scroll / window blur (avoids a stale, drifting menu)
+ */
+function TabContextMenu({
+  x,
+  y,
+  tab,
+  tabCount,
+  onDismiss,
+  onClose,
+  onCloseOthers,
+  onCloseAll,
+  onTogglePin,
+  onToggleViewMode,
+  onSplit,
+  onCopyPath,
+  onRevealInNav,
+  onShowInExplorer,
+  onOpenInDefaultApp,
+  onRename,
+  onDelete,
+}: {
+  x: number;
+  y: number;
+  tab: Tab;
+  tabCount: number;
+  onDismiss: () => void;
+  onClose: () => void;
+  onCloseOthers: () => void | Promise<void>;
+  onCloseAll: () => void | Promise<void>;
+  onTogglePin: () => void;
+  onToggleViewMode: () => void;
+  onSplit: (edge: Exclude<DropEdge, "center">) => void;
+  onCopyPath: () => void;
+  onRevealInNav: () => void;
+  onShowInExplorer: () => void;
+  onOpenInDefaultApp: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  // After the menu mounts we measure it and clamp into the viewport.
+  // We render once at (x, y) with visibility:hidden, take the rect,
+  // then reposition. This avoids a frame of off-screen flash and
+  // means we never need to hard-code a width.
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 6;
+    let left = x;
+    let top = y;
+    if (left + r.width + margin > vw) left = Math.max(margin, vw - r.width - margin);
+    if (top + r.height + margin > vh) top = Math.max(margin, vh - r.height - margin);
+    setPos({ left, top });
+  }, [x, y]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onDismiss();
+      }
+    };
+    const onDown = (e: PointerEvent) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      onDismiss();
+    };
+    const onScroll = () => onDismiss();
+    const onBlur = () => onDismiss();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [onDismiss]);
+
+  // Helper for wireable items: dismiss + run.
+  const run = (fn: () => void | Promise<void>) => () => {
+    onDismiss();
+    void fn();
+  };
+
+  const hasFile = !!tab.fileId;
+  const isPinned = !!tab.isPinned;
+  const isPreview = tab.viewMode === "preview";
+
+  // Position is computed in useLayoutEffect; we render the menu at
+  // the raw click coords for the first paint (hidden) so the measure
+  // pass has real DOM dimensions.
+  const style: React.CSSProperties = pos
+    ? { position: "fixed", left: pos.left, top: pos.top, zIndex: 2000 }
+    : {
+        position: "fixed",
+        left: x,
+        top: y,
+        zIndex: 2000,
+        visibility: "hidden",
+      };
+
+  return createPortal(
+    <div
+      ref={wrapRef}
+      className="split-menu doc-more-menu tab-context-menu"
+      role="menu"
+      style={style}
+      // Stop the right-click on the menu itself from re-triggering the
+      // tab's onContextMenu (which would close + reopen the menu in
+      // place — visually flickery).
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        onClick={run(onClose)}
+        disabled={isPinned}
+        title={isPinned ? "Unpin first to close" : undefined}
+      >
+        <IcClose className="split-menu-icon" />
+        <span>Close</span>
+      </button>
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        onClick={run(onCloseOthers)}
+        disabled={tabCount <= 1}
+      >
+        <IcCloseAll className="split-menu-icon" />
+        <span>Close others</span>
+      </button>
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        onClick={run(onCloseAll)}
+      >
+        <IcCloseAll className="split-menu-icon" />
+        <span>Close all</span>
+      </button>
+
+      <div className="split-menu-divider" role="separator" />
+
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        onClick={run(onTogglePin)}
+      >
+        {isPinned ? (
+          <IcPinned className="split-menu-icon" />
+        ) : (
+          <IcPin className="split-menu-icon" />
+        )}
+        <span>{isPinned ? "Unpin" : "Pin"}</span>
+      </button>
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        disabled
+        title="Coming soon"
+      >
+        <IcUnlink className="split-menu-icon" />
+        <span>Unlink tab</span>
+      </button>
+
+      {hasFile && (
+        <>
+          <div className="split-menu-divider" role="separator" />
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={run(onToggleViewMode)}
+          >
+            {isPreview ? (
+              <IcCode className="split-menu-icon" />
+            ) : (
+              <IcEye className="split-menu-icon" />
+            )}
+            <span>{isPreview ? "Source mode" : "Reading view"}</span>
+          </button>
+        </>
+      )}
+
+      <div className="split-menu-divider" role="separator" />
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        onClick={run(() => onSplit("right"))}
+      >
+        <IcSplitH className="split-menu-icon" />
+        <span>Split right</span>
+      </button>
+      <button
+        role="menuitem"
+        className="split-menu-item"
+        onClick={run(() => onSplit("bottom"))}
+      >
+        <IcSplitV className="split-menu-icon" />
+        <span>Split down</span>
+      </button>
+
+      {hasFile && (
+        <>
+          <div className="split-menu-divider" role="separator" />
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={run(onCopyPath)}
+          >
+            <IcCopy className="split-menu-icon" />
+            <span>Copy path</span>
+          </button>
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={run(onRevealInNav)}
+          >
+            <IcLocation className="split-menu-icon" />
+            <span>Reveal file in navigation</span>
+          </button>
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={run(onShowInExplorer)}
+          >
+            <IcFolderOpened className="split-menu-icon" />
+            <span>Show in system explorer</span>
+          </button>
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={run(onOpenInDefaultApp)}
+          >
+            <IcLinkExternal className="split-menu-icon" />
+            <span>Open in default app</span>
+          </button>
+
+          <div className="split-menu-divider" role="separator" />
+          <button
+            role="menuitem"
+            className="split-menu-item"
+            onClick={run(onRename)}
+          >
+            <IcEdit className="split-menu-icon" />
+            <span>Rename…</span>
+          </button>
+          <button
+            role="menuitem"
+            className="split-menu-item danger"
+            onClick={run(onDelete)}
+          >
+            <IcTrash className="split-menu-icon" />
+            <span>Delete file</span>
+          </button>
+        </>
+      )}
+    </div>,
+    document.body,
   );
 }
 

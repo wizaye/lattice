@@ -272,12 +272,20 @@ function TreeRow({
     <div
       className={`tree-row file${selected ? " selected" : ""}`}
       style={{ paddingLeft: 22 + depth * 14 }}
+      data-file-id={node.id}
       draggable
       onDragStart={onDragStart}
       onClick={() => onOpen(node)}
       onDoubleClick={() => onOpen(node)}
       onContextMenu={(e) => onContextMenu(e, node)}
-      title={node.name}
+      // aria-label instead of `title` so the native browser tooltip
+      // (yellow OS bubble) never appears — it would otherwise draw
+      // on top of our Ctrl+hover preview popover, especially on the
+      // hover-then-Ctrl path where the OS tooltip is already on
+      // screen and Chromium won't dismiss it just because we strip
+      // the `title` attribute mid-display. Screen readers still get
+      // the name via aria-label.
+      aria-label={node.name}
       // ── Drop-on-file ────────────────────────────────────────────────
       // File rows also accept drops so the user can "drag completely
       // outside" a folder. Without this, the browser's default
@@ -381,6 +389,54 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
   }, [vaultPath]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  // ---- window events from outside the file tree ----------------------
+  // EditorArea's tab context menu (and DocMoreMenu) fire these to
+  // drive file-tree-owned actions without prop-drilling. Keeping the
+  // listeners local means FileTree stays the single owner of inline-
+  // rename state and scroll-to-row behaviour.
+  //
+  // Folder rows default to open (useState(true) per FileTreeNode), so
+  // "reveal" only needs to scrollIntoView + flash the row. If we ever
+  // make folders default-closed we'll need to lift open state into a
+  // Set<string> here and force-open every ancestor of the target.
+  useEffect(() => {
+    const onRename = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileId: string }>).detail;
+      if (!detail?.fileId) return;
+      setInlineEdit({ path: detail.fileId, type: "rename" });
+      // Also scroll the row into view so the inline editor is visible.
+      requestAnimationFrame(() => {
+        const el = document.querySelector(
+          `[data-file-id="${CSS.escape(detail.fileId)}"]`,
+        );
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    };
+
+    const onReveal = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileId: string }>).detail;
+      if (!detail?.fileId) return;
+      requestAnimationFrame(() => {
+        const el = document.querySelector(
+          `[data-file-id="${CSS.escape(detail.fileId)}"]`,
+        );
+        if (!el) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        // Brief highlight flash so the user's eye lands on it. The
+        // class self-removes after the animation (700 ms).
+        el.classList.add("reveal-flash");
+        window.setTimeout(() => el.classList.remove("reveal-flash"), 700);
+      });
+    };
+
+    window.addEventListener("lattice-rename-file", onRename);
+    window.addEventListener("lattice-reveal-file", onReveal);
+    return () => {
+      window.removeEventListener("lattice-rename-file", onRename);
+      window.removeEventListener("lattice-reveal-file", onReveal);
+    };
+  }, [setInlineEdit]);
 
   const handleContextAction = useCallback(async (action: string) => {
     if (!contextMenu) return;
