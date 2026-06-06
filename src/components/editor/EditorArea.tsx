@@ -60,6 +60,9 @@ import {
   IcSwap,
   IcTrash,
 } from "../common/Icons";
+import { useEditorStore } from "../../state/editorStore";
+import { useVaultStore } from "../../state/vaultStore";
+import GraphView from "./GraphView";
 import "./EditorArea.css";
 
 type Props = {
@@ -81,6 +84,7 @@ type Props = {
   topRightInsetPx: number;
   /** px of left padding to reserve for macos traffic lights when left sidebar is collapsed. */
   topLeftInsetPx: number;
+  onOpenFileByPath?: (path: string) => void;
 };
 
 /**
@@ -102,6 +106,7 @@ export function EditorArea(props: Props) {
     onToggleRightSidebar,
     topRightInsetPx,
     topLeftInsetPx,
+    onOpenFileByPath,
   } = props;
 
   // ---- tab ops ---------------------------------------------------------
@@ -264,6 +269,9 @@ export function EditorArea(props: Props) {
           onTreeChange(splitLeaf(tree, leafId, direction, newLeaf, placeAfter));
           onChangeActiveLeaf(newLeaf.id);
         }
+        useEditorStore.getState().loadFile(file.id).then((content) => {
+          useVaultStore.getState().updateFileContent(file.id, content);
+        });
         return;
       }
       // tab drag → move tab between leaves (or self-rearrange)
@@ -323,6 +331,9 @@ export function EditorArea(props: Props) {
         };
         setLeaf(leafId, (leaf) => insertTabAt(leaf, newTab, index));
         onChangeActiveLeaf(leafId);
+        useEditorStore.getState().loadFile(file.id).then((content) => {
+          useVaultStore.getState().updateFileContent(file.id, content);
+        });
         return;
       }
       if (data.kind === "tab") {
@@ -385,6 +396,7 @@ export function EditorArea(props: Props) {
         onToggleRightSidebar={onToggleRightSidebar}
         topRightInsetPx={topRightInsetPx}
         topLeftInsetPx={topLeftInsetPx}
+        onOpenFileByPath={onOpenFileByPath}
       />
     </div>
   );
@@ -434,6 +446,7 @@ type RenderProps = {
   onToggleRightSidebar: () => void;
   topRightInsetPx: number;
   topLeftInsetPx: number;
+  onOpenFileByPath?: (path: string) => void;
 };
 
 function RenderTree(props: RenderProps) {
@@ -589,6 +602,7 @@ function Pane(props: PaneProps) {
     onToggleRightSidebar,
     topRightInsetPx,
     topLeftInsetPx,
+    onOpenFileByPath,
   } = props;
 
   const isActive = leaf.id === activeLeafId;
@@ -841,6 +855,9 @@ function Pane(props: PaneProps) {
         {activeTab ? (
           activeTab.fileId ? (
             (() => {
+              if (activeTab.fileId === "__graph__") {
+                return <GraphView onOpenFile={onOpenFileByPath!} />;
+              }
               const file = vault.get(activeTab.fileId);
               // Folder rows shouldn't be openable in tabs, and a stale
               // tab pointing at a deleted file falls back to EmptyTab.
@@ -875,7 +892,7 @@ function Pane(props: PaneProps) {
                     onUpdateFileContent?.(file.id, c)
                   }
                   onSave={() => {
-                    /* save handled by editorStore in App */
+                    useEditorStore.getState().saveFile(file.id);
                   }}
                 />
               );
@@ -927,6 +944,7 @@ function TabButton({ leafId, tab, active, onActivate, onClose }: TabBtnProps) {
   // dropped the tab we just unmount immediately (the timer is a no-op).
   const [closing, setClosing] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
+  const isDirty = useEditorStore((s) => tab.fileId ? s.dirtyFiles.has(tab.fileId) : false);
 
   useEffect(() => {
     return () => {
@@ -969,14 +987,17 @@ function TabButton({ leafId, tab, active, onActivate, onClose }: TabBtnProps) {
     >
       <span className="tab-title">{tab.title}</span>
       <button
-        className="tab-close"
+        className={`tab-close ${isDirty ? "dirty" : ""}`}
         title="Close"
         onClick={(e) => {
           e.stopPropagation();
           triggerClose();
         }}
       >
-        <IcClose />
+        {isDirty && <div className="dirty-dot" />}
+        <div className="close-icon">
+          <IcClose />
+        </div>
       </button>
     </div>
   );

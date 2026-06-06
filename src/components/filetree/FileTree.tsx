@@ -5,6 +5,7 @@ import { setDragImageBelowCursor } from "../common/dragGhost";
 import { useVaultStore } from "../../state/vaultStore";
 import { renameEntry, createFolder as createFolderOnDisk, createFile as createFileOnDisk, deleteFile, deleteFolder } from "../../lib/tauriApi";
 import { renameAndUpdateLinks } from "../../lib/markdown";
+import { confirm, message } from "@tauri-apps/plugin-dialog";
 import "./FileTree.css";
 
 // ── Context Menu ──
@@ -213,14 +214,14 @@ function TreeRow({
               if (parentDir === node.id) return;
 
               const newPath = `${node.id}/${sourceName}`;
-              const doMove = window.confirm(`Are you sure you want to move '${sourceName}' into '${node.name}'?`);
+              const doMove = await confirm(`Are you sure you want to move '${sourceName}' into '${node.name}'?`, { title: "Move Item", kind: "warning" });
               if (!doMove) return;
 
               const vaultPath = useVaultStore.getState().vaultPath;
               const isMd = sourcePath.toLowerCase().endsWith(".md");
 
               if (isMd && vaultPath) {
-                const doUpdate = window.confirm(`Update all internal links to '${sourceName}'?`);
+                const doUpdate = await confirm(`Update all internal links to '${sourceName}'?`, { title: "Update Links" });
                 if (doUpdate) {
                   await renameAndUpdateLinks(sourcePath, newPath);
                 } else {
@@ -311,7 +312,7 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  const handleContextAction = useCallback((action: string) => {
+  const handleContextAction = useCallback(async (action: string) => {
     if (!contextMenu) return;
     const node = contextMenu.node;
 
@@ -324,7 +325,8 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
       setInlineEdit({ path: node.id, type: "rename" });
     } else if (action === "delete" && node) {
       const msg = node.kind === "folder" ? `Delete folder "${node.name}" and all contents?` : `Delete "${node.name}"?`;
-      if (window.confirm(msg)) {
+      const doDelete = await confirm(msg, { title: "Delete", kind: "warning" });
+      if (doDelete) {
         (async () => {
           try {
             if (node.kind === "folder") {
@@ -364,7 +366,7 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
         const isMd = oldPath.toLowerCase().endsWith(".md");
 
         if (isMd && vaultPath) {
-          const doUpdate = window.confirm(`Rename to "${value}"?\n\nUpdate internal links?`);
+          const doUpdate = await confirm(`Rename to "${value}"?\n\nUpdate internal links?`, { title: "Update Links" });
           if (doUpdate) {
             await renameAndUpdateLinks(oldPath, newPath);
           } else {
@@ -377,7 +379,7 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
       }
     } catch (err) {
       console.error("Operation failed:", err);
-      window.alert(`Operation failed: ${err}`);
+      await message(`Operation failed: ${err}`, { title: "Error", kind: "error" });
     }
     setInlineEdit(null);
   }, [inlineEdit, vaultPath, onOpen, setInlineEdit]);
@@ -401,12 +403,12 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
           if (parentDir === vaultPath) return; // already in root
 
           const newPath = `${vaultPath}/${sourceName}`;
-          const doMove = window.confirm(`Move '${sourceName}' to the vault root?`);
+          const doMove = await confirm(`Move '${sourceName}' to the vault root?`, { title: "Move Item", kind: "warning" });
           if (!doMove) return;
 
           const isMd = sourcePath.toLowerCase().endsWith(".md");
           if (isMd) {
-            const doUpdate = window.confirm(`Update internal links to '${sourceName}'?`);
+            const doUpdate = await confirm(`Update internal links to '${sourceName}'?`, { title: "Update Links" });
             if (doUpdate) {
               await renameAndUpdateLinks(sourcePath, newPath);
             } else {

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -295,7 +295,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
           activateOnTyping: true,
         }),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
+          if (update.docChanged && update.transactions.some(tr => tr.annotation(Transaction.userEvent))) {
             // Mark dirty immediately
             const es = useEditorStore.getState();
             if (!es.dirtyFiles.has(currentPath)) {

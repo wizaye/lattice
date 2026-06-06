@@ -7,6 +7,7 @@ import {
   IcEdit,
   IcFolder,
   IcGear,
+  IcGraph,
   IcHelp,
   IcMoon,
   IcMore,
@@ -33,6 +34,7 @@ type Props = {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  onOpenGraph: () => void;
   /** Open the Manage Vaults modal — invoked from the vault picker's
    *  "Manage vaults\u2026" item. The sidebar only forwards the click;
    *  modal state lives in App so the modal can render at the top of
@@ -56,6 +58,7 @@ export function LeftSidebar({
   onToggleTheme,
   onOpenSettings,
   onOpenManageVaults,
+  onOpenGraph,
   isMac,
   onToggleSidebar,
 }: Props) {
@@ -123,6 +126,7 @@ export function LeftSidebar({
               <button className="icon-btn tiny" title="New folder" onClick={() => vaultPath && setInlineEdit({ path: vaultPath, type: "newFolder" })}>
                 <IcNewFolder />
               </button>
+
               <button className="icon-btn tiny" title="Sort">
                 <IcSortAZ />
               </button>

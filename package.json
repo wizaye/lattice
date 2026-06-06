@@ -23,6 +23,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-os": "^2.3.2",
     "@vscode/codicons": "^0.0.45",
+    "force-graph": "^1.51.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zustand": "^5.0.14"

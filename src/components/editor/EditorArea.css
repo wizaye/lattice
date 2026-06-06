@@ -643,3 +643,21 @@
   background: rgba(227, 100, 100, 0.12);
 }
 
+/* Tab dirty dot */
+.tab-close .dirty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-normal);
+  display: block;
+}
+.tab-close.dirty .close-icon {
+  display: none;
+}
+.tab-close.dirty:hover .dirty-dot {
+  display: none;
+}
+.tab-close.dirty:hover .close-icon {
+  display: block;
+}
+

@@ -142,10 +142,8 @@ export default function App() {
   const vaultName = useVaultStore((s) => s.vaultName) || "Lattice";
 
   // Debounce timer ref for auto-saving file content to disk
-  const saveTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-
   /** Write back the new body for a file (markdown or canvas). Updates
-   *  the in-memory vault tree + editor store, and debounce-saves to disk. */
+   *  the in-memory vault tree + editor store, and marks it dirty. */
   const onUpdateFileContent = useCallback(
     (fileId: string, content: string) => {
       // Update zustand vault store (in-memory tree)
@@ -153,11 +151,6 @@ export default function App() {
       // Update editor store (content cache)
       useEditorStore.getState().setFileContent(fileId, content);
       useEditorStore.getState().markDirty(fileId);
-      // Debounce save to disk (500ms)
-      clearTimeout(saveTimerRef.current[fileId]);
-      saveTimerRef.current[fileId] = setTimeout(() => {
-        useEditorStore.getState().saveFile(fileId);
-      }, 500);
     },
     [],
   );
@@ -402,6 +395,32 @@ export default function App() {
     [tree, activeLeafId],
   );
 
+  const onOpenFileByPath = useCallback((path: string) => {
+    const file = vault.get(path);
+    if (file) openFile(file);
+  }, [vault, openFile]);
+
+  const onOpenGraph = useCallback(() => {
+    const newTab: Tab = {
+      id: uid("tab"),
+      fileId: "__graph__",
+      title: "Graph View",
+    };
+    setTree((prev) => {
+      const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
+      if (!leaf) return prev;
+      
+      const existing = leaf.tabs.find(t => t.fileId === "__graph__");
+      if (existing) {
+         return mapLeaves(prev, l => l.id === leaf.id ? { ...l, activeTabId: existing.id } : l) || prev;
+      }
+      
+      return mapLeaves(prev, (l) =>
+        l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+      ) || prev;
+    });
+  }, [activeLeafId]);
+
   // ---- Wikilink navigation ------------------------------------------------
   // The CodeMirror editor dispatches a custom event when a [[wikilink]] is
   // clicked. We listen for it here and open the target file.
@@ -496,7 +515,7 @@ export default function App() {
           )}
         </div>
         <div className="col-body">
-          <LeftActivityStrip />
+          <LeftActivityStrip onOpenGraph={onOpenGraph} />
         </div>
       </div>
 
@@ -520,6 +539,7 @@ export default function App() {
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}
             onOpenManageVaults={openManageVaults}
+            onOpenGraph={onOpenGraph}
             isMac={isMac}
             onToggleSidebar={toggleLeftSidebar}
           />
@@ -535,6 +555,7 @@ export default function App() {
           onChangeActiveLeaf={setActiveLeafId}
           onTreeChange={onTreeChange}
           onUpdateFileContent={onUpdateFileContent}
+          onOpenFileByPath={onOpenFileByPath}
           leftSidebarCollapsed={leftCollapsed}
           onToggleLeftSidebar={toggleLeftSidebar}
           rightSidebarCollapsed={rightCollapsed}

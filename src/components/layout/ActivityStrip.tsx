@@ -8,7 +8,7 @@ import {
 } from "../common/Icons";
 
 /** Vertical icon column for the L-strip body. */
-export function LeftActivityStrip() {
+export function LeftActivityStrip({ onOpenGraph }: { onOpenGraph?: () => void }) {
   const icons = [
     { Icon: IcGraph, title: "Graph view" },
     { Icon: IcGrid, title: "Canvas" },
@@ -20,7 +20,7 @@ export function LeftActivityStrip() {
   return (
     <div className="lstrip-body">
       {icons.map(({ Icon, title }, i) => (
-        <button key={i} className="icon-btn lstrip-icon" title={title}>
+        <button key={i} className="icon-btn lstrip-icon" title={title} onClick={title === "Graph view" ? onOpenGraph : undefined}>
           <Icon />
         </button>
       ))}
