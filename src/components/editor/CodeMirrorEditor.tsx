@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EditorState, Transaction } from "@codemirror/state";
+import { EditorState, RangeSetBuilder, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -21,6 +21,7 @@ import {
   historyKeymap,
   indentWithTab,
 } from "@codemirror/commands";
+import type { Command } from "@codemirror/view";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import {
@@ -254,6 +255,64 @@ const wikilinkStyle = EditorView.baseTheme({
   },
 });
 
+// ── List hanging indent ──
+// Why: Obsidian renders nested ordered/bulleted lists with hanging indent
+// so wrapped continuation lines align UNDER the content (not flush at
+// column 0). With plain `EditorView.lineWrapping`, our wraps fell back
+// to column 0, which made deeply-nested items look "sidelined" — the
+// nested markers blurred into the parent's wrap text.
+// How: for each line matching `^(\s*)([-*+]|\d+[.)])(\s+)`, add a line
+// decoration with `padding-left: Xch; text-indent: -Xch;` where X is the
+// full prefix width. The two declarations cancel for the first visual
+// line (so source still reads normally) but `padding-left` keeps every
+// wrapped continuation indented by X chars, giving the hanging-indent
+// shape. `ch` is the width of "0" in the active font — close enough to
+// the actual char width of `1. ` / `   1. `.
+// NOTE: We do NOT draw indent guide lines here — Obsidian only draws
+// them in reading mode (the source editor stays clean). The preview-mode
+// guide lives in EditorArea.css under `.md-preview li:has(> ul, > ol)`.
+const LIST_LINE_RE = /^(\s*)([-*+]|\d+[.)])(\s+)/;
+
+const listHangingIndent = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+    update(update: { docChanged: boolean; viewportChanged: boolean; view: EditorView }) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = this.build(update.view);
+      }
+    }
+    build(view: EditorView): DecorationSet {
+      const builder = new RangeSetBuilder<Decoration>();
+      for (const { from, to } of view.visibleRanges) {
+        let pos = from;
+        while (pos <= to) {
+          const line = view.state.doc.lineAt(pos);
+          const m = LIST_LINE_RE.exec(line.text);
+          if (m) {
+            const prefix = m[0].length; // leading WS + marker + trailing WS
+            builder.add(
+              line.from,
+              line.from,
+              Decoration.line({
+                attributes: {
+                  style: `padding-left:${prefix}ch;text-indent:-${prefix}ch;`,
+                },
+              }),
+            );
+          }
+          if (line.to + 1 <= pos) break; // safety against zero-width loops
+          pos = line.to + 1;
+        }
+      }
+      return builder.finish();
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
 // ── Wikilink autocomplete ──
 function collectAllFiles(
   nodes: FileNode[],
@@ -313,6 +372,96 @@ function wikilinkCompletions(
     filter: false,
   };
 }
+
+// ── List-aware Tab / Shift-Tab ──
+// Plain `indentWithTab` adds 2 spaces, which is NOT enough to nest a
+// CommonMark list under `1. ` (the parent's content column is 3, so the
+// child must be indented ≥3 spaces). It also doesn't renumber ordered
+// lists, so the visible source stays `2.` after the indent and reads
+// wrong. These two commands fix both:
+//   • Tab on a list line: indent by (marker + trailing whitespace) chars
+//     (e.g. 3 for `1. `, 2 for `- `), and renumber ordered markers to `1.`
+//     (the Obsidian convention for a new nested sublist).
+//   • Shift-Tab on a list line: dedent by the same unit, capped by current
+//     indent. Numbering is left alone on dedent (re-sequencing the new
+//     parent's siblings is out of scope and would surprise the user).
+// Both return `false` when no selected line is a list item, so the keymap
+// falls through to `indentWithTab` for code / prose.
+const LIST_MARKER_RE = /^(\s*)([-*+]|\d+[.)])(\s+)/;
+
+function selectedLineNumbers(state: EditorState): number[] {
+  const set = new Set<number>();
+  for (const r of state.selection.ranges) {
+    const fromLine = state.doc.lineAt(r.from).number;
+    const toLine = state.doc.lineAt(r.to).number;
+    for (let n = fromLine; n <= toLine; n++) set.add(n);
+  }
+  return [...set];
+}
+
+const indentListLine: Command = (view) => {
+  const { state } = view;
+  type Hit = {
+    line: ReturnType<typeof state.doc.line>;
+    leadingWs: string;
+    marker: string;
+    trailingWs: string;
+  };
+  const hits: Hit[] = [];
+  for (const n of selectedLineNumbers(state)) {
+    const line = state.doc.line(n);
+    const m = LIST_MARKER_RE.exec(line.text);
+    if (!m) return false; // Mixed selection — let indentWithTab handle it.
+    hits.push({ line, leadingWs: m[1], marker: m[2], trailingWs: m[3] });
+  }
+  if (hits.length === 0) return false;
+
+  const changes = hits.map(({ line, leadingWs, marker, trailingWs }) => {
+    const indent = " ".repeat(marker.length + trailingWs.length);
+    if (/^\d+/.test(marker)) {
+      // Restart ordered numbering to 1 (e.g. "2." -> "1.", "10)" -> "1)").
+      const suffix = marker.replace(/^\d+/, "");
+      const newMarker = "1" + suffix;
+      return {
+        from: line.from,
+        to: line.from + leadingWs.length + marker.length,
+        insert: indent + leadingWs + newMarker,
+      };
+    }
+    return { from: line.from, insert: indent };
+  });
+
+  view.dispatch({ changes, userEvent: "input.indent" });
+  return true;
+};
+
+const dedentListLine: Command = (view) => {
+  const { state } = view;
+  type Hit = {
+    line: ReturnType<typeof state.doc.line>;
+    leadingWs: string;
+    marker: string;
+    trailingWs: string;
+  };
+  const hits: Hit[] = [];
+  for (const n of selectedLineNumbers(state)) {
+    const line = state.doc.line(n);
+    const m = LIST_MARKER_RE.exec(line.text);
+    if (!m) return false;
+    if (m[1].length === 0) return false; // Already at column 0 — no-op.
+    hits.push({ line, leadingWs: m[1], marker: m[2], trailingWs: m[3] });
+  }
+  if (hits.length === 0) return false;
+
+  const changes = hits.map(({ line, leadingWs, marker, trailingWs }) => {
+    const unit = marker.length + trailingWs.length;
+    const remove = Math.min(unit, leadingWs.length);
+    return { from: line.from, to: line.from + remove };
+  });
+
+  view.dispatch({ changes, userEvent: "delete.dedent" });
+  return true;
+};
 
 // ── Component ──
 type Props = {
@@ -387,6 +536,10 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         EditorView.lineWrapping,
         keymap.of([
           ...closeBracketsKeymap,
+          // List-aware Tab handlers go BEFORE indentWithTab so they take
+          // precedence on list lines and fall through everywhere else.
+          { key: "Tab", run: indentListLine },
+          { key: "Shift-Tab", run: dedentListLine },
           ...defaultKeymap,
           ...historyKeymap,
           indentWithTab,
@@ -403,6 +556,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         syntaxHighlighting(markdownHighlight),
         wikilinkPlugin,
         wikilinkStyle,
+        listHangingIndent,
         autocompletion({
           override: [wikilinkCompletions],
           activateOnTyping: true,

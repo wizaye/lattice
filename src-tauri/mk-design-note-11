@@ -1,0 +1,29 @@
+# design-note-11
+
+Related: [[design-note-12]] · [[design-note-1]] · [[design-note-2]]
+
+
+petgraph analytics is for nerd stats as we discussed and up next im planning all these features 
+1. calendar implementation
+	1. outlook+ (teams) --> Meet notes in markdown (from entra ai endpoints) (m365 subscription) enterprise version of this software
+	2. Cal.com --> open source devs who can create account, integrate their cal.com calendar and manage events
+	3. google calendar or apple calendar --> for most of the users (students and normal users)
+2. Journalling approach --> logseq --> By date--> integrate into calendar
+3. Canvas --> Done partially but more tools 
+4. Plugins --> 
+	1. BYOC --> Default batteries --> Vault syncing, password based e2e encryption
+	2. BYOM --> Ai Based deep integration into the app to get all context (either ollama or apis (GPT, claude, gemini etc))
+5. CLI --> Hard core senior engineers --> Ratataoui ui for rust (hyper fast stuff)
+6. By default all files in vault are version controlled and save --> create a file tree how to commit is question (intelligent commit messages as normal users dont know about git vcs)
+7. Databases --> Scratch impl (make a design plan for this)
+
+For students and Academic use (default software)
+1. IEEE, springer out of box formatting (latex stuff, precompile also we can take it up as plugin )
+2. Standardise way of exporting canvas into proper digrams that people can use in research papers
+3. graph visualisation of PKM
+4. journaling
+
+
+Onboarding journey needs to be built for installer and for first time app boot up
+1. Import from obsidian, logseq, notion, siyuan (can take up as plugin if user starts as fresh)
+End 2 end file encryption (for enterprise users and for users who need security)
