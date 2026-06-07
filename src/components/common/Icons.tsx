@@ -239,6 +239,11 @@ export const IcCloseAll = codicon("close-all");
 export const IcNewFile = codicon("new-file");
 export const IcEye = codicon("eye");
 export const IcCode = codicon("code");
+// "Slides view" doc-menu entry. codicons doesn't ship a dedicated
+// presentation/slideshow glyph; `play-circle` is the closest semantic
+// fit (overlap with media playback is acceptable since slide decks
+// behave like step-through playback).
+export const IcSlideshow = codicon("play-circle");
 export const IcLinkExternal = codicon("link-external");
 export const IcFileAdd = codicon("file-add");
 export const IcFilePdf = codicon("file-pdf");

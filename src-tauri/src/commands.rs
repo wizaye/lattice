@@ -25,6 +25,18 @@ pub fn read_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("Failed to read file '{}': {}", path, e))
 }
 
+/// Read the raw bytes of a file (used for binary previews — currently
+/// just `.pdf`, but the same shape works for any binary asset).
+///
+/// We return `Vec<u8>` instead of base64-encoding here because Tauri 2's
+/// v2 IPC wire format already handles `Vec<u8>` as a typed payload
+/// without an extra encode/decode hop, and pdfjs accepts a `Uint8Array`
+/// directly. Keeping it raw avoids the ~33% size bloat from base64.
+#[tauri::command]
+pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    fs::read(&path).map_err(|e| format!("Failed to read file '{}': {}", path, e))
+}
+
 /// Write content to a file at the given path, creating it if it doesn't exist.
 #[tauri::command]
 pub fn write_file(path: String, content: String) -> Result<(), String> {

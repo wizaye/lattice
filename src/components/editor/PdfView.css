@@ -1,0 +1,139 @@
+/* ── PDF viewer (PdfView.tsx) ────────────────────────────────────────
+   Layout shape mirrors Chrome/Edge's native PDF reader: a thin top
+   toolbar (title + pagination + zoom) and a single scroll container
+   below, with stacked pages.  We don't use a third-party reader
+   chrome (pdf.js's bundled `web/viewer.html`) because:
+     (a) it ships its own theme/translations/icons we'd have to
+         override globally, and
+     (b) it expects to run as a standalone page, not embedded in a
+         pane.
+   Building the chrome ourselves is ~80 LOC and keeps the look
+   consistent with the rest of Lattice. */
+
+.pdf-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-app);
+  color: var(--text-normal);
+}
+
+.pdf-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-header);
+  font-size: 12px;
+  user-select: none;
+}
+
+.pdf-title {
+  font-weight: 600;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.pdf-spacer {
+  flex: 0 0 12px;
+}
+
+.pdf-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.pdf-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+
+.pdf-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pdf-page-indicator,
+.pdf-zoom-label {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  min-width: 56px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.pdf-zoom-label {
+  min-width: 44px;
+}
+
+.pdf-scroll {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px 0 24px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  /* Subtle dark surround so the white pages "pop" — same trick Chrome
+     uses.  Keep dark even in light theme; readers expect pages to
+     contrast with their tray. */
+  background: #2b2b2b;
+}
+
+[data-theme="light"] .pdf-scroll {
+  /* Lighter neutral tray in light theme — full Chrome-dark would
+     fight the rest of the chrome. */
+  background: #555a60;
+}
+
+.pdf-page-wrap {
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* PdfView sets explicit pixel `width`/`height` on the inner canvas
+     so the wrap just lets it size naturally. */
+}
+
+.pdf-page-canvas {
+  display: block;
+  max-width: 100%;
+  /* Hint to the browser to render the canvas with crisp pixels — we
+     over-sample by DPR in JS, then scale down via `style.width`.
+     Without this Chromium sometimes uses bilinear filtering and
+     fonts look faintly blurry. */
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.pdf-loading,
+.pdf-empty,
+.pdf-error {
+  color: var(--text-muted);
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.pdf-error {
+  color: var(--text-error, #e57373);
+  max-width: 480px;
+  line-height: 1.5;
+}

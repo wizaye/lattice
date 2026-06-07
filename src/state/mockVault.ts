@@ -141,6 +141,123 @@ RCM - external library which is no longer a part
     kind: "canvas",
     content: SAMPLE_CANVAS,
   },
+  // ── Demo: KaTeX math rendering in reading mode ─────────────────────
+  // Showcases inline (`$E=mc^2$`) and display (`$$ ... $$`) syntax,
+  // including a few tricky constructs (matrices, integrals, aligned
+  // environments) so visual regressions in KaTeX upgrades are easy
+  // to spot. Pure markdown — no special tab handling needed.
+  {
+    id: "file-math-demo",
+    name: "Math Demo.md",
+    kind: "file",
+    content: `# Math Demo
+
+Inline math: Einstein's famous $E = mc^2$, the Euler identity $e^{i\\pi} + 1 = 0$, and a quick fraction $\\tfrac{1}{2}$.
+
+## Display
+
+A Gaussian integral:
+
+$$
+\\int_{-\\infty}^{\\infty} e^{-x^{2}}\\,dx = \\sqrt{\\pi}
+$$
+
+A simple matrix:
+
+$$
+\\begin{bmatrix}
+  a & b \\\\
+  c & d
+\\end{bmatrix}
+\\cdot
+\\begin{bmatrix} x \\\\ y \\end{bmatrix}
+=
+\\begin{bmatrix} ax + by \\\\ cx + dy \\end{bmatrix}
+$$
+
+Aligned equations:
+
+$$
+\\begin{aligned}
+  (a+b)^2 &= a^2 + 2ab + b^2 \\\\
+  (a-b)^2 &= a^2 - 2ab + b^2
+\\end{aligned}
+$$
+
+Hover this link with Ctrl held: [[Slides Demo]] — the popover renders math too.
+`,
+  },
+  // ── Demo: Reveal.js slides view ────────────────────────────────────
+  // Demonstrates horizontal slides (`---` on its own line), vertical
+  // sub-slides (`--`), code blocks (which must NOT trigger slide
+  // splits even when they contain `---`), and KaTeX inside slides.
+  // To see this, open the note then use the doc-header's More menu
+  // (⋯) → Slides view.
+  {
+    id: "file-slides-demo",
+    name: "Slides Demo.md",
+    kind: "file",
+    content: `# Welcome
+
+Slides view powered by **Reveal.js**.
+
+Open the **⋯** menu in the doc header and pick *Slides view*.
+
+---
+
+## How it works
+
+- \`---\` on its own line  →  new horizontal slide
+- \`--\` on its own line  →  vertical sub-slide
+- Code fences are safe — \`---\` inside a fence does NOT split
+
+---
+
+## Vertical example
+
+Press ↓ to step down into nested slides.
+
+--
+
+### Sub-slide A
+
+This is a vertical sub-slide. ↑/↓ to navigate.
+
+--
+
+### Sub-slide B
+
+Another sub-slide.
+
+---
+
+## Math works too
+
+Inline: $E = mc^2$.
+
+Display:
+
+$$
+\\int_0^{\\infty} e^{-x^{2}}\\,dx = \\frac{\\sqrt{\\pi}}{2}
+$$
+
+---
+
+## Code blocks
+
+\`\`\`ts
+// The triple-dash below would NOT be treated as a slide break
+// because we track fence state line-by-line.
+const banner = "---";
+\`\`\`
+
+---
+
+## That's it
+
+Press **F** for fullscreen, **?** for keyboard shortcuts.
+`,
+  },
 ];
 
 /** Flatten the vault for fast id-based lookup. */

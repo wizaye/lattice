@@ -54,6 +54,28 @@ export async function readFile(path: string): Promise<string> {
   return invoke<string>("read_file", { path });
 }
 
+/**
+ * Read a binary file (e.g. `.pdf`) as a `Uint8Array`.
+ *
+ * The Tauri command (`read_file_bytes`) returns a `Vec<u8>` which the
+ * `@tauri-apps/api/core` IPC layer ships as a JS `number[]` over the
+ * v2 wire format.  We immediately wrap it in a typed array so call
+ * sites can hand it to pdfjs / Blob without further conversion.
+ *
+ * Falls back to `null` when called against the mock vault sentinel
+ * (no real filesystem path to read from) so consumers can branch on
+ * `result ?? base64Source` without try/catch noise.
+ */
+export async function readFileBytes(path: string): Promise<Uint8Array> {
+  const raw = await invoke<number[] | ArrayBuffer | Uint8Array>(
+    "read_file_bytes",
+    { path },
+  );
+  if (raw instanceof Uint8Array) return raw;
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  return new Uint8Array(raw as number[]);
+}
+
 export async function writeFile(path: string, content: string): Promise<void> {
   return invoke<void>("write_file", { path, content });
 }
@@ -106,11 +128,20 @@ export async function getBacklinks(vaultPath: string, activeFilePath: string): P
  */
 export function toFrontendTree(backendNodes: BackendFileNode[]): FileNode[] {
   return backendNodes.map((node) => {
+    // Order matters: folder check first (it has no extension at all),
+    // then specific extensions, then the markdown/text default.  We
+    // route `.pdf` to its own `kind` because PdfView reads the file
+    // as binary bytes — the markdown editor's text path would
+    // mojibake the body and the dirty-tracker would mark it dirty on
+    // first paint.
+    const lower = node.name.toLowerCase();
     const kind = node.isDir
-      ? "folder" as const
-      : node.name.endsWith(".canvas")
-        ? "canvas" as const
-        : "file" as const;
+      ? ("folder" as const)
+      : lower.endsWith(".canvas")
+        ? ("canvas" as const)
+        : lower.endsWith(".pdf")
+          ? ("pdf" as const)
+          : ("file" as const);
 
     const result: FileNode = {
       id: node.path, // absolute path IS the identity

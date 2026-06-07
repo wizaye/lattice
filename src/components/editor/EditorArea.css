@@ -727,6 +727,26 @@
   color: var(--text-normal);
 }
 
+/*
+ * Slides view wrapper. Same flex-fill contract as
+ * .markdown-preview-host so Reveal.js can measure its container —
+ * without `flex: 1` + `min-height: 0` the host collapses to 0
+ * because every child uses absolute positioning (Reveal positions
+ * each `<section>` with `position: absolute`), giving the flow no
+ * intrinsic height to propagate back up. The `display: flex` lets
+ * the inner `.slides-view` stretch to the host's full size. We
+ * deliberately do NOT set `overflow: auto` — Reveal handles its own
+ * fullscreen / scroll behaviour and we don't want a scrollbar on
+ * the host clipping the deck.
+ */
+.markdown-slides-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-primary);
+  color: var(--text-normal);
+}
+
 .md-preview {
   max-width: 720px;
   margin: 0 auto;

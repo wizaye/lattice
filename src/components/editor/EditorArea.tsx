@@ -24,6 +24,10 @@ import {
 // Markdown component kept for future reading-mode toggle
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { PdfView } from "./PdfView";
+import "./PdfView.css";
+import { SlidesView } from "./SlidesView";
+import "./SlidesView.css";
 import { CanvasView } from "../canvas/CanvasView";
 import { EmptyTab } from "./EmptyTab";
 import { setDragImageBelowCursor } from "../common/dragGhost";
@@ -62,6 +66,7 @@ import {
   IcPlus,
   IcReplace,
   IcSearch,
+  IcSlideshow,
   IcSplit,
   IcSplitH,
   IcSplitV,
@@ -241,6 +246,12 @@ export function EditorArea(props: Props) {
   // (MarkdownPreview). Lives at the EditorArea root because it needs
   // the split-tree mutator; the doc-header button in `Pane` just calls
   // this through props.
+  //
+  // Only toggles between "source" ↔ "preview". "slides" is set via
+  // `onSetViewMode` from the DocMoreMenu — keeping the binary toggle
+  // here means the doc-header IcBook/IcEdit button stays predictable
+  // (one click flips between exactly two states) and never traps the
+  // user in slides mode by accident.
   const onToggleViewMode = useCallback(
     (leafId: string, tabId: string) => {
       setLeaf(leafId, (leaf) => ({
@@ -249,9 +260,26 @@ export function EditorArea(props: Props) {
           t.id === tabId
             ? {
                 ...t,
+                // From "slides" we leave back to "source" — the most
+                // common intent is "give me the editor back".
                 viewMode: t.viewMode === "preview" ? "source" : "preview",
               }
             : t,
+        ),
+      }));
+    },
+    [setLeaf],
+  );
+
+  // Set a tab to a specific view mode. Used by the DocMoreMenu where
+  // we expose three discrete entries (Reading / Source / Slides) — a
+  // toggle isn't enough because there are three states.
+  const onSetViewMode = useCallback(
+    (leafId: string, tabId: string, mode: "source" | "preview" | "slides") => {
+      setLeaf(leafId, (leaf) => ({
+        ...leaf,
+        tabs: leaf.tabs.map((t) =>
+          t.id === tabId ? { ...t, viewMode: mode } : t,
         ),
       }));
     },
@@ -668,6 +696,7 @@ export function EditorArea(props: Props) {
         onDropOnTabbar={handleDropOnTabbar}
         onUpdateFileContent={onUpdateFileContent}
         onToggleViewMode={onToggleViewMode}
+        onSetViewMode={onSetViewMode}
         onCopyFilePath={onCopyFilePath}
         onRevealFileInNav={onRevealFileInNav}
         onShowInExplorer={onShowInExplorer}
@@ -731,6 +760,13 @@ type RenderProps = {
    *  (MarkdownPreview). Implemented at the EditorArea root because
    *  that's where the split-tree mutator (setLeaf) lives. */
   onToggleViewMode: (leafId: string, tabId: string) => void;
+  /** Set a tab's view mode to a specific value. Used by the
+   *  DocMoreMenu's 3-state Reading/Source/Slides switcher. */
+  onSetViewMode: (
+    leafId: string,
+    tabId: string,
+    mode: "source" | "preview" | "slides",
+  ) => void;
   /** File-action callbacks used by both DocMoreMenu (3-dot in the
    *  doc header) and the tab right-click TabContextMenu. They live
    *  at the root because they need access to the split tree and the
@@ -901,6 +937,7 @@ function Pane(props: PaneProps) {
     onDropOnTabbar,
     onUpdateFileContent,
     onToggleViewMode,
+    onSetViewMode,
     onCopyFilePath,
     onRevealFileInNav,
     onShowInExplorer,
@@ -928,6 +965,10 @@ function Pane(props: PaneProps) {
   // whenever the active tab is a canvas document.
   const activeFile = activeTab?.fileId ? vault.get(activeTab.fileId) : null;
   const isCanvasTab = activeFile?.kind === "canvas";
+  // PDF tabs render a non-editable pdfjs viewer (PdfView). Hide the
+  // markdown-specific doc chrome (reading-mode toggle, DocMoreMenu
+  // items like Find/Replace) since none of them apply.
+  const isPdfTab = activeFile?.kind === "pdf";
   // Graph view is a virtual tab (`fileId === "__graph__"`) with no
   // backing FileNode. It needs a graph-specific More menu (Split
   // right / Split down / Copy screenshot / Bookmark) rather than the
@@ -1168,7 +1209,7 @@ function Pane(props: PaneProps) {
           <SplitMenuButton
             onSplit={(edge) => onSplit(leaf.id, edge)}
           />
-          {activeTab?.fileId && !isCanvasTab && activeTab.fileId !== "__graph__" && (
+          {activeTab?.fileId && !isCanvasTab && !isPdfTab && activeTab.fileId !== "__graph__" && (
             <button
               className="icon-btn tiny"
               title={activeTab.viewMode === "preview" ? "Edit mode" : "Reading mode"}
@@ -1190,6 +1231,7 @@ function Pane(props: PaneProps) {
             !isCanvasTab && (
               <DocMoreMenu
                 hasFile={!!activeTab?.fileId}
+                isPdf={isPdfTab}
                 onClose={
                   activeTab
                     ? () => onCloseTab(leaf.id, activeTab.id)
@@ -1198,6 +1240,11 @@ function Pane(props: PaneProps) {
                 onToggleViewMode={
                   activeTab
                     ? () => onToggleViewMode(leaf.id, activeTab.id)
+                    : undefined
+                }
+                onSetViewMode={
+                  activeTab
+                    ? (mode) => onSetViewMode(leaf.id, activeTab.id, mode)
                     : undefined
                 }
                 viewMode={activeTab?.viewMode ?? "source"}
@@ -1268,6 +1315,33 @@ function Pane(props: PaneProps) {
                       onUpdateFileContent?.(file.id, json)
                     }
                   />
+                );
+              }
+              // PDF — non-editable pdfjs viewer. For mock-vault entries
+              // we pass the embedded base64 string (mock vault has no
+              // backing disk path); for real vaults we pass the file
+              // id as the absolute path, and PdfView calls the
+              // `read_file_bytes` Tauri IPC to slurp the binary.
+              if (file.kind === "pdf") {
+                return (
+                  <PdfView
+                    filePath={file.id}
+                    base64={file.content}
+                    fileName={file.name}
+                  />
+                );
+              }
+              // Slides view — Reveal.js-driven slide deck rendered
+              // from the same markdown that source/reading mode show.
+              // Slide breaks: `---` (horizontal), `--` (vertical).
+              // Checked BEFORE the "preview" branch because both are
+              // markdown view modes and we want slides to win when
+              // selected.
+              if (activeTab.viewMode === "slides") {
+                return (
+                  <div className="markdown-slides-host">
+                    <SlidesView source={file.content ?? ""} />
+                  </div>
                 );
               }
               // Default: markdown editor view. Tab-level `viewMode`
@@ -1736,8 +1810,10 @@ function TabbarOptionsMenu({
  */
 function DocMoreMenu({
   hasFile,
+  isPdf = false,
   onClose,
   onToggleViewMode,
+  onSetViewMode,
   viewMode,
   onCopyPath,
   onRevealInNav,
@@ -1747,9 +1823,18 @@ function DocMoreMenu({
   onDelete,
 }: {
   hasFile: boolean;
+  /** True when the active tab is a PDF — suppresses the
+   *  Reading/Source/Slides view-mode triple (PDFs have a fixed,
+   *  non-editable viewer). All file-action items (Rename, Copy path,
+   *  etc.) still show through. */
+  isPdf?: boolean;
   onClose?: () => void;
   onToggleViewMode?: () => void;
-  viewMode?: "source" | "preview";
+  /** Discrete view-mode setter — used by the 3 mode-switcher items
+   *  (Reading / Source / Slides). When omitted those items fall back
+   *  to `onToggleViewMode` for the binary case. */
+  onSetViewMode?: (mode: "source" | "preview" | "slides") => void;
+  viewMode?: "source" | "preview" | "slides";
   onCopyPath?: () => void;
   onRevealInNav?: () => void;
   onShowInExplorer?: () => void;
@@ -1810,36 +1895,64 @@ function DocMoreMenu({
                 <IcLink className="split-menu-icon" />
                 <span>Backlinks in document</span>
               </button>
-              <button
-                role="menuitem"
-                className="split-menu-item"
-                onClick={
-                  onToggleViewMode && viewMode === "source"
-                    ? run(onToggleViewMode)
-                    : stub
-                }
-              >
-                <IcEye className="split-menu-icon" />
-                <span>Reading view</span>
-                {viewMode === "preview" && (
-                  <IcCheck className="split-menu-trailing" />
-                )}
-              </button>
-              <button
-                role="menuitem"
-                className="split-menu-item"
-                onClick={
-                  onToggleViewMode && viewMode === "preview"
-                    ? run(onToggleViewMode)
-                    : stub
-                }
-              >
-                <IcCode className="split-menu-icon" />
-                <span>Source mode</span>
-                {viewMode === "source" && (
-                  <IcCheck className="split-menu-trailing" />
-                )}
-              </button>
+              {!isPdf && (
+                <>
+                  <button
+                    role="menuitem"
+                    className="split-menu-item"
+                    onClick={
+                      onSetViewMode
+                        ? run(() => onSetViewMode("preview"))
+                        : onToggleViewMode && viewMode === "source"
+                          ? run(onToggleViewMode)
+                          : stub
+                    }
+                  >
+                    <IcEye className="split-menu-icon" />
+                    <span>Reading view</span>
+                    {viewMode === "preview" && (
+                      <IcCheck className="split-menu-trailing" />
+                    )}
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="split-menu-item"
+                    onClick={
+                      onSetViewMode
+                        ? run(() => onSetViewMode("source"))
+                        : onToggleViewMode && viewMode === "preview"
+                          ? run(onToggleViewMode)
+                          : stub
+                    }
+                  >
+                    <IcCode className="split-menu-icon" />
+                    <span>Source mode</span>
+                    {viewMode === "source" && (
+                      <IcCheck className="split-menu-trailing" />
+                    )}
+                  </button>
+                  {/* Slides view — only meaningful when `onSetViewMode`
+                      is wired (the discrete setter knows how to land
+                      on "slides"; the binary toggle can only flip
+                      preview↔source). Disabled gracefully otherwise. */}
+                  <button
+                    role="menuitem"
+                    className="split-menu-item"
+                    onClick={
+                      onSetViewMode
+                        ? run(() => onSetViewMode("slides"))
+                        : stub
+                    }
+                    disabled={!onSetViewMode}
+                  >
+                    <IcSlideshow className="split-menu-icon" />
+                    <span>Slides view</span>
+                    {viewMode === "slides" && (
+                      <IcCheck className="split-menu-trailing" />
+                    )}
+                  </button>
+                </>
+              )}
               <div className="split-menu-divider" role="separator" />
             </>
           )}

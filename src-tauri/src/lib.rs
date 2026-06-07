@@ -11,6 +11,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             commands::read_file,
+            commands::read_file_bytes,
             commands::write_file,
             commands::list_directory,
             commands::create_file,
