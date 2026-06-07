@@ -87,7 +87,12 @@ pub fn rename_entry(old_path: String, new_path: String) -> Result<(), String> {
 }
 
 
-/// Delete a file.
+/// Delete a file — sends it to the system recycle bin via the
+/// `trash` crate so the user can recover from an accidental click.
+/// On Windows uses IFileOperation, on macOS NSWorkspace, on Linux
+/// the freedesktop trash spec.  If the OS has no trash (e.g.
+/// headless Linux), surfaces the error so the caller can decide
+/// whether to fall back to a hard delete.
 #[tauri::command]
 pub fn delete_file(path: String) -> Result<(), String> {
     let p = Path::new(&path);
@@ -97,10 +102,12 @@ pub fn delete_file(path: String) -> Result<(), String> {
     if p.is_dir() {
         return Err(format!("Path is a directory, use delete_folder: '{}'", path));
     }
-    fs::remove_file(&path).map_err(|e| format!("Failed to delete file '{}': {}", path, e))
+    trash::delete(p).map_err(|e| format!("Failed to recycle file '{}': {}", path, e))
 }
 
-/// Delete a folder and all its contents recursively.
+/// Delete a folder and all its contents — sends to the recycle bin
+/// (recursive containers are recycled in one operation on every
+/// supported OS).  Recovery is identical to `delete_file`.
 #[tauri::command]
 pub fn delete_folder(path: String) -> Result<(), String> {
     let p = Path::new(&path);
@@ -110,7 +117,7 @@ pub fn delete_folder(path: String) -> Result<(), String> {
     if !p.is_dir() {
         return Err(format!("Path is not a directory: '{}'", path));
     }
-    fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete folder '{}': {}", path, e))
+    trash::delete(p).map_err(|e| format!("Failed to recycle folder '{}': {}", path, e))
 }
 
 fn build_tree(dir: &Path) -> Result<Vec<FileNode>, std::io::Error> {

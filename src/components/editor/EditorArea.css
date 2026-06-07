@@ -872,3 +872,32 @@
 .md-preview strong { font-weight: 700; color: var(--text-normal); }
 .md-preview em { font-style: italic; }
 .md-preview del { text-decoration: line-through; color: var(--text-muted); }
+
+/* ── KaTeX math (markdown-it-texmath) ──────────────────────────────
+   katex.min.css is imported globally from MarkdownPreview.tsx, but it
+   ships fixed dark text that fights both light + dark themes.  We
+   re-tint glyphs to inherit, give display equations breathing room
+   inside the prose flow, and let block math scroll horizontally on
+   narrow viewports instead of wrapping (which would split sub/super
+   scripts mid-glyph and look wrong). */
+.md-preview .katex,
+.md-preview .katex-display {
+  color: var(--text-normal);
+}
+.md-preview .katex-display {
+  /* Center, breathe vertically, and isolate from neighbouring text. */
+  margin: 0.9em 0;
+  padding: 0.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* Inline math sits on the text baseline; keep it from inflating line
+   height the way KaTeX's default 1.2 line-height does. */
+.md-preview .katex { line-height: 1.2; }
+/* Soft-failure rendering: texmath wraps malformed math in
+   `<span class="katex-error">` when `throwOnError: false`.  Make those
+   visually distinct without screaming. */
+.md-preview .katex-error {
+  color: var(--text-error, #e57373);
+  border-bottom: 1px dotted var(--text-error, #e57373);
+}

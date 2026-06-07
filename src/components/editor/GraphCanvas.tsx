@@ -182,12 +182,26 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const animationTimerRef = useRef<number | null>(null);
 
     /**
-     * Update the selection refs and nudge the simulation so the next
-     * frame redraws with the new highlight state. We use a tiny alpha
-     * bump (not a full reheat) — enough to wake the render loop without
-     * making nodes jump around.
+     * Update the selection refs so the next render frame redraws with
+     * the new highlight state.
+     *
+     * `silent` (default false): when true, do NOT reheat the d3-force
+     * simulation. Used by the HOVER path — hover state changes already
+     * trigger force-graph's internal canvas repaint, so we only need
+     * the new refs to be in place; reheating would re-energise the
+     * physics, which (with our loose velocityDecay=0.15) causes nodes
+     * to drift away from the cursor, which flips hover-target, which
+     * triggers another reheat — an orbit feedback loop.
+     *
+     * When called from CLICK / DRAG (silent=false), we DO reheat
+     * briefly so the in-flight simulation snaps the highlighted node's
+     * neighbourhood into a slightly more compact configuration. The
+     * setTimeout cools down again within 600ms.
      */
-    const applySelection = (selectedId: string | null) => {
+    const applySelection = (
+      selectedId: string | null,
+      opts?: { silent?: boolean },
+    ) => {
       const connected = new Set<string>();
       if (selectedId && lastDataRef.current) {
         connected.add(selectedId);
@@ -204,6 +218,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       }
       selectedNodeIdRef.current = selectedId;
       connectedNodeIdsRef.current = connected;
+      if (opts?.silent) return;
       const g = instanceRef.current;
       if (!g) return;
       // Wake the render loop just enough to repaint with the new
@@ -414,7 +429,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           if (draggingRef.current) return;
           el.style.cursor = node ? "pointer" : "grab";
           if (!lockedNodeIdRef.current) {
-            applySelection(node?.id ?? null);
+            // Silent: never reheat the d3-force simulation from a
+            // hover event.  Reheating + loose velocityDecay (0.15)
+            // makes nodes drift away from the cursor, which then
+            // flips the hover target, which reheats again — an
+            // unbounded orbit feedback loop that manifested as the
+            // graph "spinning under the cursor".  force-graph's
+            // internal renderer already calls a repaint on hover-
+            // state change, so we get the dim/highlight pass for
+            // free without touching the simulation.
+            applySelection(node?.id ?? null, { silent: true });
           }
         })
         .onNodeDrag((node: any) => {

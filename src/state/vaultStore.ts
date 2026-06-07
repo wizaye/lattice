@@ -66,6 +66,19 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         fileTree: tree,
         flatVault: flattenVault(tree),
       });
+      // ── VCS auto-refresh ─────────────────────────────────────────
+      // refreshTree is called after create / rename / delete ops, so
+      // it's the right place to nudge the VCS panel for tree-shape
+      // changes (saves go through editorStore.saveFile separately).
+      // Lazy dynamic import to avoid a circular module-load between
+      // vaultStore → vcsStore → (anything that imports vaultStore at
+      // top level). The debounce in vcsStore swallows the double
+      // refresh that happens right after vault-open (App.tsx also
+      // kicks one off when vaultPath changes).
+      if (vaultPath !== "__mock__") {
+        const { useVcsStore } = await import("./vcsStore");
+        void useVcsStore.getState().refresh(vaultPath);
+      }
     } catch (err) {
       console.error("Failed to refresh tree:", err);
     }

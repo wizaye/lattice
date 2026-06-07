@@ -58,7 +58,7 @@ const SAMPLE_CANVAS = JSON.stringify(
   "\t",
 );
 
-export const VAULT_NAME = "StressVault";
+export const VAULT_NAME = "Az-Cim";
 
 /**
  * The sentinel "file id" for the GraphView virtual tab. EditorArea
@@ -71,59 +71,6 @@ export const VAULT_NAME = "StressVault";
  * everywhere.)
  */
 export const GRAPH_TAB_FILE_ID = "__graph__";
-
-// ── Synthetic stress vault ─────────────────────────────────────────
-// Five topical folders, twelve notes each (60 total), with each note
-// linking to its three folder-mates and the first note of each folder
-// linking to the next folder's hub. This produces a graph with five
-// tight clusters connected by sparse "ambassador" edges — much more
-// interesting than a handful of demo notes, and it surfaces force-
-// graph bugs (sizing, focus, drag, wand re-grow) that only manifest
-// on larger networks.
-const TOPICS = ["ai", "arch", "web", "devops", "design"] as const;
-const NOTES_PER_TOPIC = 12;
-
-function buildStressNotes(): { tree: FileNode[]; nodes: FileNode[] } {
-  const folders: FileNode[] = [];
-  const allNotes: FileNode[] = [];
-  TOPICS.forEach((topic, ti) => {
-    const children: FileNode[] = [];
-    for (let i = 0; i < NOTES_PER_TOPIC; i++) {
-      const name = `${topic}-note-${i + 1}`;
-      // 3 intra-cluster wikilinks: next, +2, +3 (mod 12). Gives every
-      // node in-cluster degree ≥ 3 so the cluster stays connected.
-      const links: string[] = [];
-      for (let k = 1; k <= 3; k++) {
-        const j = (i + k) % NOTES_PER_TOPIC;
-        links.push(`[[${topic}-note-${j + 1}]]`);
-      }
-      // Inter-cluster ambassador: first note of each folder also
-      // links to the first note of the next folder, so the five
-      // clusters form a loop in the graph.
-      if (i === 0) {
-        const next = TOPICS[(ti + 1) % TOPICS.length];
-        links.push(`[[${next}-note-1]]`);
-      }
-      const content = `# ${name}\n\nRelated: ${links.join(" \u00b7 ")}\n`;
-      children.push({
-        id: `mk-${name}`,
-        name: `${name}.md`,
-        kind: "file",
-        content,
-      });
-    }
-    folders.push({
-      id: `mk-folder-${topic}`,
-      name: topic,
-      kind: "folder",
-      children,
-    });
-    allNotes.push(...children);
-  });
-  return { tree: folders, nodes: allNotes };
-}
-
-const { tree: STRESS_TREE } = buildStressNotes();
 
 export const initialVault: FileNode[] = [
   // Hard-coded graph entry pinned at the top of the file tree. It is
@@ -138,12 +85,56 @@ export const initialVault: FileNode[] = [
     name: "Graph View",
     kind: "graph",
   },
-  // The synthetic 60-note network — five folders of twelve notes each,
-  // wired via [[wikilinks]] to produce a multi-cluster graph that
-  // exercises every interaction (drag-focus, click-focus, wand re-
-  // grow, zoom/pan). The starter canvas remains available so the
-  // canvas editor still has something to open.
-  ...STRESS_TREE,
+  {
+    id: "folder-clippings",
+    name: "Clippings",
+    kind: "folder",
+    children: [
+      {
+        id: "file-clip-1",
+        name: "Welcome to Lattice",
+        kind: "file",
+        content: `# Welcome to Lattice
+
+A tiny **Obsidian-style** workspace built on Tauri + React.
+
+- Drag files from the sidebar into the editor
+- Drop a tab on the edge of a pane to split
+- Resize the [[Oversubscriptions]] sidebars from either side
+- Toggle the activity bar icons to collapse panels
+- Open **Project Map.canvas** to try the new infinite canvas
+
+Have a look at [[Rahul's 1 on 1]] for a sample note.`,
+      },
+    ],
+  },
+  {
+    id: "file-oversubscriptions",
+    name: "Oversubscriptions",
+    kind: "file",
+    content: `# Oversubscriptions
+
+Notes on capacity planning and oversubscription strategy.
+
+See also: [[Rahul's 1 on 1]]`,
+  },
+  {
+    id: "file-rahul-1on1",
+    name: "Rahul's 1 on 1",
+    kind: "file",
+    content: `# Rahul's 1 on 1
+
+You can refer Oversubscriptions here - [[Oversubscriptions]]
+
+
+RCM - external library which is no longer a part
+
+
+[[DQos]]
+
+[[ResourceCentralClient.cs]]
+`,
+  },
   {
     id: "file-project-map-canvas",
     name: "Project Map.canvas",

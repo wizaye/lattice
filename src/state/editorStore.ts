@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { readFile, writeFile } from "../lib/tauriApi";
+import { useVaultStore } from "./vaultStore";
+import { useVcsStore } from "./vcsStore";
 
 interface EditorState {
   /** Map of file path → loaded content. */
@@ -52,6 +54,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const next = new Set(get().dirtyFiles);
       next.delete(path);
       set({ dirtyFiles: next });
+      // ── VCS auto-refresh ───────────────────────────────────────────
+      // Every successful disk-write nudges the VCS panel so the
+      // working-changes list reflects reality without the user having
+      // to click Refresh.  We read the vault path lazily (via
+      // getState()) instead of subscribing — the editor store has no
+      // business re-rendering on vault changes.  The VCS store
+      // debounces (~250ms), so a flurry of saves coalesces into one
+      // git status walk.  Skip when no vault is open or when we're on
+      // the mock-vault sentinel (no real filesystem to scan).
+      const vaultPath = useVaultStore.getState().vaultPath;
+      if (vaultPath && vaultPath !== "__mock__") {
+        void useVcsStore.getState().refresh(vaultPath);
+      }
     } catch (err) {
       console.error("Failed to save file:", err);
     }

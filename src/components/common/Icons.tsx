@@ -79,6 +79,10 @@ export const IcClose = codicon("close");
 export const IcFolder = codicon("folder");
 export const IcSearch = codicon("search");
 export const IcBookmark = codicon("bookmark");
+// `source-control` is the VS Code SCM glyph — a circle-on-a-branch
+// that reads as "git" without being repo-specific (we plan to support
+// GitHub, GDrive, OneDrive, Dropbox, etc. through one BYOC pipe).
+export const IcSourceControl = codicon("source-control");
 
 // Left activity strip (Obsidian core plugins)
 export const IcGraph = codicon("type-hierarchy");
@@ -216,6 +220,18 @@ export const IcSyncIgnored = codicon("sync-ignored");
 export const IcMerge = codicon("git-merge");
 export const IcCheck = codicon("check");
 export const IcFileSubmodule = codicon("file-submodule");
+
+// VCS / BYOC — Changes panel iconography
+export const IcGitCommit = codicon("git-commit");
+export const IcGitBranch = codicon("git-branch");
+export const IcGitPullRequest = codicon("git-pull-request");
+export const IcDiff = codicon("diff");
+export const IcDiscard = codicon("discard");
+export const IcCloud = codicon("cloud");
+export const IcCloudUpload = codicon("cloud-upload");
+export const IcCloudDownload = codicon("cloud-download");
+export const IcRefresh = codicon("refresh");
+export const IcSparkle = codicon("sparkle"); // AI-assisted commit message
 
 // Tabbar "View options" + markdown "More options" menus
 export const IcStack = codicon("layers");

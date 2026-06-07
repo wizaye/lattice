@@ -11,6 +11,17 @@ type Props = {
    *  renders as a red "no sync" indicator. Once we hook up an actual
    *  sync backend this becomes a real status feed. */
   synced?: boolean;
+  /** Number of uncommitted working-tree changes from the VCS store.
+   *  When > 0 we paint a small badge over the sync icon so the user
+   *  knows there's local work that hasn't been snapshotted yet — same
+   *  affordance as VS Code's source-control bottom bar dot. */
+  dirtyCount?: number;
+  /** Fired when the user clicks the trailing sync indicator. App wires
+   *  this to open the Changes view in the left sidebar (and expand the
+   *  sidebar if it's currently collapsed) so the pill is the canonical
+   *  shortcut into VCS + BYOC controls. Optional so DEV/test renders
+   *  of the pill don't have to thread it through. */
+  onClickSync?: () => void;
 };
 
 /**
@@ -34,11 +45,17 @@ export function StatusPill({
   words,
   characters,
   synced = false,
+  dirtyCount = 0,
+  onClickSync,
 }: Props) {
   if (!hasOpenFile) {
     return (
       <div className="status-pill empty">
-        <SyncIndicator synced={synced} />
+        <SyncIndicator
+          synced={synced}
+          dirtyCount={dirtyCount}
+          onClick={onClickSync}
+        />
       </div>
     );
   }
@@ -60,7 +77,11 @@ export function StatusPill({
         <span className="sp-num">{characters}</span>
         <span className="sp-lbl">characters</span>
       </span>
-      <SyncIndicator synced={synced} />
+      <SyncIndicator
+        synced={synced}
+        dirtyCount={dirtyCount}
+        onClick={onClickSync}
+      />
     </div>
   );
 }
@@ -69,17 +90,49 @@ export function StatusPill({
  * Trailing sync indicator. Kept as a sibling component so both the
  * empty pill and the populated pill render the exact same button —
  * single source of truth for hover / color / icon swap behavior.
+ *
+ * Clicking the indicator hands off to `onClick` (typically the App-
+ * level handler that opens the Changes view in the left sidebar).
+ * Title copy reflects both the underlying sync state AND the action,
+ * so users get a hint about what the click will do.
+ *
+ * When `dirtyCount > 0` we overlay a tiny badge bubble on the icon —
+ * the same visual cue VS Code uses on its source-control activity-bar
+ * entry. We cap the rendered number at 9+ so it never bloats the pill.
  */
-function SyncIndicator({ synced }: { synced: boolean }) {
-  const title = synced ? "Sync up to date" : "Sync not configured";
+function SyncIndicator({
+  synced,
+  dirtyCount,
+  onClick,
+}: {
+  synced: boolean;
+  dirtyCount: number;
+  onClick?: () => void;
+}) {
+  const status = synced ? "Sync up to date" : "Sync not configured";
+  const dirtyHint =
+    dirtyCount > 0
+      ? ` — ${dirtyCount} uncommitted change${dirtyCount === 1 ? "" : "s"}`
+      : "";
+  const title = onClick
+    ? `${status}${dirtyHint} — open Changes`
+    : `${status}${dirtyHint}`;
   return (
     <button
       type="button"
-      className={`sp-icon sync${synced ? " ok" : " off"}`}
+      className={`sp-icon sync${synced ? " ok" : " off"}${
+        dirtyCount > 0 ? " has-dirty" : ""
+      }`}
       title={title}
       aria-label={title}
+      onClick={onClick}
     >
       {synced ? <IcSync /> : <IcSyncIgnored />}
+      {dirtyCount > 0 && (
+        <span className="sp-dirty-badge" aria-hidden>
+          {dirtyCount > 9 ? "9+" : dirtyCount}
+        </span>
+      )}
     </button>
   );
 }

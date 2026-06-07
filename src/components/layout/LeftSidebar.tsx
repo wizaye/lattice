@@ -12,16 +12,24 @@ import {
   IcMore,
   IcNewFolder,
   IcPanelLeft,
+  IcRefresh,
   IcSearch,
   IcSortAZ,
+  IcSourceControl,
   IcSun,
 } from "../common/Icons";
 import { FileTree, type InlineEditState } from "../filetree/FileTree";
 import { useVaultStore } from "../../state/vaultStore";
+import { useVcsStore } from "../../state/vcsStore";
 import { VaultPickerMenu } from "../modals/VaultPickerMenu";
+import { ChangesPanel } from "./ChangesPanel";
 import "./LeftSidebar.css";
 
-export type LeftView = "files" | "search" | "bookmarks";
+// `changes` is the VCS + BYOC home (see docs/impl-v2.md §4 + §5.2).
+// It's deep-linked from the status-pill sync indicator so the same
+// surface is reachable from both the sidebar header and the bottom-
+// right corner of the app — single source of truth for "sync state".
+export type LeftView = "files" | "search" | "bookmarks" | "changes";
 
 type Props = {
   vaultName: string;
@@ -73,6 +81,12 @@ export function LeftSidebar({
   ].filter((v, i, a) => a.indexOf(v) === i);
 
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  // Subscribe to VCS state ONLY for the bits the sidebar header /
+  // toolbar need.  Subscribing to the whole status object would cause
+  // pointless re-renders on every commit; we only need the spinner
+  // flag here.
+  const vcsRefreshing = useVcsStore((s) => s.refreshing);
+  const vcsRefresh = useVcsStore((s) => s.refresh);
   const [inlineEdit, setInlineEdit] = useState<InlineEditState>(null);
   return (
     <>
@@ -98,6 +112,13 @@ export function LeftSidebar({
           onClick={() => onChangeView("bookmarks")}
         >
           <IcBookmark />
+        </button>
+        <button
+          className={`icon-btn${view === "changes" ? " active" : ""}`}
+          title="Changes (version control & sync)"
+          onClick={() => onChangeView("changes")}
+        >
+          <IcSourceControl />
         </button>
         <div className="ls-header-drag" data-tauri-drag-region />
         {isMac && (
@@ -153,6 +174,30 @@ export function LeftSidebar({
               </button>
             </>
           )}
+          {view === "changes" && (
+            <>
+              <span className="ls-toolbar-label">Changes</span>
+              <span className="ls-toolbar-spacer" />
+              <button
+                className="icon-btn tiny"
+                title={
+                  vcsRefreshing
+                    ? "Refreshing…"
+                    : "Refresh version-control status"
+                }
+                // Disable only when there's literally no vault to scan;
+                // the spinner is for cosmetics — the store debounces
+                // so spamming the click is harmless.
+                onClick={() => vaultPath && void vcsRefresh(vaultPath)}
+                disabled={!vaultPath || vaultPath === "__mock__"}
+              >
+                <IcRefresh />
+              </button>
+              <button className="icon-btn tiny" title="More">
+                <IcMore />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Active view — keyed on `view` so React remounts the subtree
@@ -177,6 +222,7 @@ export function LeftSidebar({
             {view === "bookmarks" && (
               <div className="ls-empty">No bookmarks yet.</div>
             )}
+            {view === "changes" && <ChangesPanel />}
           </div>
         </div>
       </div>

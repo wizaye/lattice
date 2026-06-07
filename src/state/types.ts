@@ -42,10 +42,9 @@ export type Tab = {
    */
   viewMode?: "source" | "preview";
   /**
-   * When `true` the tab is pinned: the X button is replaced with a
-   * pin icon, "Close all" / "Close others" skip it, and pinned tabs
-   * sort to the left of unpinned ones. Mirrors Obsidian behaviour.
-   * Undefined ≡ false so older serialized layouts keep working.
+   * Pinned tabs survive "close others" / middle-click-close and show
+   * a pin icon in place of the × button. Optional so older serialized
+   * layouts (and freshly opened tabs) stay unpinned by default.
    */
   isPinned?: boolean;
 };

@@ -1,0 +1,180 @@
+/* GitGraph — SVG DAG overlay + commit rows.
+ *
+ * Layout: the wrapper is `position: relative` so the absolutely-
+ * positioned SVG hangs from the top-left, and the `.gg-rows` list
+ * gets pushed right via inline `margin-left` set by the React
+ * component (matches the SVG's width).
+ *
+ * Designed to live inside `.cp-section-body` — inherits the panel's
+ * font-size + colour tokens.
+ */
+
+.gg {
+  position: relative;
+  width: 100%;
+  /* Horizontal scroll only when lanes overflow the panel — vertical
+     scrolling is owned by the outer panel. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+
+/* SVG sits in the absolute top-left.  pointer-events:none so the
+   `<li>` rows underneath catch hover + click — otherwise dots would
+   eat the click events and the row title wouldn't fire. */
+.gg-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  /* Scroll along with the rows when the panel is overflowing. */
+  z-index: 1;
+}
+
+/* Lane lines — drawn behind dots.  Slight transparency so when two
+   lanes cross, the eye reads "both" rather than "the foreground one
+   replaced the background one". */
+.gg-lane-line {
+  opacity: 0.85;
+}
+
+/* Connector lines / beziers — same colour as the parent's lane.
+   Slightly less prominent so the dots stay the focal point. */
+.gg-conn {
+  opacity: 0.9;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Commit dots */
+.gg-dot {
+  transition: r 120ms ease;
+}
+.gg-dot-merge {
+  /* Merge commits get a fill-then-stroke ring to read as "joiner". */
+  fill: var(--bg-1, #1e1e1e);
+  stroke-width: 2;
+}
+.gg-dot-head {
+  /* Current HEAD gets a thicker accent ring + brighter stroke. */
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent, #4a9eff) 60%, transparent));
+}
+.gg-dot-selected {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent, #4a9eff) 80%, transparent));
+}
+
+/* Right-side row list */
+.gg-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.gg-row {
+  display: grid;
+  /* refs | sha | summary | avatar | time */
+  grid-template-columns: auto 48px minmax(0, 1fr) 16px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+}
+.gg-row:hover,
+.gg-row-hover {
+  background: color-mix(in srgb, var(--text-primary, #ddd) 6%, transparent);
+}
+.gg-row-selected {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 14%, transparent);
+}
+.gg-row-selected:hover {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 20%, transparent);
+}
+
+/* Ref pills (branches / tags / HEAD) — inline before the sha. */
+.gg-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.gg-ref {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  font-family: var(--font-text);
+}
+/* HEAD-pointing local — bright accent so the user always knows where
+   they are. */
+.gg-ref-head {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 22%, transparent);
+  color: var(--accent, #4a9eff);
+  border-color: color-mix(in srgb, var(--accent, #4a9eff) 40%, transparent);
+}
+/* Plain local branch (not HEAD) — muted blue. */
+.gg-ref-branch {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 12%, transparent);
+  color: color-mix(in srgb, var(--accent, #4a9eff) 90%, white);
+}
+/* Remote-tracking — neutral grey to de-emphasise. */
+.gg-ref-remote {
+  background: color-mix(in srgb, var(--text-faint, #888) 14%, transparent);
+  color: var(--text-muted, #aaa);
+  font-style: italic;
+}
+/* Tag — amber, matches the "modified" glyph palette. */
+.gg-ref-tag {
+  background: color-mix(in srgb, #ffb74d 18%, transparent);
+  color: #ffb74d;
+}
+
+.gg-sha {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-faint, #888);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gg-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, #ddd);
+}
+
+/* Avatar — small initials chip; deterministic colour from the
+   author's email (set inline by the React component). */
+.gg-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0;
+  flex-shrink: 0;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.gg-time {
+  font-size: 11px;
+  color: var(--text-faint, #888);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

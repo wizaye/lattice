@@ -22,19 +22,27 @@ import { LeftActivityStrip } from "./components/layout/ActivityStrip";
 import { EditorArea } from "./components/editor/EditorArea";
 import { WindowControls } from "./components/layout/TopBar";
 import { StatusPill } from "./components/layout/StatusPill";
+import { useVcsStore, selectDirtyCount } from "./state/vcsStore";
+import {
+  type BacklinkGroup,
+  type MentionGroup,
+  type OutgoingRef,
+  type HeadingRef,
+  collectHeadings,
+  collectOutgoing,
+  collectTags,
+  computeBacklinks,
+  computeUnlinkedMentions,
+  countMentions,
+  countWords,
+} from "./lib/backlinks";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import {
   ManageVaultsModal,
   type Vault,
 } from "./components/modals/ManageVaultsModal";
 import { IcPanelLeft } from "./components/common/Icons";
-import { HoverPreview } from "./components/common/HoverPreview";
 import { useDragResize } from "./hooks/useDragResize";
-import { OnboardingShell } from "./components/onboarding/OnboardingShell";
-import {
-  shouldShowOnboarding,
-  useOnboardingStore,
-} from "./components/onboarding/state/onboardingStore";
 
 const LEFT_MIN = 160;
 const LEFT_MAX = 520;
@@ -61,30 +69,13 @@ function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
   };
 }
 
-function countWords(md: string): { words: number; characters: number } {
-  const stripped = md
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`[^`]*`/g, "")
-    .replace(/\[\[([^\]]+)\]\]/g, "$1")
-    .replace(/[#>*_`\-]/g, "")
-    .replace(/\[(.*?)\]\(.*?\)/g, "$1");
-  const words = stripped.split(/\s+/).filter(Boolean).length;
-  const characters = md.length;
-  return { words, characters };
-}
-
-// Backlinks engine + companion collectors live in `src/lib/backlinks.ts`.
-// Inlining them here turned out to be a footgun — the old `collectBacklinks`
-// compared the raw wikilink body to the target name, so `[[Foo|Alias]]`
-// and `[[Foo#anchor]]` never matched. The new module also surfaces snippets
-// + occurrence counts + unlinked-mentions, which the right sidebar uses.
-import {
-  collectHeadings,
-  collectOutgoing,
-  collectTags,
-  computeBacklinks,
-  computeUnlinkedMentions,
-} from "./lib/backlinks";
+// NOTE: word counting, backlinks, outgoing, tags, and headings all live in
+// `src/lib/backlinks.ts`. Inlining them here historically caused two bugs:
+//   1. `BacklinkRef[]` shape leaked into RightSidebar (which expects
+//      `BacklinkGroup[]` with snippets) and threw at render → blank screen.
+//   2. `[[Target|Alias]]` and `[[Target#anchor]]` never matched because
+//      the comparison used the raw match group instead of the cleaned
+//      target. Keep all collectors in the shared module.
 
 export default function App() {
   // ---- Vault & active file -------------------------------------------------
@@ -94,16 +85,14 @@ export default function App() {
   const vaultNodes = useVaultStore((s) => s.fileTree);
   const vault = useVaultStore((s) => s.flatVault);
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  void vaultPath; // reserved for future backend backlinks call
   const vaultName = useVaultStore((s) => s.vaultName) || "Lattice";
 
-  // ── Onboarding wizard mount flag ──────────────────────────────────────
-  // Shows the fullscreen onboarding shell on first launch (or any time
-  // `onboarding.completedAt` is null). The shell mounts on top of the
-  // rest of the app; the existing UI still renders underneath so users
-  // can faintly see what they're setting up — matches the design in
-  // docs/onboarding-journey.md §5.4.
-  const onboardingVisible = useOnboardingStore(shouldShowOnboarding);
+  // Live VCS dirty-count for the status-pill badge. Stays at 0 until
+  // the first refresh resolves (and falls back to 0 when no vault is
+  // open). Subscribing via the dedicated selector keeps re-renders
+  // limited to changes in the count specifically — the rest of the
+  // VcsStore (history, errors, etc.) doesn't touch App.
+  const dirtyCount = useVcsStore(selectDirtyCount);
 
   // ── Bootstrap a mock vault on first mount ─────────────────────────────
   // Without this, the file tree is empty on startup (nobody has picked a
@@ -148,18 +137,6 @@ export default function App() {
     }));
   }, []);
 
-  // Dev-only escape hatch so Playwright/manual scripts can swap the
-  // mock vault for a big synthetic dataset to stress-test the graph
-  // view. The window assignment is a no-op outside DEV (Vite replaces
-  // the import.meta.env.DEV check at build time).
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    (window as any).__lattice = {
-      vault: useVaultStore,
-      editor: useEditorStore,
-    };
-  }, []);
-
   // Debounce timer ref for auto-saving file content to disk
   /** Write back the new body for a file (markdown or canvas). Updates
    *  the in-memory vault tree + editor store, and marks it dirty. */
@@ -188,6 +165,24 @@ export default function App() {
       if (first) setActiveLeafId(first.id);
     }
   }, [tree, activeLeafId]);
+
+  // ── Kick off VCS status refresh whenever the active vault changes.
+  // We skip the synthetic mock-vault sentinel (no real filesystem) and
+  // call `reset()` so any stale status from a previously-open vault is
+  // cleared instantly — otherwise the sidebar/pill briefly show numbers
+  // from the OLD vault while the new refresh is in flight.
+  //
+  // Re-runs only when `vaultPath` itself changes (NOT every render),
+  // so the cost is essentially zero for normal use. The refresh call
+  // is debounced inside `vcsStore` to coalesce rapid switches.
+  useEffect(() => {
+    const store = useVcsStore.getState();
+    if (!vaultPath || vaultPath === "__mock__") {
+      store.reset();
+      return;
+    }
+    void store.refresh(vaultPath);
+  }, [vaultPath]);
 
   const onTreeChange = useCallback((next: SplitTree | null) => {
     if (next) setTree(next);
@@ -362,17 +357,22 @@ export default function App() {
     return f && f.kind === "file" ? f : null;
   }, [tree, activeLeafId, vault]);
 
-  const backlinks = useMemo(() => {
+  const backlinks = useMemo<BacklinkGroup[]>(() => {
     if (!activeFile) return [];
     return computeBacklinks(activeFile, vault);
   }, [activeFile, vault]);
 
-  const unlinked = useMemo(() => {
+  // Unlinked mentions: plain-text mentions of the active file's basename
+  // in other notes that aren't yet `[[wikilinks]]`. Shown in a second
+  // section under Backlinks in the right sidebar; the engine caps the
+  // workload (max 50 files, 5 snippets each) so even huge vaults stay
+  // responsive on the main thread.
+  const unlinked = useMemo<MentionGroup[]>(() => {
     if (!activeFile) return [];
     return computeUnlinkedMentions(activeFile, vault);
   }, [activeFile, vault]);
 
-  const outgoing = useMemo(() => {
+  const outgoing = useMemo<OutgoingRef[]>(() => {
     if (!activeFile || !activeFile.content) return [];
     return collectOutgoing(activeFile.content);
   }, [activeFile]);
@@ -382,7 +382,7 @@ export default function App() {
     return collectTags(activeFile.content);
   }, [activeFile]);
 
-  const headings = useMemo(() => {
+  const headings = useMemo<HeadingRef[]>(() => {
     if (!activeFile || !activeFile.content) return [];
     return collectHeadings(activeFile.content);
   }, [activeFile]);
@@ -391,14 +391,10 @@ export default function App() {
     if (!activeFile)
       return { backlinks: 0, words: 0, characters: 0 } as const;
     const { words, characters } = countWords(activeFile.content ?? "");
-    // Status pill shows total mention count (not just file count) so
-    // it matches the number a user actually sees in the right sidebar.
-    const totalMentions = backlinks.reduce(
-      (n, g) => n + g.snippets.length,
-      0,
-    );
     return {
-      backlinks: totalMentions,
+      // Status pill shows TOTAL mention count, not file count. Matches
+      // Obsidian's behaviour and the rs-stats strip in the sidebar.
+      backlinks: countMentions(backlinks),
       words,
       characters,
     };
@@ -465,35 +461,6 @@ export default function App() {
     if (file) openFile(file);
   }, [vault, openFile]);
 
-  /** Open a file by its node id — used by the right sidebar backlink list. */
-  const openFileById = useCallback(
-    (fileId: string) => {
-      const f = vault.get(fileId);
-      if (f && f.kind === "file") openFile(f);
-    },
-    [vault, openFile],
-  );
-
-  /**
-   * Open a file by its display name (without extension). Used by the
-   * outgoing-links panel — clicking `[[Some Note]]` should land in
-   * that note even though the panel only knows the name.
-   */
-  const openFileByName = useCallback(
-    (name: string) => {
-      const needle = name.toLowerCase().replace(/\.(md|markdown)$/i, "");
-      let found: FileNode | null = null;
-      vault.forEach((node) => {
-        if (found) return;
-        if (node.kind !== "file") return;
-        const base = node.name.toLowerCase().replace(/\.(md|markdown)$/i, "");
-        if (base === needle) found = node;
-      });
-      if (found) openFile(found);
-    },
-    [vault, openFile],
-  );
-
   const onOpenGraph = useCallback(() => {
     const newTab: Tab = {
       id: uid("tab"),
@@ -554,21 +521,6 @@ export default function App() {
     window.addEventListener("lattice-open-wikilink", handler);
     return () => window.removeEventListener("lattice-open-wikilink", handler);
   }, [openFile]);
-
-  // ---- Open file by id (hover-preview expand button, etc.) ---------------
-  // HoverPreview dispatches this when the user clicks the expand icon
-  // in the popover header. Same pattern as `lattice-open-wikilink` so
-  // the singleton doesn't need a prop-drilled opener.
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      const id = detail?.fileId as string | undefined;
-      if (!id) return;
-      openFileById(id);
-    };
-    window.addEventListener("lattice-open-file-by-id", handler);
-    return () => window.removeEventListener("lattice-open-file-by-id", handler);
-  }, [openFileById]);
 
   // ---- Keyboard shortcuts -------------------------------------------------
   useEffect(() => {
@@ -697,17 +649,35 @@ export default function App() {
           <RightSidebar
             hasOpenFile={activeFile !== null}
             activeFileName={
-              activeFile
-                ? activeFile.name.replace(/\.(md|markdown)$/i, "")
-                : null
+              activeFile ? activeFile.name.replace(/\.(md|markdown)$/i, "") : null
             }
             backlinks={backlinks}
             unlinked={unlinked}
             outgoing={outgoing}
             tags={tags}
             headings={headings}
-            onOpenFile={openFileById}
-            onOpenByName={openFileByName}
+            onOpenFile={(fileId) => {
+              const f = vault.get(fileId);
+              if (f) openFile(f);
+            }}
+            onOpenByName={(name) => {
+              // Resolve a wikilink target name (no extension) to a vault
+              // file by case-insensitive basename match. Mirrors the
+              // logic in the `lattice-open-wikilink` handler so clicks
+              // from the outgoing-links list behave like real wikilink
+              // clicks in the editor.
+              const target = name.toLowerCase();
+              let found: FileNode | null = null;
+              vault.forEach((node) => {
+                if (found) return;
+                if (node.kind === "folder") return;
+                const base = node.name
+                  .replace(/\.md$/i, "")
+                  .replace(/\.canvas$/i, "");
+                if (base.toLowerCase() === target) found = node;
+              });
+              if (found) openFile(found);
+            }}
           />
         </div>
       </div>
@@ -718,6 +688,16 @@ export default function App() {
         backlinks={metrics.backlinks}
         words={metrics.words}
         characters={metrics.characters}
+        dirtyCount={dirtyCount}
+        onClickSync={() => {
+          // Clicking the status-pill sync indicator is the canonical
+          // shortcut into the Changes view (VCS + BYOC). If the left
+          // sidebar is collapsed, expand it first so the panel is
+          // actually visible — otherwise the click would silently
+          // switch a hidden view.
+          if (leftCollapsed) setLeftCollapsed(false);
+          setLeftView("changes");
+        }}
       />
 
       {/* ===== Floating window controls (always at top right) ===== */}
@@ -765,15 +745,6 @@ export default function App() {
         onOpenExistingVault={onOpenExistingVault}
         onClose={closeManageVaults}
       />
-
-      {/* ===== Onboarding wizard (fullscreen, only on first launch) ===== */}
-      {onboardingVisible && <OnboardingShell />}
-
-      {/* ===== Obsidian-style Ctrl+hover preview popover (singleton).
-              Mounts once near the root and uses delegated mousemove
-              + data-file-id attributes on tabs / tree rows to find
-              its hover targets. See HoverPreview.tsx for the contract. */}
-      <HoverPreview />
     </div>
   );
 }
