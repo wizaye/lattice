@@ -211,20 +211,92 @@ pub fn quartz_plugin_install(dir: &Path) -> Result<(), String> {
 /// publishing wizard.
 pub fn ensure_scaffold(dir: &Path) -> Result<(), String> {
     let plugins_dir = dir.join(".quartz").join("plugins");
-    if plugins_dir.is_dir() {
-        return Ok(());
-    }
-    quartz_create(dir)?;
-    quartz_plugin_install(dir)?;
     if !plugins_dir.is_dir() {
-        return Err(format!(
-            "quartz create reported success but {} still does not exist — \
-             try deleting {} and re-running the publishing wizard.",
-            plugins_dir.display(),
-            dir.display()
-        ));
+        quartz_create(dir)?;
+        quartz_plugin_install(dir)?;
+        if !plugins_dir.is_dir() {
+            return Err(format!(
+                "quartz create reported success but {} still does not exist — \
+                 try deleting {} and re-running the publishing wizard.",
+                plugins_dir.display(),
+                dir.display()
+            ));
+        }
     }
+    // Always re-apply the globby patch — cheap, idempotent, and
+    // protects against `npm install` having reset the file.
+    patch_globby_disable_gitignore(dir)?;
     Ok(())
+}
+
+/// Patch `<dir>/quartz/util/glob.ts` so its `globby(...)` call uses
+/// `gitignore: false` instead of `gitignore: true`.
+///
+/// **Why this matters.** Lattice installs Quartz at
+/// `<vault>/.lattice/publish/quartz/` and copies the user's notes
+/// into `<quartz>/content/` before each build.  Most vaults have a
+/// root-level `.gitignore` that ignores `.lattice/` (Lattice itself
+/// writes that file during onboarding to keep its state out of the
+/// user's git history).  Quartz's default file discovery walks UP
+/// from `content/` looking for `.gitignore` files and, per git's own
+/// spec, finds `.lattice/` excluded — which means every `.md` under
+/// our content dir is treated as ignored.  Result: `Found 0 input
+/// files` and a 404 on the preview homepage.
+///
+/// Lattice already controls publication scope via its own
+/// `exclude.patterns` (see `exclude.rs`), so Quartz's gitignore
+/// integration is redundant noise.  We disable it by string-replacing
+/// the single `gitignore: true,` line in `quartz/util/glob.ts`.  The
+/// patch is idempotent — running it on an already-patched file is a
+/// no-op.
+fn patch_globby_disable_gitignore(dir: &Path) -> Result<(), String> {
+    let glob_ts = dir.join("quartz").join("util").join("glob.ts");
+    let contents = match std::fs::read_to_string(&glob_ts) {
+        Ok(s) => s,
+        // Missing file → scaffold isn't where we expect; let the
+        // caller's downstream build error surface a clearer message.
+        Err(_) => return Ok(()),
+    };
+    if contents.contains("gitignore: false") {
+        return Ok(()); // already patched
+    }
+    let Some(patched) = contents.replace_one("gitignore: true,", "gitignore: false,")
+    else {
+        // Quartz upstream changed the line — log via stderr (the
+        // command output captured by tauri dev) and continue.  The
+        // user will see "Found 0 input files" and can file an issue.
+        eprintln!(
+            "lattice: could not patch {} — `gitignore: true,` not found; \
+             Quartz may have changed its glob.ts upstream",
+            glob_ts.display()
+        );
+        return Ok(());
+    };
+    std::fs::write(&glob_ts, patched)
+        .map_err(|e| format!("failed to write patched {}: {}", glob_ts.display(), e))?;
+    Ok(())
+}
+
+/// Local helper — `str::replace` always returns a `String`, so the
+/// caller can't tell whether anything matched.  We need that signal
+/// to know whether to bail with the "upstream changed" message.
+///
+/// Named `replace_one` (not `replace_first`) because the latter is
+/// in the process of being added to stdlib — see rust-lang/rust
+/// issue #48919 — and we'd rather not race the name collision.
+trait ReplaceOne {
+    fn replace_one(&self, needle: &str, replacement: &str) -> Option<String>;
+}
+
+impl ReplaceOne for str {
+    fn replace_one(&self, needle: &str, replacement: &str) -> Option<String> {
+        let idx = self.find(needle)?;
+        let mut out = String::with_capacity(self.len() + replacement.len());
+        out.push_str(&self[..idx]);
+        out.push_str(replacement);
+        out.push_str(&self[idx + needle.len()..]);
+        Some(out)
+    }
 }
 
 /// Spawn the command, wait up to `timeout`, and report failure with

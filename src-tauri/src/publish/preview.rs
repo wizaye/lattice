@@ -203,9 +203,7 @@ fn handle_request(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
     };
 
     if !target.exists() {
-        return req.respond(
-            Response::from_string("Not Found").with_status_code(StatusCode(404)),
-        );
+        return serve_404(req, root);
     }
 
     // Directory → serve index.html if present.
@@ -216,9 +214,7 @@ fn handle_request(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
     };
 
     if !file_path.is_file() {
-        return req.respond(
-            Response::from_string("Not Found").with_status_code(StatusCode(404)),
-        );
+        return serve_404(req, root);
     }
 
     // Sniff Content-Type from extension.
@@ -267,6 +263,34 @@ fn resolve_target(root: &Path, url_path: &str) -> Result<PathBuf, ()> {
         }
     }
     Ok(out)
+}
+
+/// Reply with Quartz's own `404.html` page (with HTTP 404) when it
+/// exists, so the user sees a styled page with the Explorer sidebar
+/// instead of a plain-text "Not Found".  This mirrors what
+/// Netlify/GitHub Pages do for static sites and means the preview
+/// behaves like production.  Falls back to plaintext when the file
+/// can't be read (e.g. Quartz didn't emit one for some reason).
+fn serve_404(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
+    let custom = root.join("404.html");
+    if let Ok(bytes) = std::fs::read(&custom) {
+        let len = bytes.len();
+        let response = Response::from_data(bytes)
+            .with_status_code(StatusCode(404))
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
+                    .unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Content-Length"[..], len.to_string().as_bytes())
+                    .unwrap(),
+            );
+        return req.respond(response);
+    }
+    req.respond(Response::from_string("Not Found").with_status_code(StatusCode(404)))
 }
 
 #[cfg(test)]
