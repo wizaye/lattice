@@ -19,6 +19,8 @@
 //!   * Every IPC DTO is `#[serde(rename_all = "camelCase")]` to match the
 //!     existing BYOC / VCS conventions.
 
+pub mod compile;
+pub mod md_to_tex;
 pub mod toml;
 pub mod templates;
 
@@ -387,8 +389,28 @@ pub async fn paper_status(paper: String) -> Result<PaperStatus, String> {
 
 #[tauri::command]
 pub async fn paper_compile(paper: String) -> Result<String, String> {
-    let _ = paper;
-    Err("paper_compile is not yet implemented (lands in phase C1 — Typst engine wiring)".to_string())
+    if paper.is_empty() {
+        return Err("paper path is empty".to_string());
+    }
+    let paper_abs = PathBuf::from(&paper);
+    if !paper_abs.is_dir() {
+        return Err(format!("paper folder not found: {}", paper_abs.display()));
+    }
+    // Defensive: a paper is identified by the presence of
+    // .lattice/paper.toml.  Reject anything else so we don't compile
+    // arbitrary folders the UI may pass by mistake.
+    if !paper_abs.join(".lattice").join("paper.toml").is_file() {
+        return Err(format!(
+            "no .lattice/paper.toml under {} \u{2014} not a paper folder",
+            paper_abs.display()
+        ));
+    }
+    // The compile pipeline is CPU-bound (LaTeX shell-out) so we run
+    // it on the blocking pool to keep the Tauri event loop responsive.
+    let pdf = tokio::task::spawn_blocking(move || compile::compile(&paper_abs))
+        .await
+        .map_err(|e| format!("paper_compile join error: {e}"))??;
+    Ok(pdf.to_string_lossy().to_string())
 }
 
 #[tauri::command]

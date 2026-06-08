@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IcClose, IcRefresh } from "../common/Icons";
+import { IcClose, IcLinkExternal, IcRefresh } from "../common/Icons";
 import { usePublishStore } from "../../state/publishStore";
 import type { HostId } from "../../lib/publish";
 import { publishInit } from "../../lib/publish";
@@ -29,13 +29,15 @@ type Props = {
 
 const MOCK_VAULT = "__mock__";
 
-type Step = 0 | 1 | 2 | 3;
+type Step = 0 | 1 | 2 | 3 | 4;
 const STEPS: { label: string }[] = [
   { label: "Environment" },
   { label: "Host" },
   { label: "Template" },
   { label: "Connect" },
+  { label: "Preview" },
 ];
+const LAST_STEP: Step = 4;
 
 export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   const probe = usePublishStore((s) => s.probe);
@@ -44,6 +46,14 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   const refreshProbe = usePublishStore((s) => s.refreshProbe);
   const refreshRegistries = usePublishStore((s) => s.refreshRegistries);
   const refreshStatus = usePublishStore((s) => s.refreshStatus);
+  // Subscribe to the per-vault row directly so step 4 re-renders on
+  // `busy`/`lastError`/`previewUrl` changes driven by the store.
+  // `__mock__` is fine as a key — `rowFor` returns the empty row and
+  // the build/preview buttons stay disabled.
+  const row = usePublishStore((s) => (vaultPath ? s.rows[vaultPath] : undefined));
+  const buildAction = usePublishStore((s) => s.build);
+  const previewAction = usePublishStore((s) => s.preview);
+  const previewStopAction = usePublishStore((s) => s.previewStop);
 
   const isMockVault = vaultPath === MOCK_VAULT || !vaultPath;
 
@@ -118,13 +128,15 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     if (step === 0) return probe?.ok === true;
     if (step === 1) return hostId !== null;
     if (step === 2) return templateId !== null;
+    // Step 3 → advance only after Connect succeeds (row.exists).
+    if (step === 3) return row?.exists === true;
     return false;
-  }, [step, probe, hostId, templateId, isMockVault]);
+  }, [step, probe, hostId, templateId, isMockVault, row]);
 
   const onNext = useCallback(() => {
     if (!canAdvance) return;
     setError(null);
-    setStep((s) => (s < 3 ? ((s + 1) as Step) : s));
+    setStep((s) => (s < LAST_STEP ? ((s + 1) as Step) : s));
   }, [canAdvance]);
 
   const onBack = useCallback(() => {
@@ -138,14 +150,48 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     setError(null);
     try {
       await publishInit(vaultPath, hostId, templateId);
-      // Real path would close here; D1 stub throws and the catch surfaces it.
-      onClose();
+      // Refresh row so canAdvance sees `exists: true` and so the
+      // preview step shows the connected host/template.
+      await refreshStatus(vaultPath);
+      setStep(LAST_STEP);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setConnecting(false);
     }
-  }, [isMockVault, vaultPath, hostId, templateId, onClose]);
+  }, [isMockVault, vaultPath, hostId, templateId, refreshStatus]);
+
+  const onBuild = useCallback(async () => {
+    if (!vaultPath) return;
+    setError(null);
+    await buildAction(vaultPath);
+  }, [vaultPath, buildAction]);
+
+  const onPreview = useCallback(async () => {
+    if (!vaultPath) return;
+    setError(null);
+    await previewAction(vaultPath);
+  }, [vaultPath, previewAction]);
+
+  const onPreviewStop = useCallback(async () => {
+    if (!vaultPath) return;
+    setError(null);
+    await previewStopAction(vaultPath);
+  }, [vaultPath, previewStopAction]);
+
+  const onOpenPreview = useCallback(async () => {
+    const url = row?.previewUrl;
+    if (!url) return;
+    try {
+      // Tauri 2: route through plugin-opener so the OS default
+      // browser opens, not a child WebView.  Dynamic import keeps
+      // the browser dev build working when the plugin isn't bundled.
+      const mod = await import("@tauri-apps/plugin-opener");
+      await mod.openUrl(url);
+    } catch {
+      window.open(url, "_blank", "noreferrer");
+    }
+  }, [row?.previewUrl]);
 
   if (!open) return null;
 
@@ -337,14 +383,10 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
           {step === 3 && (
             <>
               <div className="pw-section-title">Step 4 · Connect</div>
-              <div className="pw-banner">
-                <span>
-                  <strong>Heads up.</strong> Host adapters (auth, build, deploy)
-                  ship in phase D2 +. Clicking <em>Connect</em> below will call
-                  the real <code>publish_init</code> IPC; today it surfaces a
-                  “phase D2 — not yet implemented” error into the footer so the
-                  wiring is end-to-end testable.
-                </span>
+              <div className="pw-hint">
+                Lattice will write <code>.lattice/publish.json</code> into your
+                vault and stage the chosen template bundle so the next step can
+                build a static site locally.
               </div>
               <div className="pw-hint">
                 Selected host:{" "}
@@ -355,6 +397,104 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                   {templates.find((t) => t.id === templateId)?.label ?? "—"}
                 </strong>
               </div>
+              {row?.exists && (
+                <div className="pw-banner">
+                  <span>Already connected. Click <em>Connect</em> again to refresh, or hit <em>Next</em> to build a local preview.</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {step === 4 && (
+            <>
+              <div className="pw-section-title">Step 5 · Build &amp; preview</div>
+              <div className="pw-hint">
+                Build the Quartz site from your vault and serve it on a
+                throw-away local port. Use this to spot-check the layout
+                before wiring a real deploy in a later release.
+              </div>
+              <div className="pw-card-grid" style={{ gridTemplateColumns: "1fr" }}>
+                <div className="pw-card" style={{ cursor: "default" }}>
+                  <div className="pw-card-head">
+                    <span className="pw-card-label">Local build</span>
+                    <span className={`pw-card-badge${row?.lastBuildAt ? " ready" : ""}`}>
+                      {row?.lastBuildAt ? "Built" : "Not built"}
+                    </span>
+                  </div>
+                  <div className="pw-card-desc">
+                    Runs <code>npx quartz build</code> against this vault.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="pw-btn primary"
+                      onClick={onBuild}
+                      disabled={!!row?.busy || isMockVault}
+                    >
+                      {row?.busy ? "Working…" : "Build"}
+                    </button>
+                  </div>
+                </div>
+                <div className="pw-card" style={{ cursor: "default" }}>
+                  <div className="pw-card-head">
+                    <span className="pw-card-label">Local preview</span>
+                    <span className={`pw-card-badge${row?.previewUrl ? " ready" : ""}`}>
+                      {row?.previewUrl ? "Running" : "Stopped"}
+                    </span>
+                  </div>
+                  <div className="pw-card-desc">
+                    {row?.previewUrl ? (
+                      <>Serving at <code>{row.previewUrl}</code></>
+                    ) : (
+                      <>Serves the last build on <code>http://127.0.0.1:&lt;auto&gt;</code>.</>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    {!row?.previewUrl ? (
+                      <button
+                        type="button"
+                        className="pw-btn primary"
+                        onClick={onPreview}
+                        disabled={!!row?.busy || isMockVault}
+                      >
+                        {row?.busy ? "Working…" : "Start preview"}
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="pw-btn primary"
+                          onClick={onOpenPreview}
+                          disabled={!!row?.busy}
+                        >
+                          <IcLinkExternal /> Open in browser
+                        </button>
+                        <button
+                          type="button"
+                          className="pw-btn"
+                          onClick={onPreviewStop}
+                          disabled={!!row?.busy}
+                        >
+                          Stop preview
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {row?.lastError && (
+                <div
+                  className="pw-hint"
+                  style={{
+                    color: "var(--text-error, #e57373)",
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
+                    fontSize: 11.5,
+                  }}
+                >
+                  {row.lastError}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -374,14 +514,34 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
               >
                 Next
               </button>
+            ) : step === 3 ? (
+              <>
+                <button
+                  type="button"
+                  className="pw-btn primary"
+                  onClick={onConnect}
+                  disabled={connecting || isMockVault || !hostId || !templateId}
+                >
+                  {connecting ? "Connecting…" : row?.exists ? "Reconnect" : "Connect"}
+                </button>
+                {row?.exists && (
+                  <button
+                    type="button"
+                    className="pw-btn primary"
+                    onClick={onNext}
+                    disabled={!canAdvance}
+                  >
+                    Next
+                  </button>
+                )}
+              </>
             ) : (
               <button
                 type="button"
                 className="pw-btn primary"
-                onClick={onConnect}
-                disabled={connecting || isMockVault || !hostId || !templateId}
+                onClick={onClose}
               >
-                {connecting ? "Connecting…" : "Connect"}
+                Done
               </button>
             )}
           </div>

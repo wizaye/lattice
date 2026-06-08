@@ -78,7 +78,43 @@ import {
 import { useEditorStore } from "../../state/editorStore";
 import { useVaultStore } from "../../state/vaultStore";
 import GraphView from "./GraphView";
+import { PaperToolbar } from "../paper/PaperToolbar";
 import "./EditorArea.css";
+
+/**
+ * Walk up an absolute file path looking for an ancestor directory
+ * whose `.lattice/paper.toml` is present in the flat vault map.  This
+ * is how the EditorArea knows to render a `<PaperToolbar />` above a
+ * markdown editor: no filesystem call, just a constant-time lookup in
+ * the already-loaded vault tree.
+ *
+ * Returns the absolute path of the paper root, or `null` when the
+ * markdown file is a plain vault note (no enclosing paper project).
+ *
+ * Both forward- and back-slash separators are supported so this works
+ * unchanged on Windows + macOS + Linux.
+ */
+function paperRootForPath(
+  filePath: string,
+  flatVault: Map<string, { kind: string }>,
+): string | null {
+  if (!filePath) return null;
+  // Detect the separator the path uses and walk up by trimming the
+  // last segment until we either hit a root or find a `.lattice/paper.toml`
+  // entry in the flat vault.
+  const sep = filePath.includes("\\") && !filePath.includes("/") ? "\\" : "/";
+  let cur = filePath;
+  // 32 hops is more than enough for any sane vault layout and bounds
+  // the loop tightly.
+  for (let i = 0; i < 32; i++) {
+    const idx = cur.lastIndexOf(sep);
+    if (idx <= 0) break;
+    cur = cur.slice(0, idx);
+    const probe = `${cur}${sep}.lattice${sep}paper.toml`;
+    if (flatVault.has(probe)) return cur;
+  }
+  return null;
+}
 
 /**
  * Ask the user what to do with a dirty file before closing its tab.
@@ -1348,25 +1384,52 @@ function Pane(props: PaneProps) {
               // toggles between source (CodeMirror) and reading mode
               // (markdown-it rendered HTML via MarkdownPreview). The
               // toggle button lives in the doc header above.
-              if (activeTab.viewMode === "preview") {
-                return (
+              //
+              // When this markdown file lives inside a paper project
+              // (i.e. an ancestor directory contains a
+              // `.lattice/paper.toml`), we slot a `<PaperToolbar />`
+              // above the editor so the user can compile to PDF
+              // without leaving the buffer.  Detection is a
+              // constant-time walk over the flat vault map; null
+              // means "plain note, no toolbar".
+              const paperRoot = paperRootForPath(file.id, vault);
+              const editorBody =
+                activeTab.viewMode === "preview" ? (
                   <div className="markdown-preview-host">
                     <MarkdownPreview source={file.content ?? ""} />
                   </div>
+                ) : (
+                  <CodeMirrorEditor
+                    content={file.content ?? ""}
+                    filePath={file.id}
+                    onChange={(c) =>
+                      onUpdateFileContent?.(file.id, c)
+                    }
+                    onSave={() => {
+                      useEditorStore.getState().saveFile(file.id);
+                    }}
+                  />
+                );
+              if (paperRoot) {
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      height: "100%",
+                      minHeight: 0,
+                    }}
+                  >
+                    <PaperToolbar paperAbsPath={paperRoot} />
+                    <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex" }}>
+                      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+                        {editorBody}
+                      </div>
+                    </div>
+                  </div>
                 );
               }
-              return (
-                <CodeMirrorEditor
-                  content={file.content ?? ""}
-                  filePath={file.id}
-                  onChange={(c) =>
-                    onUpdateFileContent?.(file.id, c)
-                  }
-                  onSave={() => {
-                    useEditorStore.getState().saveFile(file.id);
-                  }}
-                />
-              );
+              return editorBody;
             })()
           ) : (
             <EmptyTab

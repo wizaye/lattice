@@ -14,9 +14,9 @@
 //! a Tauri command (~50 ms on Windows) and avoids pulling the shell
 //! plugin's permissions surface into the D1 capability set.
 
-use std::process::Command;
-
 use serde::Serialize;
+
+use super::proc::spawn;
 
 /// Result of [`probe`].  Sent over IPC to the wizard's "Check
 /// prerequisites" step.  All four fields are populated even on
@@ -126,90 +126,11 @@ fn run_silently(bin: &str) -> bool {
     }
 }
 
-/// Build a [`Command`] for `bin`, resolving Windows PATHEXT shims so
-/// `npm` / `npx` (which ship as `npm.cmd` / `npx.cmd`) are found the
-/// same way cmd / PowerShell find them.  `std::process::Command::new`
-/// on Windows talks to `CreateProcessW` directly and does NOT walk
-/// PATHEXT — bare `Command::new("npm")` fails with `NotFound` even
-/// though `npm --version` works in a terminal.  This was the
-/// publish-probe "npm not found" bug reported by users with a working
-/// Node install.
-///
-/// On non-Windows targets the binary name is used verbatim — every
-/// supported shell resolves PATH itself, and there's no PATHEXT story.
-fn spawn(bin: &str) -> Command {
-    #[cfg(windows)]
-    {
-        if let Some(resolved) = resolve_on_path_windows(bin) {
-            let mut cmd = Command::new(resolved);
-            apply_no_window(&mut cmd);
-            return cmd;
-        }
-        let mut cmd = Command::new(bin);
-        apply_no_window(&mut cmd);
-        cmd
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new(bin)
-    }
-}
-
-/// Walk `PATH` × `PATHEXT` looking for `bin` and return the first
-/// match.  Returns `None` when nothing resolves — caller falls back to
-/// a bare spawn so the OS still gets a chance (eg. when the user has
-/// shimmed `npm` via a Reparse Point).
-///
-/// **PATHEXT-before-bare-name is critical when `bin` has no extension.**
-/// Node.js's Windows installer drops *both* `npm` (a 2073-byte POSIX
-/// shell script with a `#!/bin/sh` shebang) *and* `npm.cmd` (the real
-/// Windows shim) into `C:\Program Files\nodejs\`.  A naive
-/// "bare name first" walk would resolve to the POSIX script, and
-/// `CreateProcessW` on a `#!`-prefixed text file fails with
-/// `%1 is not a valid Win32 application`.  This exact misfire was the
-/// "npm not found despite working install" bug reported in the wizard.
-///
-/// `cmd.exe` itself never matches a bare name when no extension is
-/// supplied — it walks PATHEXT and stops there.  We follow the same
-/// rule, with a single concession: if the caller passes an
-/// already-suffixed name (`node.exe`), we try that bare path first so
-/// we don't accidentally prefer some sibling `node.exe.cmd`.
-#[cfg(windows)]
-fn resolve_on_path_windows(bin: &str) -> Option<std::path::PathBuf> {
-    let pathext =
-        std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
-    let path = std::env::var_os("PATH")?;
-    let has_ext = std::path::Path::new(bin).extension().is_some();
-    for dir in std::env::split_paths(&path) {
-        if has_ext {
-            let direct = dir.join(bin);
-            if direct.is_file() {
-                return Some(direct);
-            }
-        }
-        for ext in pathext.split(';') {
-            let ext = ext.trim();
-            if ext.is_empty() {
-                continue;
-            }
-            let candidate = dir.join(format!("{bin}{ext}"));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
-/// Suppress the brief console flash WebView2 users see when we spawn a
-/// `.cmd` shim — matches the `CREATE_NO_WINDOW` flag the `git` runner
-/// uses in `src-tauri/src/git.rs`.
-#[cfg(windows)]
-fn apply_no_window(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-}
+// `spawn`, `resolve_on_path_windows`, and the console-flash
+// suppression all live in `super::proc` now so the same PATHEXT-trap
+// fix applies to every publish subprocess (node probe, git clone,
+// npm install, npx quartz build).  See `publish/proc.rs` for the
+// full rationale.
 
 // ─── Tiny semver helper ──────────────────────────────────────────────────
 //
@@ -331,6 +252,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn resolves_npm_to_cmd_shim_not_posix_script() {
+        use super::super::proc::resolve_on_path_windows;
         // Skip when this host has no npm on PATH (CI without Node).
         if run_version("node").is_empty() {
             eprintln!("skipping: no node on PATH on this host");

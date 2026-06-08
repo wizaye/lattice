@@ -120,6 +120,33 @@ blake3 = "1"
 # docs/publishing-plan.md §4 for the full eventual dep set.
 toml = "0.9"
 
+# Slice D phase D3 — local Quartz build + preview.
+#
+# `tiny_http` is the lightest viable HTTP server in the Rust ecosystem
+# (~600 LoC, no async runtime needed) — perfect for the one-shot
+# loopback preview server that serves <vault>/.lattice/publish/quartz/
+# public/ on 127.0.0.1:<random>.  We deliberately avoid axum/hyper to
+# keep the dep graph and binary size in check (axum pulls tower +
+# tower-http + ~80 transitive crates).
+tiny_http = "0.12"
+
+# Sniff Content-Type for the preview server's static-file responses.
+mime_guess = "2"
+
+# Glob matching for the publish exclude list (`**/*.private.md`,
+# `drafts/**`, …).  `globset` compiles a GlobSet once per build that
+# matches in O(files × patterns) with prefix optimisation — cheaper
+# than re-parsing patterns per file.
+globset = "0.4"
+
+# Slice C phase C2 — markdown → LaTeX converter for paper_compile.
+#
+# `comrak` gives us a CommonMark + GFM AST (same engine GitHub uses),
+# which we walk to emit LaTeX.  Disabling the default `syntect`
+# feature keeps the dep weight reasonable; we don't need syntax
+# highlighting on the LaTeX side (the engine handles `\verbatim`).
+comrak = { version = "0.28", default-features = false }
+
 [dev-dependencies]
 # Scratch directories for sync/manifest tests.  Auto-cleaned on Drop.
 tempfile = "3"

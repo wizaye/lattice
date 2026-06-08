@@ -32,8 +32,13 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
 
+pub mod exclude;
 pub mod node_probe;
+pub mod preview;
+pub mod proc;
+pub mod quartz;
 pub mod toml;
 
 pub use node_probe::ProbeReport;
@@ -185,6 +190,50 @@ pub(crate) fn publish_toml_path(vault_root: &Path) -> PathBuf {
     vault_root.join(".lattice").join("publish.toml")
 }
 
+/// Where the local Quartz checkout lives for a given vault.  Always
+/// `<vault>/.lattice/publish/quartz/`.  Materialised by [`publish_init`].
+pub(crate) fn quartz_dir(vault_root: &Path) -> PathBuf {
+    vault_root.join(".lattice").join("publish").join("quartz")
+}
+
+/// ISO-8601 UTC timestamp without milliseconds.  Mirrors the format
+/// the `paper::toml` module uses so both configs round-trip the same.
+fn iso_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    // Days-since-epoch arithmetic; rough but stable enough for a
+    // human-readable timestamp.  We avoid pulling `chrono` for this.
+    let secs_per_day = 86_400i64;
+    let days = secs / secs_per_day;
+    let time_of_day = secs.rem_euclid(secs_per_day);
+    let hh = time_of_day / 3600;
+    let mm = (time_of_day % 3600) / 60;
+    let ss = time_of_day % 60;
+    let (y, mo, d) = civil_from_days(days);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y, mo, d, hh, mm, ss
+    )
+}
+
+/// Howard Hinnant's days-from-civil inverse — days since 1970-01-01 →
+/// (year, month, day).  Public domain; widely cited.
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m as u32, d as u32)
+}
+
 // ─── IPC commands — REAL ─────────────────────────────────────────────────
 
 /// Probe Node / npm / npx versions on `PATH`.  Used as the very first
@@ -255,16 +304,50 @@ fn opt_non_empty(s: &str) -> Option<String> {
 
 // ─── IPC commands — STUBS ────────────────────────────────────────────────
 
-/// Phase D2 — scaffold `.lattice/publish.toml` + `.lattice/publish/quartz/`
-/// + run `npm install`.  Stub until the build pipeline lands.
+/// Initialise publishing for `vault`: write `publish.toml`, clone the
+/// pinned Quartz repo into `<vault>/.lattice/publish/quartz/`, and run
+/// `npm install` inside it.
+///
+/// Long-running (60-120s typical) because `npm install` pulls Quartz's
+/// transitive deps.  The frontend should show a spinner while this
+/// call is in flight.  Failure modes are surfaced as strings with
+/// the failing step + the tail of subprocess stderr.
 #[tauri::command]
 pub async fn publish_init(
     vault: String,
     host_id: HostId,
     template_id: String,
 ) -> Result<(), String> {
-    let _ = (vault, host_id, template_id);
-    Err("publish_init: not yet implemented (lands in phase D2)".to_string())
+    let root = vault_dir(&vault)?;
+    let toml_path = publish_toml_path(&root);
+    let quartz_root = quartz_dir(&root);
+
+    // Run the heavy work in a blocking task — git clone + npm install
+    // are synchronous and would otherwise hold the IPC executor.
+    tokio::task::spawn_blocking(move || {
+        // 1. Write `publish.toml` (or update it if the user re-runs the
+        //    wizard with a different host/template choice).
+        let mut cfg = if toml_path.exists() {
+            PublishToml::load(&toml_path)?
+        } else {
+            PublishToml::default()
+        };
+        if cfg.meta.created.is_empty() {
+            cfg.meta.created = iso_now();
+        }
+        cfg.host.id = Some(host_id);
+        cfg.quartz.template = template_id;
+        cfg.save(&toml_path)?;
+
+        // 2. Clone Quartz (idempotent — wipes any half-installed tree).
+        quartz::clone_quartz(&quartz_root)?;
+
+        // 3. Install Quartz's deps.  This is the slow step.
+        quartz::npm_install(&quartz_root)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| format!("publish_init join error: {e}"))?
 }
 
 /// Phase D2 — start the auth flow for the chosen host.  Stub.
@@ -297,25 +380,136 @@ pub async fn publish_auth_pick(
     Err("publish_auth_pick: not yet implemented (lands in phase D2)".to_string())
 }
 
-/// Phase D3 — run the full build pipeline (filter → copy → quartz build).
+/// Run the full build pipeline: filter the vault → copy markdown into
+/// `<quartz>/content/` → run `npx quartz build`.
+///
+/// Returns the absolute path to the produced `<quartz>/public/`
+/// directory on success.  Stores `last_build_at` + `last_build_ms` in
+/// `publish.toml`.
 #[tauri::command]
 pub async fn publish_build(vault: String) -> Result<String, String> {
-    let _ = vault;
-    Err("publish_build: not yet implemented (lands in phase D3)".to_string())
+    let root = vault_dir(&vault)?;
+    let toml_path = publish_toml_path(&root);
+    if !toml_path.exists() {
+        return Err("publish.toml not found — run Set up Publishing first.".to_string());
+    }
+    let quartz_root = quartz_dir(&root);
+    if !quartz_root.is_dir() {
+        return Err(format!(
+            "Quartz checkout missing at {} — run Set up Publishing again.",
+            quartz_root.display()
+        ));
+    }
+
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let mut cfg = PublishToml::load(&toml_path)?;
+        let started = std::time::Instant::now();
+
+        // 1. Compile excludes (baseline + user list).
+        let filter = exclude::VaultFilter::from_patterns(&cfg.exclude.patterns)?;
+
+        // 2. Wipe + recreate <quartz>/content/ so removed notes don't
+        //    linger from a prior build.
+        let content_dir = quartz_root.join("content");
+        if content_dir.exists() {
+            std::fs::remove_dir_all(&content_dir).map_err(|e| {
+                format!("failed to clear {}: {}", content_dir.display(), e)
+            })?;
+        }
+        std::fs::create_dir_all(&content_dir)
+            .map_err(|e| format!("failed to create {}: {}", content_dir.display(), e))?;
+
+        // 3. Walk the vault and copy filtered markdown.
+        let mut copied: u32 = 0;
+        let mut bytes: u64 = 0;
+        for entry in WalkDir::new(&root)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let Ok(rel) = entry.path().strip_prefix(&root) else {
+                continue;
+            };
+            if !filter.should_include(rel) {
+                continue;
+            }
+            let dst = content_dir.join(rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    format!("failed to create {}: {}", parent.display(), e)
+                })?;
+            }
+            let n = std::fs::copy(entry.path(), &dst)
+                .map_err(|e| format!("copy {}: {}", entry.path().display(), e))?;
+            copied += 1;
+            bytes += n;
+        }
+
+        // Quartz refuses to build with zero content; write a tiny
+        // placeholder so the user gets a working preview even on an
+        // empty vault.
+        if copied == 0 {
+            let placeholder = content_dir.join("index.md");
+            std::fs::write(
+                &placeholder,
+                "---\ntitle: Welcome to Lattice\n---\n\nYour vault is empty — \
+                 add some `.md` files and rebuild.\n",
+            )
+            .map_err(|e| format!("failed to write placeholder index: {e}"))?;
+        }
+
+        // 4. Build.
+        let public_dir = quartz::npx_quartz_build(&quartz_root).map_err(|e| {
+            // Persist the failure so the UI can surface it in the
+            // status pill on the next status poll.
+            cfg.state.last_error = Some(e.clone());
+            let _ = cfg.save(&toml_path);
+            e
+        })?;
+
+        // 5. Persist success state.
+        cfg.state.last_build_at = Some(iso_now());
+        cfg.state.last_build_ms = Some(started.elapsed().as_millis() as u64);
+        cfg.state.last_error = None;
+        cfg.state.last_deploy_files = Some(copied);
+        cfg.state.last_deploy_bytes = Some(bytes);
+        cfg.save(&toml_path)?;
+
+        Ok(public_dir.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("publish_build join error: {e}"))?
 }
 
-/// Phase D4 — start the local browser preview server on 127.0.0.1.
+/// Start a local HTTP preview server bound to `127.0.0.1:<random>`,
+/// serving the most recently built `<quartz>/public/` directory.
+/// Returns the URL the UI should open in the system browser.
 #[tauri::command]
 pub async fn publish_preview(vault: String) -> Result<String, String> {
-    let _ = vault;
-    Err("publish_preview: not yet implemented (lands in phase D4)".to_string())
+    let root = vault_dir(&vault)?;
+    let public_dir = quartz_dir(&root).join("public");
+    if !public_dir.is_dir() {
+        return Err(
+            "No built site found — run Build first to render your vault.".to_string(),
+        );
+    }
+    let root_clone = root.clone();
+    let public_clone = public_dir.clone();
+    tokio::task::spawn_blocking(move || preview::start(&root_clone, &public_clone))
+        .await
+        .map_err(|e| format!("publish_preview join error: {e}"))?
 }
 
-/// Phase D4 — stop the local preview server.  Idempotent once real.
+/// Stop the local preview server for this vault.  Idempotent.
 #[tauri::command]
 pub async fn publish_preview_stop(vault: String) -> Result<(), String> {
-    let _ = vault;
-    Err("publish_preview_stop: not yet implemented (lands in phase D4)".to_string())
+    let root = vault_dir(&vault)?;
+    tokio::task::spawn_blocking(move || preview::stop(&root))
+        .await
+        .map_err(|e| format!("publish_preview_stop join error: {e}"))?
 }
 
 /// Phase D5 — push the built site to the configured host.
@@ -349,9 +543,14 @@ pub async fn publish_open_live(vault: String) -> Result<(), String> {
 // ─── Static registries ───────────────────────────────────────────────────
 
 /// The four hosts we plan to support.  Mirror of
-/// `docs/publishing-plan.md` §3 "Tractability snapshot".  Today every
-/// `adapter_ready` is `false` — the wizard greys them out.  Flip a
-/// single bool here when an adapter lands.
+/// `docs/publishing-plan.md` §3 "Tractability snapshot".
+///
+/// `adapter_ready` controls whether the wizard lets the user pick the
+/// host.  All four are now `true` because the **local preview path**
+/// works for every host — we write the chosen host into
+/// `publish.toml` and use it on the eventual `publish_deploy` call,
+/// but the build + preview steps are host-agnostic.  The actual
+/// deploy adapters land in later D-phases.
 fn built_in_hosts() -> Vec<HostInfo> {
     vec![
         HostInfo {
@@ -365,7 +564,7 @@ fn built_in_hosts() -> Vec<HostInfo> {
             supports_custom_domain: true,
             has_dashboard: true,
             has_live_url: true,
-            adapter_ready: false,
+            adapter_ready: true,
         },
         HostInfo {
             id: HostId::Cloudflare,
@@ -378,7 +577,7 @@ fn built_in_hosts() -> Vec<HostInfo> {
             supports_custom_domain: true,
             has_dashboard: true,
             has_live_url: true,
-            adapter_ready: false,
+            adapter_ready: true,
         },
         HostInfo {
             id: HostId::Netlify,
@@ -391,7 +590,7 @@ fn built_in_hosts() -> Vec<HostInfo> {
             supports_custom_domain: true,
             has_dashboard: true,
             has_live_url: true,
-            adapter_ready: false,
+            adapter_ready: true,
         },
         HostInfo {
             id: HostId::Vercel,
@@ -404,15 +603,19 @@ fn built_in_hosts() -> Vec<HostInfo> {
             supports_custom_domain: true,
             has_dashboard: true,
             has_live_url: true,
-            adapter_ready: false,
+            adapter_ready: true,
         },
     ]
 }
 
 /// The three bundled Quartz templates.  Mirror of
 /// `docs/publishing-plan.md` §4 — `templates/{garden, docs, notebook}/`.
-/// All three are `bundle_ready=false` in D1; flip when the template
-/// files land in the binary.
+///
+/// `bundle_ready` controls whether the wizard offers the template.
+/// `garden` is `true` because Quartz's own default config produces a
+/// usable garden site out of the box — we don't yet overlay our own
+/// per-template config files; that lands in a follow-up phase.  The
+/// other two templates remain `false` until their config overlays land.
 fn built_in_templates() -> Vec<TemplateInfo> {
     vec![
         TemplateInfo {
@@ -422,7 +625,7 @@ fn built_in_templates() -> Vec<TemplateInfo> {
                 "Friendly, casual default. Knowledge graph visible, backlinks \
                  expanded, soft colour palette. Best for personal note vaults.",
             quartz_version: "5",
-            bundle_ready: false,
+            bundle_ready: true,
         },
         TemplateInfo {
             id: "docs",
