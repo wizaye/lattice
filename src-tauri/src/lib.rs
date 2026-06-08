@@ -1,6 +1,7 @@
 mod commands;
 mod git;
 mod paper;
+mod publish;
 mod sync;
 
 use tauri::Manager;
@@ -82,6 +83,27 @@ pub fn run() {
             paper::paper_byof_import,
             paper::paper_byof_re_import,
             paper::paper_byof_remove,
+            // Slice D — publishing (vault → Quartz v5 site → host).
+            // Phase D1 ships publish_probe + publish_list_hosts +
+            // publish_list_templates + publish_status end-to-end;
+            // every other publish_* is registered but returns a
+            // "phase X — not yet implemented" error until the
+            // matching slice lands.  See docs/publishing-plan.md.
+            publish::publish_probe,
+            publish::publish_list_hosts,
+            publish::publish_list_templates,
+            publish::publish_status,
+            publish::publish_init,
+            publish::publish_auth_start,
+            publish::publish_auth_complete,
+            publish::publish_auth_pick,
+            publish::publish_build,
+            publish::publish_preview,
+            publish::publish_preview_stop,
+            publish::publish_deploy,
+            publish::publish_disconnect,
+            publish::publish_open_dashboard,
+            publish::publish_open_live,
         ])
         .setup(|app| {
             // Set a larger default window size for the PKM workspace
