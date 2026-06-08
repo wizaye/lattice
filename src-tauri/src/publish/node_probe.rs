@@ -112,7 +112,7 @@ pub fn probe() -> ProbeReport {
 /// Run `<bin> --version` and return its stdout trimmed.  Empty string
 /// on any failure (binary not found, non-zero exit, non-UTF-8).
 fn run_version(bin: &str) -> String {
-    match Command::new(bin).arg("--version").output() {
+    match spawn(bin).arg("--version").output() {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => String::new(),
     }
@@ -120,10 +120,79 @@ fn run_version(bin: &str) -> String {
 
 /// Like [`run_version`] but only cares about success/failure.
 fn run_silently(bin: &str) -> bool {
-    match Command::new(bin).arg("--version").output() {
+    match spawn(bin).arg("--version").output() {
         Ok(out) => out.status.success(),
         Err(_) => false,
     }
+}
+
+/// Build a [`Command`] for `bin`, resolving Windows PATHEXT shims so
+/// `npm` / `npx` (which ship as `npm.cmd` / `npx.cmd`) are found the
+/// same way cmd / PowerShell find them.  `std::process::Command::new`
+/// on Windows talks to `CreateProcessW` directly and does NOT walk
+/// PATHEXT — bare `Command::new("npm")` fails with `NotFound` even
+/// though `npm --version` works in a terminal.  This was the
+/// publish-probe "npm not found" bug reported by users with a working
+/// Node install.
+///
+/// On non-Windows targets the binary name is used verbatim — every
+/// supported shell resolves PATH itself, and there's no PATHEXT story.
+fn spawn(bin: &str) -> Command {
+    #[cfg(windows)]
+    {
+        if let Some(resolved) = resolve_on_path_windows(bin) {
+            let mut cmd = Command::new(resolved);
+            apply_no_window(&mut cmd);
+            return cmd;
+        }
+        let mut cmd = Command::new(bin);
+        apply_no_window(&mut cmd);
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(bin)
+    }
+}
+
+/// Walk `PATH` × `PATHEXT` looking for `bin` (with or without an
+/// extension) and return the first match.  Returns `None` when nothing
+/// resolves — caller falls back to a bare spawn so the OS still gets a
+/// chance (eg. when the user has shimmed `npm` via a Reparse Point).
+#[cfg(windows)]
+fn resolve_on_path_windows(bin: &str) -> Option<std::path::PathBuf> {
+    let pathext =
+        std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        // Try the bare name first — covers users who explicitly put
+        // `npm.exe` (rare) on PATH or pass an already-suffixed name.
+        let direct = dir.join(bin);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        for ext in pathext.split(';') {
+            let ext = ext.trim();
+            if ext.is_empty() {
+                continue;
+            }
+            let candidate = dir.join(format!("{bin}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Suppress the brief console flash WebView2 users see when we spawn a
+/// `.cmd` shim — matches the `CREATE_NO_WINDOW` flag the `git` runner
+/// uses in `src-tauri/src/git.rs`.
+#[cfg(windows)]
+fn apply_no_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
 }
 
 // ─── Tiny semver helper ──────────────────────────────────────────────────
