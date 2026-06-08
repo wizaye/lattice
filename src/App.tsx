@@ -41,6 +41,8 @@ import {
   ManageVaultsModal,
   type Vault,
 } from "./components/modals/ManageVaultsModal";
+import { NewPaperModal } from "./components/modals/NewPaperModal";
+import { PublishWizard } from "./components/modals/PublishWizard";
 import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
 
@@ -275,6 +277,35 @@ export default function App() {
 
   const openManageVaults = useCallback(() => setVaultsOpen(true), []);
   const closeManageVaults = useCallback(() => setVaultsOpen(false), []);
+
+  // ---- New Paper modal (Slice C) -----------------------------------------
+  // The modal scaffolds a `paper.toml`-anchored folder via the real
+  // `paper_create` IPC.  We surface it from the LeftSidebar footer
+  // (next to Settings) AND respond to a `lattice-open-new-paper`
+  // window event so future entry points (file-tree right-click,
+  // command palette, etc.) don't need to thread props through the
+  // whole tree.
+  const [newPaperOpen, setNewPaperOpen] = useState(false);
+  const openNewPaper = useCallback(() => setNewPaperOpen(true), []);
+  const closeNewPaper = useCallback(() => setNewPaperOpen(false), []);
+
+  // ---- Publish wizard (Slice D) ------------------------------------------
+  const [publishOpen, setPublishOpen] = useState(false);
+  const openPublishWizard = useCallback(() => setPublishOpen(true), []);
+  const closePublishWizard = useCallback(() => setPublishOpen(false), []);
+
+  // Cross-cutting: let any component dispatch a CustomEvent to open
+  // either modal without needing the callback in scope.
+  useEffect(() => {
+    const onNewPaper = () => setNewPaperOpen(true);
+    const onPublish = () => setPublishOpen(true);
+    window.addEventListener("lattice-open-new-paper", onNewPaper);
+    window.addEventListener("lattice-open-publish-wizard", onPublish);
+    return () => {
+      window.removeEventListener("lattice-open-new-paper", onNewPaper);
+      window.removeEventListener("lattice-open-publish-wizard", onPublish);
+    };
+  }, []);
 
   const doOpenVaultByPath = useCallback(async (path: string) => {
     await useVaultStore.getState().openVault(path);
@@ -639,6 +670,8 @@ export default function App() {
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}
             onOpenManageVaults={openManageVaults}
+            onOpenNewPaper={openNewPaper}
+            onOpenPublishWizard={openPublishWizard}
             isMac={isMac}
             onToggleSidebar={toggleLeftSidebar}
           />
@@ -771,6 +804,23 @@ export default function App() {
         onOpenFolderAsVault={onOpenFolderAsVault}
         onOpenExistingVault={onOpenExistingVault}
         onClose={closeManageVaults}
+      />
+
+      {/* ===== New Paper modal (Slice C) ===== */}
+      <NewPaperModal
+        open={newPaperOpen}
+        vaultPath={vaultPath}
+        vaultName={vaultName}
+        onClose={closeNewPaper}
+        onOpenPath={onOpenFileByPath}
+      />
+
+      {/* ===== Publish wizard (Slice D) ===== */}
+      <PublishWizard
+        open={publishOpen}
+        vaultPath={vaultPath}
+        vaultName={vaultName}
+        onClose={closePublishWizard}
       />
     </div>
   );
