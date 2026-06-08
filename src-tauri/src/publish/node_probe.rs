@@ -155,21 +155,37 @@ fn spawn(bin: &str) -> Command {
     }
 }
 
-/// Walk `PATH` × `PATHEXT` looking for `bin` (with or without an
-/// extension) and return the first match.  Returns `None` when nothing
-/// resolves — caller falls back to a bare spawn so the OS still gets a
-/// chance (eg. when the user has shimmed `npm` via a Reparse Point).
+/// Walk `PATH` × `PATHEXT` looking for `bin` and return the first
+/// match.  Returns `None` when nothing resolves — caller falls back to
+/// a bare spawn so the OS still gets a chance (eg. when the user has
+/// shimmed `npm` via a Reparse Point).
+///
+/// **PATHEXT-before-bare-name is critical when `bin` has no extension.**
+/// Node.js's Windows installer drops *both* `npm` (a 2073-byte POSIX
+/// shell script with a `#!/bin/sh` shebang) *and* `npm.cmd` (the real
+/// Windows shim) into `C:\Program Files\nodejs\`.  A naive
+/// "bare name first" walk would resolve to the POSIX script, and
+/// `CreateProcessW` on a `#!`-prefixed text file fails with
+/// `%1 is not a valid Win32 application`.  This exact misfire was the
+/// "npm not found despite working install" bug reported in the wizard.
+///
+/// `cmd.exe` itself never matches a bare name when no extension is
+/// supplied — it walks PATHEXT and stops there.  We follow the same
+/// rule, with a single concession: if the caller passes an
+/// already-suffixed name (`node.exe`), we try that bare path first so
+/// we don't accidentally prefer some sibling `node.exe.cmd`.
 #[cfg(windows)]
 fn resolve_on_path_windows(bin: &str) -> Option<std::path::PathBuf> {
     let pathext =
         std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
     let path = std::env::var_os("PATH")?;
+    let has_ext = std::path::Path::new(bin).extension().is_some();
     for dir in std::env::split_paths(&path) {
-        // Try the bare name first — covers users who explicitly put
-        // `npm.exe` (rare) on PATH or pass an already-suffixed name.
-        let direct = dir.join(bin);
-        if direct.is_file() {
-            return Some(direct);
+        if has_ext {
+            let direct = dir.join(bin);
+            if direct.is_file() {
+                return Some(direct);
+            }
         }
         for ext in pathext.split(';') {
             let ext = ext.trim();
@@ -304,5 +320,34 @@ mod tests {
         }
         // ok must be consistent with reason
         assert_eq!(r.ok, r.reason.is_none());
+    }
+
+    /// Regression: on Windows, `C:\Program Files\nodejs\` ships both
+    /// `npm` (a POSIX `#!/bin/sh` script with NO extension) and
+    /// `npm.cmd` (the real Windows shim).  A naive "bare name first"
+    /// PATH walk would return the extensionless POSIX script, which
+    /// `CreateProcessW` cannot execute.  This test guarantees we keep
+    /// preferring PATHEXT candidates when no extension was supplied.
+    #[cfg(windows)]
+    #[test]
+    fn resolves_npm_to_cmd_shim_not_posix_script() {
+        // Skip when this host has no npm on PATH (CI without Node).
+        if run_version("node").is_empty() {
+            eprintln!("skipping: no node on PATH on this host");
+            return;
+        }
+        let resolved = resolve_on_path_windows("npm");
+        let Some(path) = resolved else {
+            panic!("npm not found on PATH despite node being present");
+        };
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        assert!(
+            matches!(ext.as_deref(), Some("cmd") | Some("bat") | Some("exe")),
+            "expected npm to resolve to a Windows-executable extension, got {:?}",
+            path
+        );
     }
 }
