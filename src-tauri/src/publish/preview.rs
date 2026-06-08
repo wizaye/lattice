@@ -203,6 +203,29 @@ fn handle_request(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
     };
 
     if !target.exists() {
+        // Static-site convention: a request to `/foo/bar` with no
+        // file extension should serve `foo/bar.html` if it exists.
+        // Quartz (and every other static SSG) emits flat `<slug>.html`
+        // files and links to extensionless URLs; the host (Netlify,
+        // GitHub Pages, etc.) auto-appends `.html`.  Without this
+        // fallback EVERY leaf page returns 404 on local preview even
+        // though every link Quartz rendered points at one.
+        //
+        // We use OsString-level concat instead of `Path::with_extension`
+        // because some filenames (e.g. `IcM Copilot Analysis..md`,
+        // which Quartz slugifies to `icm-copilot-analysis.`) have a
+        // trailing dot that `with_extension("html")` would strip,
+        // breaking the lookup.  Appending `.html` to the raw OsString
+        // produces `icm-copilot-analysis..html` which matches the
+        // file Quartz emitted.
+        let html_fallback: PathBuf = {
+            let mut s = target.as_os_str().to_os_string();
+            s.push(".html");
+            PathBuf::from(s)
+        };
+        if html_fallback.is_file() {
+            return serve_file(req, &html_fallback);
+        }
         return serve_404(req, root);
     }
 
@@ -217,12 +240,19 @@ fn handle_request(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
         return serve_404(req, root);
     }
 
-    // Sniff Content-Type from extension.
-    let mime = mime_guess::from_path(&file_path)
+    serve_file(req, &file_path)
+}
+
+/// Stream `file_path` back with `Content-Type` from the extension,
+/// `Cache-Control: no-store` (so a rebuild is visible without a
+/// shift-reload), and an accurate `Content-Length`.  Used by both the
+/// happy path and the `.html` fallback.
+fn serve_file(req: tiny_http::Request, file_path: &Path) -> std::io::Result<()> {
+    let mime = mime_guess::from_path(file_path)
         .first_or_octet_stream()
         .to_string();
 
-    let mut file = File::open(&file_path)?;
+    let mut file = File::open(file_path)?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
     let len = buf.len();
@@ -230,8 +260,6 @@ fn handle_request(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
     let response = Response::from_data(buf).with_header(
         Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap(),
     );
-    // Cache-Control: no-store so the user sees fresh content after a
-    // rebuild without manually shift-reloading.
     let response = response.with_header(
         Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..]).unwrap(),
     );
