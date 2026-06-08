@@ -1,5 +1,6 @@
 mod commands;
 mod git;
+mod paper;
 mod sync;
 
 use tauri::Manager;
@@ -64,6 +65,23 @@ pub fn run() {
             sync::byoc_storage_info,
             sync::byoc_remote_url,
             sync::byoc_manifest_path,
+            // Slice C — paper export (markdown → PDF, Overleaf bundle).
+            // Phase C1 ships paper_list_templates + paper_create end-to-end;
+            // the rest of the surface is registered but returns a clear
+            // "phase X — not yet implemented" error string until the
+            // matching slice lands.  See docs/paper-export-plan.md.
+            paper::paper_list_templates,
+            paper::paper_create,
+            paper::paper_status,
+            paper::paper_set_compile_engine,
+            paper::paper_compile,
+            paper::paper_preflight,
+            paper::paper_emit_bundle,
+            paper::paper_open_overleaf,
+            paper::paper_diff,
+            paper::paper_byof_import,
+            paper::paper_byof_re_import,
+            paper::paper_byof_remove,
         ])
         .setup(|app| {
             // Set a larger default window size for the PKM workspace

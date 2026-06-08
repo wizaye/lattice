@@ -109,6 +109,17 @@ urlencoding = "2"
 # Content-addressed object dedup for the Drive blob-store overlay.
 blake3 = "1"
 
+# ----------------------------------------------------------------------------
+# Slice C (paper export) + Slice D (publishing) — both modules round-trip
+# config through a single per-feature TOML file (`paper.toml`, `publish.toml`).
+# `toml = "0.9"` is the only new dep needed to land the module skeletons +
+# the first-real-feature slices (paper_create scaffold + publish_probe node
+# detection).  Heavier deps (typst, comrak, tauri-plugin-shell, tiny_http,
+# globset, tar/flate2) land in the follow-up phases C2-C9 / D2-D10 when their
+# call-sites are actually wired up — see docs/paper-export-plan.md §4 and
+# docs/publishing-plan.md §4 for the full eventual dep set.
+toml = "0.9"
+
 [dev-dependencies]
 # Scratch directories for sync/manifest tests.  Auto-cleaned on Drop.
 tempfile = "3"

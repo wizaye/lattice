@@ -1,0 +1,234 @@
+/**
+ * Slice C — paper export.  Typed wrappers around the Rust `paper_*`
+ * Tauri commands.
+ *
+ * Mirrors the conventions in `byoc.ts` deliberately so anyone who's
+ * already read that file (or `vcs.ts`) can grok this one in a glance:
+ *   - DTO field names match the Rust `#[serde(rename_all = "camelCase")]`
+ *     repr exactly — no transformation layer.
+ *   - `EngineKind` / `TemplateSource` / `PreflightSeverity` are
+ *     kebab-case literal unions matching the Rust enums' kebab-case
+ *     serde repr.
+ *   - The mock-vault sentinel (`"__mock__"`) is rejected here, before
+ *     any IPC ever reaches Rust.  The Rust side still defensively
+ *     re-checks via `paper::vault_dir(...)`.
+ *
+ * Phase C1 ships **two real commands** end-to-end (`paperListTemplates`
+ * + `paperCreate`).  Everything else returns a "phase X" error string
+ * from Rust until the matching slice lands — the wrappers are
+ * registered now so the UI layer can compile against the final surface.
+ *
+ * See `docs/paper-export-plan.md` for the full design.
+ */
+import { invoke } from "@tauri-apps/api/core";
+
+/** Engine kind — matches the Rust `EngineKind` kebab-case repr. */
+export type EngineKind = "typst" | "tectonic";
+
+/** Where a template came from.  Drives the picker filter chip. */
+export type TemplateSource = "built-in" | "byof";
+
+/** Severity for a `PreflightFinding`.  Matches the Rust kebab-case repr. */
+export type PreflightSeverity = "info" | "warning" | "error";
+
+/** Returned by `paper_list_templates`. */
+export interface TemplateInfo {
+  id: string;
+  label: string;
+  description: string;
+  source: TemplateSource;
+  engines: EngineKind[];
+  defaultEngine: EngineKind;
+  preview: string | null;
+}
+
+/** Author block from the New Paper wizard. */
+export interface NewPaperAuthor {
+  name: string;
+  email?: string | null;
+  affiliation?: string | null;
+  orcid?: string | null;
+}
+
+/** Input payload for `paper_create`. */
+export interface NewPaperRequest {
+  /**
+   * Absolute vault root path.  The wizard already rejects the mock
+   * vault before opening, but `paperCreate` re-checks defensively.
+   */
+  vault: string;
+  /** Vault-relative folder for the new paper.  Empty = vault root. */
+  parentRel?: string;
+  title: string;
+  templateId: string;
+  authors?: NewPaperAuthor[];
+}
+
+/** Result returned by `paper_create`. */
+export interface NewPaperResult {
+  paperAbsPath: string;
+  paperRelPath: string;
+  /** Vault-relative path the editor should open after create. */
+  openRelPath: string;
+}
+
+/** Returned by `paper_status` for a folder under a paper. */
+export interface PaperStatus {
+  exists: boolean;
+  title: string | null;
+  engine: EngineKind | null;
+  templateId: string | null;
+  lastCompiledAt: string | null;
+  lastPdfPath: string | null;
+  lastError: string | null;
+}
+
+/** One entry in the `paper_preflight` result. */
+export interface PreflightFinding {
+  severity: PreflightSeverity;
+  message: string;
+  file?: string | null;
+  line?: number | null;
+}
+
+// ─── Mock-vault gate ─────────────────────────────────────────────────────
+
+const MOCK_VAULT = "__mock__";
+
+/**
+ * True iff `v` is a non-empty real vault path (not the mock sentinel).
+ * Every paper IPC checks this first.
+ */
+const isRealVault = (v: string | null | undefined): v is string =>
+  typeof v === "string" && v.length > 0 && v !== MOCK_VAULT;
+
+// ─── Real commands (phase C1) ────────────────────────────────────────────
+
+/**
+ * Enumerate the templates available for the New Paper wizard.
+ *
+ * Pass the active vault to (eventually) include the per-vault BYOF
+ * templates from `<vault>/.lattice/byof-templates/`.  For the C1
+ * landing only the built-in templates are returned regardless.
+ */
+export async function paperListTemplates(vault: string | null): Promise<TemplateInfo[]> {
+  // Mock vault is allowed to query the registry — there's no disk I/O
+  // and the picker UI uses it to render the wizard preview cards.
+  const arg = isRealVault(vault) ? vault : null;
+  return invoke<TemplateInfo[]>("paper_list_templates", { vault: arg });
+}
+
+/**
+ * Scaffold a new paper folder.  Returns the absolute + relative paths
+ * plus the file the editor should open (`sections/01-introduction.md`).
+ *
+ * Throws if the vault is the mock sentinel.
+ */
+export async function paperCreate(req: NewPaperRequest): Promise<NewPaperResult> {
+  if (!isRealVault(req.vault)) {
+    throw new Error("Cannot create a paper in the mock vault.");
+  }
+  if (!req.title.trim()) {
+    throw new Error("Paper title cannot be empty.");
+  }
+  return invoke<NewPaperResult>("paper_create", { req });
+}
+
+/**
+ * Read `paper.toml` for a given paper folder.  Returns `{ exists: false, ... }`
+ * when the folder isn't a paper — frontend uses this to decide whether
+ * to render the `PaperToolbar`.
+ */
+export async function paperStatus(paper: string): Promise<PaperStatus> {
+  if (!paper) {
+    return {
+      exists: false,
+      title: null,
+      engine: null,
+      templateId: null,
+      lastCompiledAt: null,
+      lastPdfPath: null,
+      lastError: null,
+    };
+  }
+  return invoke<PaperStatus>("paper_status", { paper });
+}
+
+/**
+ * Update `paper.toml [engine].kind`.  Used by the engine-picker
+ * dropdown in `PaperToolbar`.
+ */
+export async function paperSetCompileEngine(paper: string, engineKind: EngineKind): Promise<void> {
+  if (!paper) throw new Error("paper path is required");
+  await invoke("paper_set_compile_engine", { paper, engineKind });
+}
+
+// ─── Stub commands (phases C2-C9, registered now for type safety) ────────
+
+/**
+ * Compile the paper and return the absolute PDF path on success.
+ * **Phase C1 (compile half) — currently errors out from Rust.**
+ */
+export async function paperCompile(paper: string): Promise<string> {
+  if (!isRealVault(paper)) throw new Error("paper path is required");
+  return invoke<string>("paper_compile", { paper });
+}
+
+/**
+ * Run preflight without compiling.  **Phase C7 — currently errors out.**
+ */
+export async function paperPreflight(paper: string): Promise<PreflightFinding[]> {
+  if (!isRealVault(paper)) throw new Error("paper path is required");
+  return invoke<PreflightFinding[]>("paper_preflight", { paper });
+}
+
+/**
+ * Emit `build/project/` + `build/project.zip` for Overleaf upload.
+ * **Phase C2 — currently errors out.**
+ */
+export async function paperEmitBundle(paper: string): Promise<string> {
+  if (!isRealVault(paper)) throw new Error("paper path is required");
+  return invoke<string>("paper_emit_bundle", { paper });
+}
+
+/**
+ * Open in Overleaf via the local sidecar URL or reveal-in-dir fallback.
+ * **Phase C2 — currently errors out.**
+ */
+export async function paperOpenOverleaf(paper: string): Promise<string> {
+  if (!isRealVault(paper)) throw new Error("paper path is required");
+  return invoke<string>("paper_open_overleaf", { paper });
+}
+
+/**
+ * Visual PDF diff vs `[build].diff_against`.  **Phase C7 — currently errors out.**
+ */
+export async function paperDiff(paper: string): Promise<string | null> {
+  if (!isRealVault(paper)) throw new Error("paper path is required");
+  return invoke<string | null>("paper_diff", { paper });
+}
+
+/**
+ * Import a BYOF conference bundle (zip).  Returns the new BYOF id.
+ * **Phase C5 — currently errors out.**
+ */
+export async function paperByofImport(vault: string, zipPath: string): Promise<string> {
+  if (!isRealVault(vault)) throw new Error("Cannot import BYOF into the mock vault.");
+  return invoke<string>("paper_byof_import", { vault, zipPath });
+}
+
+/** **Phase C5 — currently errors out.** */
+export async function paperByofReImport(
+  vault: string,
+  byofId: string,
+  zipPath: string,
+): Promise<string> {
+  if (!isRealVault(vault)) throw new Error("Cannot re-import BYOF into the mock vault.");
+  return invoke<string>("paper_byof_re_import", { vault, byofId, zipPath });
+}
+
+/** **Phase C5 — currently errors out.** */
+export async function paperByofRemove(vault: string, byofId: string): Promise<void> {
+  if (!isRealVault(vault)) throw new Error("Cannot remove BYOF from the mock vault.");
+  await invoke("paper_byof_remove", { vault, byofId });
+}
