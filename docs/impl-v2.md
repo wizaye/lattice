@@ -355,7 +355,7 @@ This is **not** a sync feature (that's §5.2) and **not** another cloud account 
 
 #### 5.5.1 Three layers
 1. **Editor (already shipped)** — vault is a folder of `.md` + `.canvas` + `.pdf`. Wikilinks, frontmatter, embeds all work.
-2. **Compiler** — bundled headless [Quartz v4](https://github.com/jackyzha0/quartz) running in a child Node process. Quartz already implements wikilink resolution, backlinks, interactive graph view, page popover previews, and full-text search — re-implementing any of that in our own pipeline would be wasted work. We just embed it.
+2. **Compiler** — bundled headless [Quartz v5](https://github.com/jackyzha0/quartz) (released 2026-05-24; see <https://quartz.jzhao.xyz/>) running in a child Node process. Requires Node v22+ and npm v10.9.2+. Quartz already implements wikilink resolution, backlinks, interactive graph view, page popover previews, full-text search, and Obsidian-compatibility — re-implementing any of that in our own pipeline would be wasted work. We just embed it. v5 splits scaffold (`npx quartz create`) from plugin install (`npx quartz plugin install --from-config`); both run during `publish_init`. See [`docs/publishing-plan.md`](publishing-plan.md) for the full build pipeline.
 3. **Hosting adapter** — uploads the compiled `public/` directory to the user's choice of GitHub Pages / Cloudflare Pages / Vercel via REST. Tokens stored in the OS keychain (same `keyring-rs` slot we already use for BYOC).
 
 ```text
@@ -434,7 +434,7 @@ trait PublishHost {
 - **No central Lattice publish server.** Compile is local, upload goes provider-direct, the user owns the project on the host. No middleman, no SLA on us.
 - **No real-time republish.** Each Publish click is a full Quartz rebuild + redeploy. Incremental builds are a v2 idea (Quartz supports them but caches add complexity not worth shipping in v1).
 - **No custom domains in v1.** Users get `*.pages.dev` / `*.vercel.app` / `*.github.io` only. Domain attachment is a one-line config in the host's dashboard the user can do themselves.
-- **Quartz v5.** As of 2026-06, Quartz is on v4. The user-shared write-up mentioned "v5" — we'll bump when it ships if the config surface stays compatible; until then v4 is what we target.
+- **Quartz v5 is locked in.** Quartz v5.0.0 shipped 2026-05-24; we target v5 from day one. **No v4 back-compat.** Minor-version drift inside v5.x is handled by the version-gating logic in `config_gen` (see [`docs/publishing-plan.md`](publishing-plan.md) §9 step 4 + D10).
 
 ---
 
@@ -1055,6 +1055,8 @@ This is the v2 build queue, built **on top of** the work already finished + the 
 
 > **Reorder rationale (this revision):** VCS is foundational — every sync/encryption/web-clipper path writes to a vault that must already be version-controlled. The **web clipper** has been promoted from step 16 to step 4 because (a) it is independent enough to be developed in parallel by a different track, (b) it produces immediate visible value for every persona, and (c) BYOC is much easier to dogfood once we have a steady stream of clipped notes flowing in. **BYOC** sits right after web clipper for that reason: it's the natural "now I want this on my other devices" payoff. **Onboarding** stays at step 3 so the introductions for steps 4+ all hang off the wizard. **BYOF** (§8.5.13) is grouped with the paper scaffolder since both share the same Tectonic build pipeline.
 
+> **🎯 Current POC focus (post-BYOC):** BYOC (step 5) is shipped and in testing. The next two POCs being actively planned are **Paper export + BYOF (step 10)** and **Publishing pipeline (step 18)** — see the dedicated slice plans [`docs/paper-export-plan.md`](paper-export-plan.md) and [`docs/publishing-plan.md`](publishing-plan.md). They are deliberately *not* being renumbered in the queue (the dependency order still holds — Publishing reuses the BYOC GitHub token, Paper export needs no upstream features), but the two slice plans are the authoritative breakdown of work for the immediate POC track. Steps 6–9 and 11–17 continue in parallel where they don't block step 10 or step 18.
+
 1. **Backlinks v2 — engine + sidebar stats panel (§ done this session, see `src/lib/backlinks.ts`).** ✅ Shipped: alias/anchor-aware engine, grouped snippets with line numbers + highlight, mentions/files/unlinked stats strip, unlinked-mention detector. Status pill now reports total mention count.
 2. **Default VCS layer + Changes panel (§4).** Foundation for both BYOC and AI commit messages. Nothing else on this list assumes a known-good vault history until this lands.
 3. **Onboarding wizard + Welcome.md (§10, [`onboarding-journey.md`](onboarding-journey.md)).** Every feature shipped after this point gets introduced through the wizard, so it has to come before BYOC/E2EE/calendar etc.
@@ -1064,7 +1066,7 @@ This is the v2 build queue, built **on top of** the work already finished + the 
 7. **Importers — Obsidian + Logseq (§11.1, §11.2).** Cheapest, highest-value imports for the persona we already attract; intentionally after BYOC so an imported vault syncs out of the box.
 8. **Calendar tier C (Google Calendar) + Journaling (§1.4, §2).** Largest user-base, most-requested feature for the Student persona.
 9. **BYOM + Ollama default + privacy matrix (§5.3).** Unlocks AI commit messages (§4.2) and the agentic features in §5.3.
-10. **Paper scaffolder + BYOF + Typst compile pipeline (§8.5, §8.5.13, §8.1).** Headline differentiator vs Overleaf/Notion/Obsidian; BYOF lands together so the very first paper a student writes can target any conference, not just our 10 built-in templates.
+10. **Paper scaffolder + BYOF + Typst compile pipeline (§8.5, §8.5.13, §8.1).** Headline differentiator vs Overleaf/Notion/Obsidian; BYOF lands together so the very first paper a student writes can target any conference, not just our 10 built-in templates. **→ Slice plan: [`docs/paper-export-plan.md`](paper-export-plan.md).**
 11. **Canvas extras phase 1 (§3.1 items 1-5).** Closes the gap to Excalidraw without a dependency.
 12. **Databases v1 — Table + Kanban + embedded-row mode (§7).** Big effort, big payoff.
 13. **Calendar tier A (Outlook + Teams) + Meeting note generation (§1.2).** Enterprise tier opens up.
@@ -1072,7 +1074,7 @@ This is the v2 build queue, built **on top of** the work already finished + the 
 15. **CLI — `lattice` ratatui (§6).** Senior-engineer love letter; can be developed in parallel from step 5 onward.
 16. **Academic bundle polish — citation graph, lab-notebook template, AI assist (§8.3, §8.4, §8.5.12) + Stats for nerds (§12).** Builds on the §8.5 scaffolder shipped in step 10.
 17. **Remaining BYOC providers (Drive, OneDrive, Dropbox, WebDAV) (§5.2.1).** Each one is a new file once the trait stabilizes; all four share the delta-cursor scheduler so they fan out in parallel. **iCloud is intentionally NOT on the v1 queue** (Apple Dev account + macOS-only signing makes the cost-to-reach ratio untenable; see §5.2.1).
-18. **Publishing pipeline — Quartz SSG + GitHub Pages / Cloudflare Pages / Vercel (§5.5).** The Obsidian-Publish replacement. Lands after Drive/OneDrive/Dropbox ship because (a) the BYOC-GitHub OAuth token from step 5 is reused by the GitHub Pages adapter, and (b) advanced users on the other clouds expect a publish target by then. The compile pipeline + 3 layouts (Garden/Docs/Notebook) all ship together — splitting them by layout would re-trigger Quartz config churn three times.
+18. **Publishing pipeline — Quartz SSG + GitHub Pages / Cloudflare Pages / Netlify / Vercel + local browser preview (§5.5).** The Obsidian-Publish replacement. Lands after Drive/OneDrive/Dropbox ship because (a) the BYOC-GitHub OAuth token from step 5 is reused by the GitHub Pages adapter (same backup repo used for sync hosts the `publish` orphan branch), and (b) advanced users on the other clouds expect a publish target by then. The compile pipeline + 3 layouts (Garden/Docs/Notebook) + the local-preview server all ship together — splitting them by layout would re-trigger Quartz config churn three times. **→ Slice plan: [`docs/publishing-plan.md`](publishing-plan.md).**
 19. **Calendar tier B (Cal.com) + Apple Calendar.** Long tail.
 20. **Canvas extras phase 2 (§3.1 items 6-10) + research-paper exports (§3.2, §8.1–8.2).**
 21. **E2EE phases 2-5 (§9.9 steps 2-5).**
