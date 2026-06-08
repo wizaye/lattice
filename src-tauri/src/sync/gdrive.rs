@@ -37,7 +37,7 @@ const USERINFO_URL: &str = "https://openidconnect.googleapis.com/v1/userinfo";
 #[allow(dead_code)] // reserved for the upcoming pull / list / delete operations
 const FILES_API: &str = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD_API: &str = "https://www.googleapis.com/upload/drive/v3/files";
-const SCOPES: &str = "https://www.googleapis.com/auth/drive.appdata openid email";
+const SCOPES: &str = "https://www.googleapis.com/auth/drive.file openid email";
 const USER_AGENT: &str = "lattice-byoc/0.1";
 
 /// 5 minutes from URL-open to browser-callback.  Longer than the
@@ -132,23 +132,31 @@ impl SyncProvider for GdriveProvider {
 
         // 7. Persist token + manifest.
         keychain::store(vault, ProviderId::Gdrive, &token_set)?;
+        
+        let vault_name = vault.file_name().unwrap_or_default().to_string_lossy();
+        let folder_name = format!("Lattice - {}", vault_name);
+        let folder_id = ensure_vault_folder(&http, &token_set.access_token, &folder_name).await?;
+
         let mut m = manifest::load(vault, ProviderId::Gdrive)?.unwrap_or_default();
         m.schema = 1;
+        m.is_connected = true;
         m.provider = "gdrive".into();
-        m.remote_label = Some("appDataFolder".into());
+        m.remote_label = Some(folder_name.clone());
+        m.last_delta_cursor = Some(folder_id);
         m.account_label = Some(user.email.clone().unwrap_or_else(|| "google".into()));
         manifest::save(vault, ProviderId::Gdrive, &m)?;
 
         Ok(AccountInfo {
             display_name: user.name.unwrap_or_else(|| "Google".into()),
             account_email: user.email,
-            remote_label: Some("appDataFolder".into()),
+            remote_label: Some(folder_name),
         })
     }
 
     async fn disconnect(&self, vault: &Path) -> Result<(), SyncError> {
         keychain::delete(vault, ProviderId::Gdrive)?;
         if let Some(mut m) = manifest::load(vault, ProviderId::Gdrive)? {
+            m.is_connected = false;
             m.last_sync_at = None;
             manifest::save(vault, ProviderId::Gdrive, &m)?;
         }
@@ -156,8 +164,8 @@ impl SyncProvider for GdriveProvider {
     }
 
     async fn status(&self, vault: &Path) -> Result<ProviderStatus, SyncError> {
-        let connected = keychain::load(vault, ProviderId::Gdrive)?.is_some();
         let m = manifest::load(vault, ProviderId::Gdrive)?;
+        let connected = m.as_ref().map_or(false, |m| m.is_connected);
         Ok(ProviderStatus {
             connected,
             account_label: m.as_ref().and_then(|m| m.account_label.clone()),
@@ -174,91 +182,82 @@ impl SyncProvider for GdriveProvider {
             .timeout(Duration::from_secs(60))
             .build()?;
 
-        // 1. Collect every loose object under .lattice/git/objects/**
-        //    (the vault's local git store).  If there's no git store
-        //    yet, return early — nothing to push.
-        let objects_dir = vault.join(".lattice").join("git").join("objects");
-        if !objects_dir.is_dir() {
-            // Fall back to .git/objects (when vault is a real git
-            // worktree rather than the Lattice-managed mirror).
-            let alt = vault.join(".git").join("objects");
-            if !alt.is_dir() {
-                return Ok(PushResult {
-                    uploaded_objects: 0,
-                    head: None,
-                    branch: None,
-                    message: "vault has no git store yet".into(),
-                });
+        // 1. Collect workspace files instead of git objects
+        let workspace_files = collect_workspace_files(vault)?;
+        let mut m = manifest::load(vault, ProviderId::Gdrive)?.unwrap_or_default();
+        
+        let root_id = match m.last_delta_cursor.clone() {
+            Some(id) => id,
+            None => {
+                let vault_name = vault.file_name().unwrap_or_default().to_string_lossy();
+                let folder_name = format!("Lattice - {}", vault_name);
+                ensure_vault_folder(&http, &token.access_token, &folder_name).await?
             }
-        }
-        let real_objects_dir = if objects_dir.is_dir() {
-            objects_dir
-        } else {
-            vault.join(".git").join("objects")
         };
 
-        let local_blobs = collect_loose_objects(&real_objects_dir)?;
-
-        // 2. Diff against manifest.
-        let mut m = manifest::load(vault, ProviderId::Gdrive)?.unwrap_or_default();
-        let uploaded: HashSet<String> = m.uploaded_objects.iter().cloned().collect();
-        let to_upload: Vec<_> = local_blobs
-            .into_iter()
-            .filter(|(hash, _)| !uploaded.contains(hash))
-            .collect();
-
-        // 3. Upload each new object.
+        let mut folder_cache = std::collections::HashMap::new();
         let mut count = 0u32;
-        for (hash, path) in &to_upload {
-            let body = fs::read(path)?;
-            upload_file(
+        
+        for abs_path in &workspace_files {
+            let rel_path = abs_path.strip_prefix(vault).unwrap_or(abs_path);
+            let path_str = rel_path.to_string_lossy().to_string();
+            
+            let bytes = match fs::read(abs_path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            
+            let meta = m.file_map.get(&path_str);
+            if let Some(existing) = meta {
+                if existing.hash == hash {
+                    continue; // Skip unchanged files
+                }
+            }
+            
+            let parent_dir = rel_path.parent().unwrap_or_else(|| std::path::Path::new(""));
+            let parent_id = ensure_nested_folder(&http, &token.access_token, &root_id, parent_dir, &mut folder_cache).await?;
+            
+            let file_name = rel_path.file_name().unwrap_or_default().to_string_lossy();
+            let mime = if file_name.ends_with(".md") {
+                "text/markdown"
+            } else if file_name.ends_with(".json") {
+                "application/json"
+            } else if file_name.ends_with(".txt") {
+                "text/plain"
+            } else {
+                "application/octet-stream"
+            };
+
+            let existing_id = meta.map(|m| m.id.as_str());
+            
+            let new_id = upsert_file(
                 &http,
                 &token.access_token,
-                &format!("obj-{hash}.bin"),
-                "application/octet-stream",
-                body,
-            )
-            .await?;
-            m.uploaded_objects.push(hash.clone());
+                &parent_id,
+                &file_name,
+                mime,
+                bytes,
+                existing_id,
+            ).await?;
+            
+            m.file_map.insert(path_str, crate::sync::manifest::RemoteFileMeta {
+                id: new_id,
+                hash,
+            });
             count += 1;
         }
 
-        // 4. Upload the current branch ref + manifest blob.
-        let head_value = head_sha(vault).ok();
-        if let Some(head) = head_value.as_deref() {
-            upload_file(
-                &http,
-                &token.access_token,
-                "refs-heads-main.txt",
-                "text/plain",
-                head.as_bytes().to_vec(),
-            )
-            .await?;
-        }
-        let blob = serde_json::to_vec_pretty(&RemoteManifest {
-            head: head_value.clone(),
-            uploaded: m.uploaded_objects.clone(),
-        })?;
-        upload_file(
-            &http,
-            &token.access_token,
-            "manifest.json",
-            "application/json",
-            blob,
-        )
-        .await?;
-
-        // 5. Persist local manifest.
-        m.local_head = head_value.clone();
-        m.remote_head = head_value.clone();
+        m.last_delta_cursor = Some(root_id);
         m.last_sync_at = Some(now_unix());
         manifest::save(vault, ProviderId::Gdrive, &m)?;
 
         Ok(PushResult {
             uploaded_objects: count,
-            head: head_value,
+            head: None,
             branch: current_branch(vault).ok(),
-            message: format!("Uploaded {count} new object(s) to appDataFolder"),
+            message: format!("Uploaded {count} file(s) to Lattice folder"),
         })
     }
 
@@ -375,23 +374,149 @@ async fn exchange_code(
     })
 }
 
-/// Multipart upload to `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`
-/// with `parents:["appDataFolder"]`.  Always creates a new file; we
-/// rely on Drive's "files can share a name" behaviour and rewrite the
-/// canonical name on every push.  (A follow-up slice will swap to
-/// upsert via `files.update` once we track the per-file id in the
-/// manifest.)
-async fn upload_file(
+#[derive(Deserialize)]
+struct FileListResponse {
+    files: Vec<DriveFile>,
+}
+
+#[derive(Deserialize)]
+struct DriveFile {
+    id: String,
+}
+
+async fn ensure_vault_folder(
     http: &reqwest::Client,
     token: &str,
+    folder_name: &str,
+) -> Result<String, SyncError> {
+    // 1. Search for existing folder
+    let q = format!("name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    let resp = http
+        .get(FILES_API)
+        .bearer_auth(token)
+        .query(&[("q", &q), ("spaces", &"drive".to_string())])
+        .send()
+        .await?;
+    
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(SyncError::Api(format!("search folder returned {status}: {body}")));
+    }
+    
+    let list: FileListResponse = resp.json().await?;
+    if let Some(file) = list.files.first() {
+        return Ok(file.id.clone());
+    }
+
+    // 2. Create folder if not found
+    let metadata = serde_json::json!({
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder"
+    });
+    
+    let resp = http
+        .post(FILES_API)
+        .bearer_auth(token)
+        .json(&metadata)
+        .send()
+        .await?;
+        
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(SyncError::Api(format!("create folder returned {status}: {body}")));
+    }
+    
+    let created: DriveFile = resp.json().await?;
+    Ok(created.id)
+}
+
+async fn ensure_nested_folder(
+    http: &reqwest::Client,
+    token: &str,
+    root_id: &str,
+    rel_path: &Path,
+    folder_cache: &mut std::collections::HashMap<PathBuf, String>,
+) -> Result<String, SyncError> {
+    let mut current_id = root_id.to_string();
+    let mut current_path = PathBuf::new();
+    
+    for component in rel_path.components() {
+        if let std::path::Component::Normal(name) = component {
+            current_path.push(name);
+            if let Some(cached_id) = folder_cache.get(&current_path) {
+                current_id = cached_id.clone();
+                continue;
+            }
+            
+            let folder_name = name.to_string_lossy();
+            let q = format!("name='{folder_name}' and '{current_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+            
+            let resp = http
+                .get(FILES_API)
+                .bearer_auth(token)
+                .query(&[("q", &q), ("spaces", &"drive".to_string())])
+                .send()
+                .await?;
+                
+            let mut found_id = None;
+            if resp.status().is_success() {
+                let list: FileListResponse = resp.json().await?;
+                if let Some(file) = list.files.first() {
+                    found_id = Some(file.id.clone());
+                }
+            }
+            
+            if let Some(id) = found_id {
+                current_id = id;
+            } else {
+                let metadata = serde_json::json!({
+                    "name": folder_name,
+                    "parents": [current_id],
+                    "mimeType": "application/vnd.google-apps.folder"
+                });
+                
+                let resp = http
+                    .post(FILES_API)
+                    .bearer_auth(token)
+                    .json(&metadata)
+                    .send()
+                    .await?;
+                    
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let err_body = resp.text().await.unwrap_or_default();
+                    return Err(SyncError::Api(format!("create nested folder returned {status}: {err_body}")));
+                }
+                
+                let created: DriveFile = resp.json().await?;
+                current_id = created.id;
+            }
+            
+            folder_cache.insert(current_path.clone(), current_id.clone());
+        }
+    }
+    
+    Ok(current_id)
+}
+
+/// Multipart upload to `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`.
+/// Handles both POST (create) and PATCH (update) if `existing_id` is provided.
+async fn upsert_file(
+    http: &reqwest::Client,
+    token: &str,
+    parent_id: &str,
     name: &str,
     mime: &str,
     body: Vec<u8>,
-) -> Result<(), SyncError> {
-    let metadata = serde_json::json!({
-        "name": name,
-        "parents": ["appDataFolder"],
-    });
+    existing_id: Option<&str>,
+) -> Result<String, SyncError> {
+    let metadata = if existing_id.is_some() {
+        serde_json::json!({ "name": name })
+    } else {
+        serde_json::json!({ "name": name, "parents": [parent_id] })
+    };
     let part_meta = reqwest::multipart::Part::text(metadata.to_string())
         .mime_str("application/json; charset=UTF-8")
         .map_err(|e| SyncError::Net(e.to_string()))?;
@@ -402,8 +527,13 @@ async fn upload_file(
         .part("metadata", part_meta)
         .part("file", part_body);
 
+    let (url, method) = match existing_id {
+        Some(id) => (format!("{UPLOAD_API}/{id}?uploadType=multipart"), reqwest::Method::PATCH),
+        None => (format!("{UPLOAD_API}?uploadType=multipart"), reqwest::Method::POST),
+    };
+
     let resp = http
-        .post(format!("{UPLOAD_API}?uploadType=multipart"))
+        .request(method, url)
         .bearer_auth(token)
         .multipart(form)
         .send()
@@ -412,33 +542,27 @@ async fn upload_file(
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(SyncError::Api(format!(
-            "upload {name} returned {status}: {body}"
+            "upsert {name} returned {status}: {body}"
         )));
     }
-    Ok(())
+    
+    let created: DriveFile = resp.json().await?;
+    Ok(created.id)
 }
 
-/// Walk a git object store and return `(blake3 hex, abs path)` for
-/// every loose object.  Skips `pack/`, `info/`, and any non-regular
-/// file.  blake3 over the on-disk bytes (which are already deflated
-/// in a git object store) gives us a content-addressed key that's
-/// stable across syncs.
-fn collect_loose_objects(objects_dir: &Path) -> Result<Vec<(String, PathBuf)>, SyncError> {
+fn collect_workspace_files(vault: &Path) -> Result<Vec<PathBuf>, SyncError> {
     let mut out = Vec::new();
-    for entry in WalkDir::new(objects_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(vault).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
             continue;
         }
         let path = entry.path();
-        // Skip pack/info trees — those need a separate sync strategy.
         if path.components().any(|c| {
-            matches!(c.as_os_str().to_str(), Some("pack") | Some("info"))
+            matches!(c.as_os_str().to_str(), Some(".git") | Some(".lattice") | Some(".DS_Store"))
         }) {
             continue;
         }
-        let bytes = fs::read(path)?;
-        let hash = blake3::hash(&bytes).to_hex().to_string();
-        out.push((hash, path.to_path_buf()));
+        out.push(path.to_path_buf());
     }
     Ok(out)
 }
@@ -460,21 +584,58 @@ fn head_sha(vault: &Path) -> Result<String, SyncError> {
 }
 
 fn git(vault: &Path, args: &[&str]) -> Result<std::process::Output, SyncError> {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+    use wait_timeout::ChildExt;
     #[cfg(windows)]
     use std::os::windows::process::CommandExt;
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 
     let mut cmd = Command::new("git");
     cmd.current_dir(vault)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
-        .env("LANG", "C");
+        .env("LANG", "C")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.output().map_err(|e| SyncError::Git(format!("git spawn failed: {e}")))
+
+    let mut child = cmd.spawn()
+        .map_err(|e| SyncError::Git(format!("git spawn failed: {e}")))?;
+
+    match child.wait_timeout(GIT_TIMEOUT) {
+        Ok(Some(status)) => {
+            let stdout = child.stdout.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            let stderr = child.stderr.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            Ok(std::process::Output { status, stdout, stderr })
+        }
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(SyncError::Git(format!(
+                "git {} timed out after {}s",
+                args.join(" "),
+                GIT_TIMEOUT.as_secs()
+            )))
+        }
+        Err(e) => {
+            let _ = child.kill();
+            Err(SyncError::Git(format!("git wait failed: {e}")))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -493,14 +654,15 @@ mod tests {
     }
 
     #[test]
-    fn collect_loose_objects_skips_pack_dir() {
+    fn collect_workspace_files_skips_git_and_lattice() {
         let dir = TempDir::new().unwrap();
-        let objects = dir.path().join("objects");
-        fs::create_dir_all(objects.join("ab")).unwrap();
-        fs::write(objects.join("ab").join("cdef"), b"obj1").unwrap();
-        fs::create_dir_all(objects.join("pack")).unwrap();
-        fs::write(objects.join("pack").join("pack-xyz.pack"), b"skip").unwrap();
-        let got = collect_loose_objects(&objects).unwrap();
-        assert_eq!(got.len(), 1, "should pick up exactly one loose object");
+        let vault = dir.path();
+        fs::write(vault.join("hello.md"), b"obj1").unwrap();
+        fs::create_dir_all(vault.join(".git")).unwrap();
+        fs::write(vault.join(".git").join("config"), b"skip").unwrap();
+        fs::create_dir_all(vault.join(".lattice")).unwrap();
+        fs::write(vault.join(".lattice").join("config"), b"skip").unwrap();
+        let got = collect_workspace_files(&vault).unwrap();
+        assert_eq!(got.len(), 1, "should only pick up hello.md");
     }
 }

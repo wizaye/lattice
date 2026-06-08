@@ -16,17 +16,22 @@
 //! exposes to every other user on multi-tenant systems).
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
+use wait_timeout::ChildExt;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Timeout for network-bound git subprocesses (push, fetch).
+const GIT_NET_TIMEOUT: Duration = Duration::from_secs(60);
 
 use super::clients::GITHUB_CLIENT_ID;
 use super::error::SyncError;
@@ -117,6 +122,7 @@ impl SyncProvider for GithubProvider {
         keychain::store(vault, ProviderId::Github, &token_set)?;
         let mut m = manifest::load(vault, ProviderId::Github)?.unwrap_or_default();
         m.schema = 1;
+        m.is_connected = true;
         m.provider = "github".into();
         m.remote_label = Some(repo_slug.clone());
         m.account_label = Some(user.login.clone());
@@ -135,6 +141,7 @@ impl SyncProvider for GithubProvider {
         // friction-free.  Only token + last_sync_at get wiped.
         keychain::delete(vault, ProviderId::Github)?;
         if let Some(mut m) = manifest::load(vault, ProviderId::Github)? {
+            m.is_connected = false;
             m.last_sync_at = None;
             manifest::save(vault, ProviderId::Github, &m)?;
         }
@@ -142,8 +149,8 @@ impl SyncProvider for GithubProvider {
     }
 
     async fn status(&self, vault: &Path) -> Result<ProviderStatus, SyncError> {
-        let connected = keychain::load(vault, ProviderId::Github)?.is_some();
         let m = manifest::load(vault, ProviderId::Github)?;
+        let connected = m.as_ref().map_or(false, |m| m.is_connected);
         Ok(ProviderStatus {
             connected,
             account_label: m.as_ref().and_then(|m| m.account_label.clone()),
@@ -505,7 +512,12 @@ fn preflight_vault(vault: &Path) -> Result<(), SyncError> {
             vault.display()
         )));
     }
-    if !vault.join(".git").exists() {
+    // Lattice uses `--separate-git-dir=.lattice/git` which creates a
+    // `.git` *file* (gitdir pointer), not a `.git` directory.  Accept
+    // either shape so the preflight works with both standard and
+    // Lattice-managed repos.
+    let dot_git = vault.join(".git");
+    if !dot_git.exists() {
         return Err(SyncError::BadInput(
             "this vault has no git repository — enable Version Control \
              above before connecting a sync provider"
@@ -600,22 +612,58 @@ fn head_sha(vault: &Path) -> Result<String, SyncError> {
 }
 
 fn git(vault: &Path, args: &[&str]) -> Result<Output, SyncError> {
+    git_timed(vault, args, GIT_NET_TIMEOUT)
+}
+
+fn git_timed(vault: &Path, args: &[&str], timeout: Duration) -> Result<Output, SyncError> {
     let mut cmd = Command::new("git");
     cmd.current_dir(vault)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C")
-        .env("LANG", "C");
+        .env("LANG", "C")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.output().map_err(|e| {
+
+    let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             SyncError::Git("git is not installed or not on PATH".into())
         } else {
             SyncError::Git(format!("git spawn failed: {e}"))
         }
-    })
+    })?;
+
+    match child.wait_timeout(timeout) {
+        Ok(Some(status)) => {
+            let stdout = child.stdout.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            let stderr = child.stderr.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            Ok(Output { status, stdout, stderr })
+        }
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(SyncError::Git(format!(
+                "git {} timed out after {}s",
+                args.join(" "),
+                timeout.as_secs()
+            )))
+        }
+        Err(e) => {
+            let _ = child.kill();
+            Err(SyncError::Git(format!("git wait failed: {e}")))
+        }
+    }
 }
 
 /// Run git with an in-memory `http.<host>.extraheader` carrying the
@@ -632,19 +680,56 @@ fn git_with_token(vault: &Path, token: &str, args: &[&str]) -> Result<Output, Sy
         .env("LANG", "C")
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "http.https://github.com/.extraheader")
-        .env(
-            "GIT_CONFIG_VALUE_0",
-            format!("Authorization: Bearer {token}"),
-        );
+        .env("GIT_CONFIG_VALUE_0", {
+            // Git's smart HTTP transport uses Basic auth, NOT Bearer.
+            // Bearer works for the REST API but is rejected by the
+            // HTTP transport endpoint.  The username is the literal
+            // string "x-access-token" (GitHub's convention); the
+            // password is the OAuth token.
+            let credentials = BASE64.encode(format!("x-access-token:{token}"));
+            format!("Authorization: Basic {credentials}")
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd.output().map_err(|e| {
+
+    let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             SyncError::Git("git is not installed or not on PATH".into())
         } else {
             SyncError::Git(format!("git spawn failed: {e}"))
         }
-    })
+    })?;
+
+    match child.wait_timeout(GIT_NET_TIMEOUT) {
+        Ok(Some(status)) => {
+            let stdout = child.stdout.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            let stderr = child.stderr.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            Ok(Output { status, stdout, stderr })
+        }
+        Ok(None) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(SyncError::Git(format!(
+                "git {} timed out after {}s",
+                args.join(" "),
+                GIT_NET_TIMEOUT.as_secs()
+            )))
+        }
+        Err(e) => {
+            let _ = child.kill();
+            Err(SyncError::Git(format!("git wait failed: {e}")))
+        }
+    }
 }
 
 #[cfg(test)]

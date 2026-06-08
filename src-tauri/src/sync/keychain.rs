@@ -383,11 +383,26 @@ mod win {
 mod nix {
     use super::*;
 
+    #[cfg(debug_assertions)]
+    fn debug_token_path(vault: &Path, provider: ProviderId) -> Result<std::path::PathBuf, SyncError> {
+        let base = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| SyncError::Io("$HOME is not set".into()))?;
+        let dir = base.join(".lattice").join("byoc-tokens");
+        Ok(dir.join(format!(
+            "{}-{}.json",
+            provider.as_str(),
+            vault_hash(vault)
+        )))
+    }
+
+    #[cfg(not(debug_assertions))]
     fn entry(vault: &Path, provider: ProviderId) -> Result<keyring::Entry, SyncError> {
         keyring::Entry::new(SERVICE, &account_key(vault, provider))
             .map_err(|e| SyncError::Keychain(e.to_string()))
     }
 
+    #[cfg(not(debug_assertions))]
     fn legacy_entry(vault: &Path, provider: ProviderId) -> Result<keyring::Entry, SyncError> {
         let legacy = format!("{}:{}", provider.as_str(), legacy_vault_hash(vault));
         keyring::Entry::new(SERVICE, &legacy).map_err(|e| SyncError::Keychain(e.to_string()))
@@ -398,47 +413,81 @@ mod nix {
         provider: ProviderId,
         plaintext: &[u8],
     ) -> Result<(), SyncError> {
-        let s = std::str::from_utf8(plaintext)
-            .map_err(|e| SyncError::Manifest(e.to_string()))?;
-        entry(vault, provider)?
-            .set_password(s)
-            .map_err(|e| SyncError::Keychain(e.to_string()))
+        #[cfg(debug_assertions)]
+        {
+            let path = debug_token_path(vault, provider)?;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, plaintext)?;
+            Ok(())
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let s = std::str::from_utf8(plaintext)
+                .map_err(|e| SyncError::Manifest(e.to_string()))?;
+            entry(vault, provider)?
+                .set_password(s)
+                .map_err(|e| SyncError::Keychain(e.to_string()))
+        }
     }
 
     pub(super) fn read(
         vault: &Path,
         provider: ProviderId,
     ) -> Result<Option<Vec<u8>>, SyncError> {
-        let e = entry(vault, provider)?;
-        match e.get_password() {
-            Ok(blob) => Ok(Some(blob.into_bytes())),
-            Err(keyring::Error::NoEntry) => {
-                // Back-compat for tokens written with the historical
-                // raw-path hash strategy.
-                let le = legacy_entry(vault, provider)?;
-                match le.get_password() {
-                    Ok(blob) => Ok(Some(blob.into_bytes())),
-                    Err(keyring::Error::NoEntry) => Ok(None),
-                    Err(other) => Err(SyncError::Keychain(other.to_string())),
-                }
+        #[cfg(debug_assertions)]
+        {
+            let path = debug_token_path(vault, provider)?;
+            match std::fs::read(&path) {
+                Ok(bytes) => Ok(Some(bytes)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(SyncError::Io(e.to_string())),
             }
-            Err(other) => Err(SyncError::Keychain(other.to_string())),
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let e = entry(vault, provider)?;
+            match e.get_password() {
+                Ok(blob) => Ok(Some(blob.into_bytes())),
+                Err(keyring::Error::NoEntry) => {
+                    let le = legacy_entry(vault, provider)?;
+                    match le.get_password() {
+                        Ok(blob) => Ok(Some(blob.into_bytes())),
+                        Err(keyring::Error::NoEntry) => Ok(None),
+                        Err(other) => Err(SyncError::Keychain(other.to_string())),
+                    }
+                }
+                Err(other) => Err(SyncError::Keychain(other.to_string())),
+            }
         }
     }
 
     pub(super) fn delete(vault: &Path, provider: ProviderId) -> Result<(), SyncError> {
-        let e = entry(vault, provider)?;
-        let le = legacy_entry(vault, provider)?;
-        match e.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()),
-            Err(other) => Err(SyncError::Keychain(other.to_string())),
+        #[cfg(debug_assertions)]
+        {
+            let path = debug_token_path(vault, provider)?;
+            match std::fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(SyncError::Io(e.to_string())),
+            }
         }
-        .and_then(|_| match le.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()),
-            Err(other) => Err(SyncError::Keychain(other.to_string())),
-        })
+        #[cfg(not(debug_assertions))]
+        {
+            let e = entry(vault, provider)?;
+            let le = legacy_entry(vault, provider)?;
+            match e.delete_credential() {
+                Ok(()) => Ok(()),
+                Err(keyring::Error::NoEntry) => Ok(()),
+                Err(other) => Err(SyncError::Keychain(other.to_string())),
+            }
+            .and_then(|_| match le.delete_credential() {
+                Ok(()) => Ok(()),
+                Err(keyring::Error::NoEntry) => Ok(()),
+                Err(other) => Err(SyncError::Keychain(other.to_string())),
+            })
+        }
     }
 }
 

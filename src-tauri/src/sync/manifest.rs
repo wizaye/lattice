@@ -18,9 +18,18 @@ use super::ProviderId;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub struct RemoteFileMeta {
+    pub id: String,
+    pub hash: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct SyncManifest {
     #[serde(default = "schema_v1")]
     pub schema: u32,
+    #[serde(default)]
+    pub is_connected: bool,
     /// Provider id as `kebab-case` string, redundant with the
     /// filename but useful for sanity checks if the file gets moved.
     pub provider: String,
@@ -38,6 +47,8 @@ pub struct SyncManifest {
     /// doesn't deserialise from JSON arrays without a custom impl.
     #[serde(default)]
     pub uploaded_objects: Vec<String>,
+    #[serde(default)]
+    pub file_map: std::collections::HashMap<String, RemoteFileMeta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_sync_at: Option<i64>,
     /// Provider-specific cursor (Drive `startPageToken`, etc.).
@@ -114,10 +125,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let m = SyncManifest {
             schema: 1,
+            is_connected: true,
             provider: "github".into(),
             local_head: Some("abc".into()),
             remote_head: Some("abc".into()),
             uploaded_objects: vec!["a".into(), "b".into()],
+            file_map: std::collections::HashMap::new(),
             last_sync_at: Some(123),
             last_delta_cursor: None,
             remote_label: Some("foo/bar".into()),

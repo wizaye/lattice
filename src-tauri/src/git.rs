@@ -3,16 +3,31 @@
 //! Every command takes a `vault_path` (the on-disk vault root) and
 //! invokes `git` with `current_dir(vault)`.  Git itself handles ref
 //! resolution, locks, packfiles, etc. — we only parse output.
+//!
+//! All Tauri commands are `async` and wrap the synchronous subprocess
+//! work in `tokio::task::spawn_blocking` so they never block the
+//! Tauri IPC thread pool.  Subprocess calls use `wait-timeout` to
+//! kill runaway git processes instead of hanging the app.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
+use wait_timeout::ChildExt;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Default timeout for most git subprocess calls (status, stage,
+/// unstage, commit, log, diff, branches).
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Longer timeout for operations that may be slow on first run
+/// (init with `git add -A` on a large vault, push/fetch).
+const GIT_TIMEOUT_LONG: Duration = Duration::from_secs(120);
 
 // ─── DTOs ───────────────────────────────────────────────────────────────
 // Field names are serialised as camelCase so the React/TS layer sees
@@ -112,29 +127,87 @@ fn vault_dir(vault_path: &str) -> Result<PathBuf, String> {
 /// env vars that keep git non-interactive (no credential prompts, no
 /// locale weirdness in our parsers) and, on Windows, hides the console
 /// window that would otherwise flash for every subprocess.
+///
+/// Uses `wait-timeout` to kill the child process if it exceeds the
+/// deadline — prevents the app from hanging when git's built-in
+/// FSMonitor daemon deadlocks (a known macOS issue) or when a network
+/// operation stalls.
 fn run(vault: &Path, args: &[&str]) -> Result<Output, String> {
+    run_with_timeout(vault, args, GIT_TIMEOUT)
+}
+
+/// Like `run` but with a caller-specified timeout.
+fn run_with_timeout(vault: &Path, args: &[&str], timeout: Duration) -> Result<Output, String> {
     let mut cmd = Command::new("git");
     cmd.current_dir(vault)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C")
-        .env("LANG", "C");
+        .env("LANG", "C")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
-    cmd.output().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             "git is not installed or not on PATH.".to_string()
         } else {
             format!("git spawn failed: {} (cwd={})", e, vault.display())
         }
-    })
+    })?;
+
+    match child.wait_timeout(timeout) {
+        Ok(Some(status)) => {
+            // Child exited within the timeout — collect stdout/stderr.
+            let stdout = child.stdout.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            let stderr = child.stderr.take().map_or_else(Vec::new, |mut r| {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut r, &mut buf).ok();
+                buf
+            });
+            Ok(Output { status, stdout, stderr })
+        }
+        Ok(None) => {
+            // Timed out — kill the child and report.
+            let _ = child.kill();
+            let _ = child.wait(); // reap zombie
+            Err(format!(
+                "git {} timed out after {}s (cwd={})",
+                args.join(" "),
+                timeout.as_secs(),
+                vault.display()
+            ))
+        }
+        Err(e) => {
+            let _ = child.kill();
+            Err(format!("git wait failed: {} (cwd={})", e, vault.display()))
+        }
+    }
 }
 
 /// Run `git <args>`, require success, return stdout bytes.
 fn ok_bytes(vault: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let out = run(vault, args)?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() {
+            format!("git {} exited {:?}", args.join(" "), out.status.code())
+        } else {
+            err
+        });
+    }
+    Ok(out.stdout)
+}
+
+/// Like `ok_bytes` but with a custom timeout.
+fn ok_bytes_with_timeout(vault: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>, String> {
+    let out = run_with_timeout(vault, args, timeout)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(if err.is_empty() {
@@ -165,22 +238,32 @@ fn opt(s: &str) -> Option<String> {
 // ─── Tauri commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn git_check_installed() -> Result<GitPresence, String> {
-    let mut cmd = Command::new("git");
-    cmd.arg("--version");
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    match cmd.output() {
-        Ok(out) if out.status.success() => Ok(GitPresence {
-            installed: true,
-            version: Some(String::from_utf8_lossy(&out.stdout).trim().to_string()),
-        }),
-        _ => Ok(GitPresence { installed: false, version: None }),
-    }
+pub async fn git_check_installed() -> Result<GitPresence, String> {
+    tokio::task::spawn_blocking(|| {
+        let mut cmd = Command::new("git");
+        cmd.arg("--version");
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.output() {
+            Ok(out) if out.status.success() => Ok(GitPresence {
+                installed: true,
+                version: Some(String::from_utf8_lossy(&out.stdout).trim().to_string()),
+            }),
+            _ => Ok(GitPresence { installed: false, version: None }),
+        }
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_status(vault_path: String) -> Result<VcsStatus, String> {
+pub async fn vcs_status(vault_path: String) -> Result<VcsStatus, String> {
+    tokio::task::spawn_blocking(move || vcs_status_sync(vault_path))
+        .await
+        .map_err(|e| format!("task panicked: {e}"))?
+}
+
+fn vcs_status_sync(vault_path: String) -> Result<VcsStatus, String> {
     let vault = vault_dir(&vault_path)?;
     if !is_repo(&vault) {
         return Ok(VcsStatus::default());
@@ -193,35 +276,46 @@ pub fn vcs_status(vault_path: String) -> Result<VcsStatus, String> {
 }
 
 #[tauri::command]
-pub fn vcs_preview_untracked_count(vault_path: String) -> Result<u32, String> {
-    let vault = vault_dir(&vault_path)?;
-    let skip: HashSet<&str> = [
-        ".git", ".lattice", ".DS_Store", "Thumbs.db", "node_modules",
-    ]
-    .into_iter()
-    .collect();
-
-    let mut n: u32 = 0;
-    for e in walkdir::WalkDir::new(&vault)
-        .follow_links(false)
+pub async fn vcs_preview_untracked_count(vault_path: String) -> Result<u32, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let skip: HashSet<&str> = [
+            ".git", ".lattice", ".DS_Store", "Thumbs.db", "node_modules",
+        ]
         .into_iter()
-        .filter_entry(|e| {
-            e.file_name()
-                .to_str()
-                .map(|name| !skip.contains(name))
-                .unwrap_or(false)
-        })
-        .filter_map(|e| e.ok())
-    {
-        if e.file_type().is_file() {
-            n = n.saturating_add(1);
+        .collect();
+
+        let mut n: u32 = 0;
+        for e in walkdir::WalkDir::new(&vault)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|name| !skip.contains(name))
+                    .unwrap_or(false)
+            })
+            .filter_map(|e| e.ok())
+        {
+            if e.file_type().is_file() {
+                n = n.saturating_add(1);
+            }
         }
-    }
-    Ok(n)
+        Ok(n)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_init(vault_path: String) -> Result<VcsStatus, String> {
+pub async fn vcs_init(vault_path: String) -> Result<VcsStatus, String> {
+    let vp = vault_path.clone();
+    tokio::task::spawn_blocking(move || vcs_init_sync(vp))
+        .await
+        .map_err(|e| format!("task panicked: {e}"))?
+}
+
+fn vcs_init_sync(vault_path: String) -> Result<VcsStatus, String> {
     let vault = vault_dir(&vault_path)?;
 
     // Keep git metadata under .lattice/ so it doesn't clutter the
@@ -237,8 +331,14 @@ pub fn vcs_init(vault_path: String) -> Result<VcsStatus, String> {
     }
 
     // Config tuned for large note-vaults on Windows / macOS / Linux.
+    //
+    // IMPORTANT: `core.fsmonitor` is explicitly DISABLED.  On macOS,
+    // setting it to "true" causes `git status` to attempt launching a
+    // `fsmonitor--daemon` (FSEvents-based) which deadlocks when
+    // invoked from a Tauri subprocess with GIT_TERMINAL_PROMPT=0.
+    // This was the root cause of the init hang on macOS.
     for (k, v) in [
-        ("core.fsmonitor", "true"),
+        ("core.fsmonitor", "false"),
         ("core.untrackedCache", "true"),
         ("feature.manyFiles", "true"),
         ("core.autocrlf", "false"),
@@ -262,105 +362,131 @@ pub fn vcs_init(vault_path: String) -> Result<VcsStatus, String> {
 
     // First-time setup: stage everything and create a root commit so
     // HEAD exists.  Set placeholder identity if the user hasn't.
+    //
+    // Uses GIT_TIMEOUT_LONG because `git add -A` on a large vault
+    // can be slow (macOS Spotlight indexing, xattr, HFS+).
     let unborn = run(&vault, &["rev-parse", "--verify", "HEAD"])
         .map(|o| !o.status.success())
         .unwrap_or(true);
     if unborn {
-        ok_bytes(&vault, &["add", "-A"])?;
+        ok_bytes_with_timeout(&vault, &["add", "-A"], GIT_TIMEOUT_LONG)?;
         if ok_bytes(&vault, &["config", "--get", "user.name"]).is_err() {
             ok_bytes(&vault, &["config", "user.name", "Lattice User"])?;
         }
         if ok_bytes(&vault, &["config", "--get", "user.email"]).is_err() {
             ok_bytes(&vault, &["config", "user.email", "user@lattice.local"])?;
         }
-        ok_bytes(
+        // --no-verify skips any user-installed git hooks that could
+        // hang or fail during the automated init.
+        ok_bytes_with_timeout(
             &vault,
-            &["commit", "--allow-empty", "-m", "Initial Lattice snapshot"],
+            &["commit", "--allow-empty", "--no-verify", "-m", "Initial Lattice snapshot"],
+            GIT_TIMEOUT_LONG,
         )?;
     }
 
-    vcs_status(vault_path)
+    vcs_status_sync(vault_path)
 }
 
 #[tauri::command]
-pub fn vcs_stage(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
-    if paths.is_empty() {
-        return vcs_status(vault_path);
-    }
-    let vault = vault_dir(&vault_path)?;
-    let mut args = vec!["add", "--"];
-    args.extend(paths.iter().map(String::as_str));
-    ok_bytes(&vault, &args)?;
-    vcs_status(vault_path)
+pub async fn vcs_stage(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
+    tokio::task::spawn_blocking(move || {
+        if paths.is_empty() {
+            return vcs_status_sync(vault_path);
+        }
+        let vault = vault_dir(&vault_path)?;
+        let mut args = vec!["add", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        ok_bytes(&vault, &args)?;
+        vcs_status_sync(vault_path)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_unstage(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
-    if paths.is_empty() {
-        return vcs_status(vault_path);
-    }
-    let vault = vault_dir(&vault_path)?;
-    let mut args = vec!["restore", "--staged", "--"];
-    args.extend(paths.iter().map(String::as_str));
-    ok_bytes(&vault, &args)?;
-    vcs_status(vault_path)
+pub async fn vcs_unstage(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
+    tokio::task::spawn_blocking(move || {
+        if paths.is_empty() {
+            return vcs_status_sync(vault_path);
+        }
+        let vault = vault_dir(&vault_path)?;
+        let mut args = vec!["restore", "--staged", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        ok_bytes(&vault, &args)?;
+        vcs_status_sync(vault_path)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 /// Discard worktree changes.  Tracked paths go through `git restore
 /// --worktree`; untracked paths are sent to the OS recycle bin via
 /// `trash` (NEVER hard-deleted — user data).
 #[tauri::command]
-pub fn vcs_discard(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
-    if paths.is_empty() {
-        return vcs_status(vault_path);
-    }
-    let vault = vault_dir(&vault_path)?;
-
-    let snap = vcs_status(vault_path.clone())?;
-    let untracked: HashSet<&str> =
-        snap.untracked.iter().map(|c| c.path.as_str()).collect();
-    let (recycle, restore): (Vec<&String>, Vec<&String>) =
-        paths.iter().partition(|p| untracked.contains(p.as_str()));
-
-    if !restore.is_empty() {
-        let mut args = vec!["restore", "--worktree", "--"];
-        args.extend(restore.iter().map(|s| s.as_str()));
-        ok_bytes(&vault, &args)?;
-    }
-    for rel in &recycle {
-        let abs = vault.join(rel);
-        if abs.exists() {
-            trash::delete(&abs).map_err(|e| format!("recycle {}: {}", rel, e))?;
+pub async fn vcs_discard(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
+    tokio::task::spawn_blocking(move || {
+        if paths.is_empty() {
+            return vcs_status_sync(vault_path.clone());
         }
-    }
-    vcs_status(vault_path)
+        let vault = vault_dir(&vault_path)?;
+
+        let snap = vcs_status_sync(vault_path.clone())?;
+        let untracked: HashSet<&str> =
+            snap.untracked.iter().map(|c| c.path.as_str()).collect();
+        let (recycle, restore): (Vec<&String>, Vec<&String>) =
+            paths.iter().partition(|p| untracked.contains(p.as_str()));
+
+        if !restore.is_empty() {
+            let mut args = vec!["restore", "--worktree", "--"];
+            args.extend(restore.iter().map(|s| s.as_str()));
+            ok_bytes(&vault, &args)?;
+        }
+        for rel in &recycle {
+            let abs = vault.join(rel);
+            if abs.exists() {
+                trash::delete(&abs).map_err(|e| format!("recycle {}: {}", rel, e))?;
+            }
+        }
+        vcs_status_sync(vault_path)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_commit(vault_path: String, message: String) -> Result<String, String> {
-    let vault = vault_dir(&vault_path)?;
-    let msg = message.trim();
-    if msg.is_empty() {
-        return Err("commit message is required".to_string());
-    }
-    ok_bytes(&vault, &["commit", "-m", msg])?;
-    Ok(ok_str(&vault, &["rev-parse", "--short=7", "HEAD"])?
-        .trim()
-        .to_string())
+pub async fn vcs_commit(vault_path: String, message: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let msg = message.trim();
+        if msg.is_empty() {
+            return Err("commit message is required".to_string());
+        }
+        ok_bytes(&vault, &["commit", "-m", msg])?;
+        Ok(ok_str(&vault, &["rev-parse", "--short=7", "HEAD"])?
+            .trim()
+            .to_string())
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_commit_all(vault_path: String, message: String) -> Result<String, String> {
-    let vault = vault_dir(&vault_path)?;
-    let msg = message.trim();
-    if msg.is_empty() {
-        return Err("commit message is required".to_string());
-    }
-    ok_bytes(&vault, &["add", "-A"])?;
-    ok_bytes(&vault, &["commit", "-m", msg])?;
-    Ok(ok_str(&vault, &["rev-parse", "--short=7", "HEAD"])?
-        .trim()
-        .to_string())
+pub async fn vcs_commit_all(vault_path: String, message: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let msg = message.trim();
+        if msg.is_empty() {
+            return Err("commit message is required".to_string());
+        }
+        ok_bytes(&vault, &["add", "-A"])?;
+        ok_bytes(&vault, &["commit", "-m", msg])?;
+        Ok(ok_str(&vault, &["rev-parse", "--short=7", "HEAD"])?
+            .trim()
+            .to_string())
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 // ─── Log ────────────────────────────────────────────────────────────────
@@ -372,42 +498,50 @@ const LOG_FMT: &str = "%H%n%h%n%an <%ae>%n%at%n%P%n%s%n%b";
 const LOG_GRAPH_FMT: &str = "%H%n%h%n%an <%ae>%n%at%n%P%n%D%n%s%n%b";
 
 #[tauri::command]
-pub fn vcs_log(vault_path: String, limit: u32) -> Result<Vec<CommitInfo>, String> {
-    let vault = vault_dir(&vault_path)?;
-    if !is_repo(&vault) {
-        return Ok(Vec::new());
-    }
-    let n = (if limit == 0 { 500 } else { limit.min(500) }).to_string();
-    let fmt = format!("--pretty=format:{}", LOG_FMT);
+pub async fn vcs_log(vault_path: String, limit: u32) -> Result<Vec<CommitInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        if !is_repo(&vault) {
+            return Ok(Vec::new());
+        }
+        let n = (if limit == 0 { 500 } else { limit.min(500) }).to_string();
+        let fmt = format!("--pretty=format:{}", LOG_FMT);
 
-    let out = run(&vault, &["log", "-z", "--max-count", &n, &fmt])?;
-    if !out.status.success() {
-        return interpret_log_error(&out.stderr, "git log");
-    }
-    Ok(split_records(&out.stdout)
-        .filter_map(parse_commit)
-        .collect())
+        let out = run(&vault, &["log", "-z", "--max-count", &n, &fmt])?;
+        if !out.status.success() {
+            return interpret_log_error(&out.stderr, "git log");
+        }
+        Ok(split_records(&out.stdout)
+            .filter_map(parse_commit)
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_log_graph(vault_path: String, limit: u32) -> Result<Vec<GraphCommit>, String> {
-    let vault = vault_dir(&vault_path)?;
-    if !is_repo(&vault) {
-        return Ok(Vec::new());
-    }
-    let n = (if limit == 0 { 500 } else { limit.min(1000) }).to_string();
-    let fmt = format!("--pretty=format:{}", LOG_GRAPH_FMT);
+pub async fn vcs_log_graph(vault_path: String, limit: u32) -> Result<Vec<GraphCommit>, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        if !is_repo(&vault) {
+            return Ok(Vec::new());
+        }
+        let n = (if limit == 0 { 500 } else { limit.min(1000) }).to_string();
+        let fmt = format!("--pretty=format:{}", LOG_GRAPH_FMT);
 
-    let out = run(
-        &vault,
-        &["log", "-z", "--all", "--date-order", "--max-count", &n, &fmt],
-    )?;
-    if !out.status.success() {
-        return interpret_log_error(&out.stderr, "git log --all");
-    }
-    Ok(split_records(&out.stdout)
-        .filter_map(parse_graph_commit)
-        .collect())
+        let out = run(
+            &vault,
+            &["log", "-z", "--all", "--date-order", "--max-count", &n, &fmt],
+        )?;
+        if !out.status.success() {
+            return interpret_log_error(&out.stderr, "git log --all");
+        }
+        Ok(split_records(&out.stdout)
+            .filter_map(parse_graph_commit)
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 fn interpret_log_error<T>(stderr: &[u8], label: &str) -> Result<Vec<T>, String> {
@@ -508,82 +642,121 @@ fn parse_graph_commit(record: &[u8]) -> Option<GraphCommit> {
 }
 
 #[tauri::command]
-pub fn vcs_diff_file(
+pub async fn vcs_diff_file(
     vault_path: String,
     rel_path: String,
     staged: Option<bool>,
 ) -> Result<String, String> {
-    let vault = vault_dir(&vault_path)?;
-    let mut args: Vec<&str> = vec!["diff", "--no-color"];
-    if staged.unwrap_or(false) {
-        args.push("--cached");
-    }
-    args.push("--");
-    args.push(&rel_path);
-    ok_str(&vault, &args)
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let mut args: Vec<&str> = vec!["diff", "--no-color"];
+        if staged.unwrap_or(false) {
+            args.push("--cached");
+        }
+        args.push("--");
+        args.push(&rel_path);
+        ok_str(&vault, &args)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_checkout_file(vault_path: String, rel_path: String) -> Result<(), String> {
-    vcs_discard(vault_path, vec![rel_path]).map(|_| ())
+pub async fn vcs_checkout_file(vault_path: String, rel_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        vcs_discard_sync(vault_path, vec![rel_path]).map(|_| ())
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
+}
+
+/// Synchronous discard — shared by both `vcs_discard` and `vcs_checkout_file`.
+fn vcs_discard_sync(vault_path: String, paths: Vec<String>) -> Result<VcsStatus, String> {
+    if paths.is_empty() {
+        return vcs_status_sync(vault_path);
+    }
+    let vault = vault_dir(&vault_path)?;
+
+    let snap = vcs_status_sync(vault_path.clone())?;
+    let untracked: HashSet<&str> =
+        snap.untracked.iter().map(|c| c.path.as_str()).collect();
+    let (recycle, restore): (Vec<&String>, Vec<&String>) =
+        paths.iter().partition(|p| untracked.contains(p.as_str()));
+
+    if !restore.is_empty() {
+        let mut args = vec!["restore", "--worktree", "--"];
+        args.extend(restore.iter().map(|s| s.as_str()));
+        ok_bytes(&vault, &args)?;
+    }
+    for rel in &recycle {
+        let abs = vault.join(rel);
+        if abs.exists() {
+            trash::delete(&abs).map_err(|e| format!("recycle {}: {}", rel, e))?;
+        }
+    }
+    vcs_status_sync(vault_path)
 }
 
 // ─── Branches ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn vcs_branches(vault_path: String) -> Result<Vec<BranchInfo>, String> {
-    let vault = vault_dir(&vault_path)?;
-    if !is_repo(&vault) {
-        return Ok(Vec::new());
-    }
+pub async fn vcs_branches(vault_path: String) -> Result<Vec<BranchInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        if !is_repo(&vault) {
+            return Ok(Vec::new());
+        }
 
-    // Unit-separator (US, 0x1F) is unambiguous between fields; lines
-    // are newline-separated.
-    const F: &str = "\x1f";
-    let fmt = format!(
-        "%(HEAD){F}%(refname){F}%(refname:short){F}%(upstream:short){F}%(upstream:track){F}%(objectname:short){F}%(committerdate:unix){F}%(subject)",
-        F = F
-    );
-    let raw = ok_str(
-        &vault,
-        &["for-each-ref", "--format", &fmt, "refs/heads", "refs/remotes"],
-    )?;
+        // Unit-separator (US, 0x1F) is unambiguous between fields; lines
+        // are newline-separated.
+        const F: &str = "\x1f";
+        let fmt = format!(
+            "%(HEAD){F}%(refname){F}%(refname:short){F}%(upstream:short){F}%(upstream:track){F}%(objectname:short){F}%(committerdate:unix){F}%(subject)",
+            F = F
+        );
+        let raw = ok_str(
+            &vault,
+            &["for-each-ref", "--format", &fmt, "refs/heads", "refs/remotes"],
+        )?;
 
-    let mut branches = Vec::new();
-    for line in raw.lines() {
-        if line.is_empty() {
-            continue;
+        let mut branches = Vec::new();
+        for line in raw.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            let f: Vec<&str> = line.split(F).collect();
+            if f.len() < 8 {
+                continue;
+            }
+            let refname = f[1];
+            if refname.ends_with("/HEAD") {
+                continue;
+            }
+            let (ahead, behind) = parse_upstream_track(f[4], f[3]);
+            branches.push(BranchInfo {
+                name: f[2].to_string(),
+                is_current: f[0] == "*",
+                is_remote: refname.starts_with("refs/remotes/"),
+                upstream: opt(f[3]),
+                ahead,
+                behind,
+                tip_short: opt(f[5]),
+                tip_summary: opt(f[7]),
+                tip_timestamp: f[6].parse::<i64>().unwrap_or(0),
+            });
         }
-        let f: Vec<&str> = line.split(F).collect();
-        if f.len() < 8 {
-            continue;
-        }
-        let refname = f[1];
-        if refname.ends_with("/HEAD") {
-            continue;
-        }
-        let (ahead, behind) = parse_upstream_track(f[4], f[3]);
-        branches.push(BranchInfo {
-            name: f[2].to_string(),
-            is_current: f[0] == "*",
-            is_remote: refname.starts_with("refs/remotes/"),
-            upstream: opt(f[3]),
-            ahead,
-            behind,
-            tip_short: opt(f[5]),
-            tip_summary: opt(f[7]),
-            tip_timestamp: f[6].parse::<i64>().unwrap_or(0),
+
+        // Current → local → remote, then by tip recency.
+        branches.sort_by(|a, b| {
+            b.is_current
+                .cmp(&a.is_current)
+                .then(a.is_remote.cmp(&b.is_remote))
+                .then(b.tip_timestamp.cmp(&a.tip_timestamp))
         });
-    }
-
-    // Current → local → remote, then by tip recency.
-    branches.sort_by(|a, b| {
-        b.is_current
-            .cmp(&a.is_current)
-            .then(a.is_remote.cmp(&b.is_remote))
-            .then(b.tip_timestamp.cmp(&a.tip_timestamp))
-    });
-    Ok(branches)
+        Ok(branches)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 /// Parse `%(upstream:track)` output:
@@ -618,54 +791,66 @@ fn parse_upstream_track(track: &str, upstream: &str) -> (Option<u32>, Option<u32
 }
 
 #[tauri::command]
-pub fn vcs_branch_create(
+pub async fn vcs_branch_create(
     vault_path: String,
     name: String,
     start_point: Option<String>,
     checkout: Option<bool>,
 ) -> Result<VcsStatus, String> {
-    let vault = vault_dir(&vault_path)?;
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("branch name is required".to_string());
-    }
-    let mut args: Vec<&str> = if checkout.unwrap_or(false) {
-        vec!["switch", "-c", n]
-    } else {
-        vec!["branch", n]
-    };
-    if let Some(sp) = start_point.as_deref() {
-        args.push(sp);
-    }
-    ok_bytes(&vault, &args)?;
-    vcs_status(vault_path)
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let n = name.trim();
+        if n.is_empty() {
+            return Err("branch name is required".to_string());
+        }
+        let mut args: Vec<&str> = if checkout.unwrap_or(false) {
+            vec!["switch", "-c", n]
+        } else {
+            vec!["branch", n]
+        };
+        if let Some(sp) = start_point.as_deref() {
+            args.push(sp);
+        }
+        ok_bytes(&vault, &args)?;
+        vcs_status_sync(vault_path)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_branch_switch(vault_path: String, name: String) -> Result<VcsStatus, String> {
-    let vault = vault_dir(&vault_path)?;
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("branch name is required".to_string());
-    }
-    ok_bytes(&vault, &["switch", n])?;
-    vcs_status(vault_path)
+pub async fn vcs_branch_switch(vault_path: String, name: String) -> Result<VcsStatus, String> {
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let n = name.trim();
+        if n.is_empty() {
+            return Err("branch name is required".to_string());
+        }
+        ok_bytes(&vault, &["switch", n])?;
+        vcs_status_sync(vault_path)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn vcs_branch_delete(
+pub async fn vcs_branch_delete(
     vault_path: String,
     name: String,
     force: Option<bool>,
 ) -> Result<VcsStatus, String> {
-    let vault = vault_dir(&vault_path)?;
-    let n = name.trim();
-    if n.is_empty() {
-        return Err("branch name is required".to_string());
-    }
-    let flag = if force.unwrap_or(false) { "-D" } else { "-d" };
-    ok_bytes(&vault, &["branch", flag, n])?;
-    vcs_status(vault_path)
+    tokio::task::spawn_blocking(move || {
+        let vault = vault_dir(&vault_path)?;
+        let n = name.trim();
+        if n.is_empty() {
+            return Err("branch name is required".to_string());
+        }
+        let flag = if force.unwrap_or(false) { "-D" } else { "-d" };
+        ok_bytes(&vault, &["branch", flag, n])?;
+        vcs_status_sync(vault_path)
+    })
+    .await
+    .map_err(|e| format!("task panicked: {e}"))?
 }
 
 // ─── Porcelain v2 parser ─────────────────────────────────────────────────

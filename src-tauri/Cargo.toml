@@ -49,6 +49,11 @@ trash = "5"
 # and for our cheap pre-init file-count preview.
 walkdir = "2.5"
 
+# Subprocess timeout — lets us kill a misbehaving `git` child process
+# after a deadline instead of blocking the Tauri IPC thread forever.
+# Tiny crate, no transitive deps.
+wait-timeout = "0.2"
+
 # ----------------------------------------------------------------------------
 # BYOC sync layer (sync/* module) — slice B, GitHub + Google Drive iteration.
 #
