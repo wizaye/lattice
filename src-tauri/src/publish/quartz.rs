@@ -41,6 +41,17 @@ const CLONE_TIMEOUT: Duration = Duration::from_secs(180);
 /// 60-120s on first run with a cold cache.  10 min cap is defensive.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// `npx quartz create` git-clones ~30-45 community plugin repos one at
+/// a time (Quartz v5 split plugins out of core).  Each clone is small
+/// but the round-trip cost adds up on slow corp links.  15 min is the
+/// 95th-percentile budget.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// `npx quartz plugin install --from-config` builds the just-cloned
+/// plugin sources with tsc/esbuild.  Most plugins ship pre-built
+/// `dist/` directories so this is fast (<1 min); 10 min cap is defensive.
+const PLUGIN_INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
+
 /// Quartz's full-vault build is fast (~5 s for ~500 notes); 5 min is
 /// plenty for everything short of pathological vaults.
 const BUILD_TIMEOUT: Duration = Duration::from_secs(300);
@@ -135,6 +146,85 @@ pub fn npx_quartz_build(dir: &Path) -> Result<PathBuf, String> {
         ));
     }
     Ok(public_dir)
+}
+
+/// Run `npx quartz create` non-interactively to materialise the
+/// `<dir>/.quartz/` scaffold (plugins + config) that Quartz v5 needs
+/// before a build can resolve `../../.quartz/plugins` imports inside
+/// upstream `quartz/components/Head.tsx`.  Without this step a fresh
+/// clone fails the build with an esbuild "Could not resolve" error
+/// at line 7 of Head.tsx.
+///
+/// Flags chosen so the create command never blocks on a `@clack`
+/// prompt:
+///   * `-t default` — template choice.  `default` is the lightest
+///     starter; we re-populate `content/` from the vault on every
+///     build anyway, so the chosen template only affects baseline
+///     `quartz.config.yaml` defaults.
+///   * `-X new` — setup strategy.  `new` means "empty content folder";
+///     this is correct because `publish_build` then writes the
+///     filtered vault into `content/`.
+///   * `-l shortest` — wikilink resolution strategy (matches Obsidian
+///     defaults; most users expect `[[Note]]` to find the file
+///     wherever it lives).
+///   * `-b localhost` — placeholder baseUrl for the initial config.
+///     The real `baseUrl` for a deploy is patched in later by
+///     `publish_deploy` when we know which host the user picked.
+pub fn quartz_create(dir: &Path) -> Result<(), String> {
+    let mut cmd = spawn("npx");
+    cmd.current_dir(dir)
+        .args([
+            "-y", "quartz", "create",
+            "-t", "default",
+            "-X", "new",
+            "-l", "shortest",
+            "-b", "localhost",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    run_with_timeout("npx quartz create", cmd, CREATE_TIMEOUT)
+}
+
+/// Run `npx quartz plugin install --from-config` inside `dir`.
+///
+/// Resolves every plugin referenced in `quartz.config.yaml` (the file
+/// written by [`quartz_create`]) — clones any that aren't already on
+/// disk and builds them (tsc / esbuild).  Idempotent: re-running with
+/// no config changes is a fast no-op.
+pub fn quartz_plugin_install(dir: &Path) -> Result<(), String> {
+    let mut cmd = spawn("npx");
+    cmd.current_dir(dir)
+        .args(["-y", "quartz", "plugin", "install", "--from-config"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    run_with_timeout("npx quartz plugin install", cmd, PLUGIN_INSTALL_TIMEOUT)
+}
+
+/// Idempotently make sure `<dir>` has the Quartz v5 scaffold needed
+/// for a build to succeed: `.quartz/plugins/` must exist (otherwise
+/// upstream `Head.tsx`'s `import { CustomOgImagesEmitterName } from
+/// "../../.quartz/plugins"` fails to resolve).
+///
+/// Lets `publish_build` self-heal an install that was scaffolded with
+/// an older build of Lattice (or interrupted mid-init) without
+/// requiring the user to delete `.lattice/publish/` and re-run the
+/// publishing wizard.
+pub fn ensure_scaffold(dir: &Path) -> Result<(), String> {
+    let plugins_dir = dir.join(".quartz").join("plugins");
+    if plugins_dir.is_dir() {
+        return Ok(());
+    }
+    quartz_create(dir)?;
+    quartz_plugin_install(dir)?;
+    if !plugins_dir.is_dir() {
+        return Err(format!(
+            "quartz create reported success but {} still does not exist — \
+             try deleting {} and re-running the publishing wizard.",
+            plugins_dir.display(),
+            dir.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Spawn the command, wait up to `timeout`, and report failure with

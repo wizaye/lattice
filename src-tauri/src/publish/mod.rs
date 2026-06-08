@@ -344,6 +344,19 @@ pub async fn publish_init(
 
         // 3. Install Quartz's deps.  This is the slow step.
         quartz::npm_install(&quartz_root)?;
+
+        // 4. Quartz v5 split plugins out of the core package: a fresh
+        //    clone has no `.quartz/plugins/` directory, but upstream
+        //    `quartz/components/Head.tsx` unconditionally imports from
+        //    `../../.quartz/plugins`.  We must run `quartz create` to
+        //    materialise that directory before any build can succeed,
+        //    then `plugin install --from-config` to populate it from
+        //    the just-written `quartz.config.yaml`.
+        //
+        //    Both steps are slow on first run (each clones a handful
+        //    of small plugin repos); they're idempotent on re-runs.
+        quartz::quartz_create(&quartz_root)?;
+        quartz::quartz_plugin_install(&quartz_root)?;
         Ok::<_, String>(())
     })
     .await
@@ -404,6 +417,18 @@ pub async fn publish_build(vault: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || -> Result<String, String> {
         let mut cfg = PublishToml::load(&toml_path)?;
         let started = std::time::Instant::now();
+
+        // 0. Self-heal: if the Quartz checkout is missing the v5
+        //    `.quartz/plugins/` scaffold (e.g. it was created by an
+        //    older build of Lattice that only ran clone + npm install,
+        //    or `publish_init` was interrupted mid-scaffold), run
+        //    `quartz create` + `plugin install --from-config` now.
+        //    Idempotent no-op if the scaffold already exists.
+        quartz::ensure_scaffold(&quartz_root).map_err(|e| {
+            cfg.state.last_error = Some(e.clone());
+            let _ = cfg.save(&toml_path);
+            e
+        })?;
 
         // 1. Compile excludes (baseline + user list).
         let filter = exclude::VaultFilter::from_patterns(&cfg.exclude.patterns)?;
