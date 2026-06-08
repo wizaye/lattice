@@ -50,6 +50,76 @@ trash = "5"
 walkdir = "2.5"
 
 # ----------------------------------------------------------------------------
+# BYOC sync layer (sync/* module) — slice B, GitHub + Google Drive iteration.
+#
+# Hard product rule: Lattice has no server.  All auth flows are public-client
+# (PKCE or Device Code), tokens live in the OS keychain only, vault data
+# flows direct from this machine to the provider's API.  See docs/byoc-plan.md.
+# ----------------------------------------------------------------------------
+
+# Token storage backends.
+#
+# Windows  → Win32 DPAPI (CryptProtectData) + file in %LOCALAPPDATA%\Lattice
+#           \byoc-tokens.  See `sync/keychain.rs`.  The user explicitly does
+#           NOT want tokens showing up in Credential Manager — we own our
+#           storage so the app is self-contained (uninstall removes tokens).
+# macOS    → keyring crate (Keychain Services).
+# Linux    → keyring crate (libsecret / secret-service).
+#
+# `keyring` therefore stays in the dep graph but is only compiled on the
+# non-Windows targets via cfg-gating inside `sync/keychain.rs`.  Disabling
+# the Windows-native backend prevents the build pulling in the COM glue
+# we'll never invoke.
+keyring = { version = "3", default-features = false, features = ["apple-native", "sync-secret-service"] }
+
+# HTTP client for the cloud APIs.
+#
+# TLS backend: `native-tls` (Schannel on Windows, Secure Transport on
+# macOS, OpenSSL on Linux).  We deliberately AVOID `rustls-tls` because
+# it pulls in `ring`, whose build script needs a C compiler.  On
+# aarch64-pc-windows-msvc (Snapdragon X / arm64 dev boxes) clang and
+# MSVC are not part of the default toolchain, and Schannel works
+# perfectly fine for talking to github.com / googleapis.com.
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream", "multipart"] }
+
+# tokio is pulled in transitively by Tauri 2 but we add an explicit entry so
+# the loopback redirect server in sync/oauth.rs can spawn a TcpListener.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+
+# Object-safe async traits for `dyn SyncProvider`.
+async-trait = "0.1"
+
+# PKCE: SHA-256 the code_verifier into the S256 challenge.
+sha2 = "0.10"
+
+# base64url (no-padding) for PKCE challenge + state nonce.
+base64 = "0.22"
+
+# CSPRNG for PKCE verifier + state nonce.
+rand = "0.8"
+
+# URL-encoded form bodies (token exchange, Drive query strings).
+urlencoding = "2"
+
+# Content-addressed object dedup for the Drive blob-store overlay.
+blake3 = "1"
+
+[dev-dependencies]
+# Scratch directories for sync/manifest tests.  Auto-cleaned on Drop.
+tempfile = "3"
+
+# Win32 DPAPI bindings for the Windows token-storage backend (sync/keychain.rs).
+# Pure FFI; no extra build-time toolchain requirements (no C compiler / clang).
+# Lives under a target-cfg dependency table so it's only resolved when
+# building for Windows targets.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }
+
+# ----------------------------------------------------------------------------
 # Build profiles — tuned for fast dev iteration on Windows.
 #
 #  - Our own app crate (`lattice` / `lattice_lib`) stays at opt-level=0 so

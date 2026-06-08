@@ -70,6 +70,20 @@ interface VcsState {
   staging: boolean;
   /** Most recent error string; null when the last op succeeded. */
   lastError: string | null;
+  /**
+   * Most recent error from `vcs_log` / `vcs_log_graph`.  Kept
+   * separate from `lastError` so a transient log-fetch failure
+   * doesn't stomp an active commit/stage/discard error the user is
+   * still reading — and so the History panel can render a focused
+   * "couldn't load commits" card with a Retry button instead of
+   * silently showing the "No commits yet" empty state (which is
+   * a lie when HEAD actually points at a real commit).
+   *
+   * Cleared at the start of every successful refresh; populated on
+   * any thrown IPC.
+   */
+  historyError: string | null;
+  graphError: string | null;
 
   /**
    * For not-yet-initialised vaults only: count of files that would
@@ -171,6 +185,12 @@ const REFRESH_DEBOUNCE_MS = 250;
 let debounceHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingVault: string | null = null;
 
+// The mock vault uses the sentinel path "__mock__" which has no
+// on-disk presence — VCS IPC would (and did) fail with ERROR_DIRECTORY.
+// Treat it as "no vault" everywhere so the sentinel never reaches Rust.
+const isRealVault = (v: string | null | undefined): v is string =>
+  typeof v === "string" && v.length > 0 && v !== "__mock__";
+
 export const useVcsStore = create<VcsState>((set, get) => {
   /**
    * Actual fetch — only run after the debounce window elapses.
@@ -179,7 +199,7 @@ export const useVcsStore = create<VcsState>((set, get) => {
    * mid-session leaves any prior error sticky for the user to read.
    */
   const doRefresh = async (vaultPath: string | null) => {
-    if (!vaultPath) {
+    if (!isRealVault(vaultPath)) {
       set({
         status: null,
         history: [],
@@ -187,6 +207,12 @@ export const useVcsStore = create<VcsState>((set, get) => {
         lastRefresh: null,
         refreshing: false,
         untrackedPreviewCount: null,
+        // History-section errors are per-vault \u2014 wipe them on
+        // vault close so the next vault opens with a clean slate.
+        historyError: null,
+        graphError: null,
+        graphHistory: [],
+        branches: [],
       });
       return;
     }
@@ -233,6 +259,8 @@ export const useVcsStore = create<VcsState>((set, get) => {
     initializing: false,
     staging: false,
     lastError: null,
+    historyError: null,
+    graphError: null,
     untrackedPreviewCount: null,
     branches: [],
     graphHistory: [],
@@ -255,20 +283,36 @@ export const useVcsStore = create<VcsState>((set, get) => {
     },
 
     refreshHistory: async (vaultPath, limit = 100) => {
-      if (!vaultPath) {
-        set({ history: [] });
+      if (!isRealVault(vaultPath)) {
+        set({ history: [], historyError: null });
         return;
       }
       try {
         const history = await vcsLog(vaultPath, limit);
-        set({ history });
+        // Sticky-on-empty rule: ONLY clear `historyError` when a
+        // populated list arrives.  An empty success could be a
+        // transient race (parallel `vcs_init`, mid-rebase window)
+        // and clearing the error here would wipe the diagnostic
+        // the user is still reading.  Previous behaviour caused
+        // "error flashes then Loading… gets stuck" because call #2
+        // came back Ok([]) and stomped call #1's real error.
+        if (history.length > 0) {
+          set({ history, historyError: null });
+        }
+        // else: leave both `history` and `historyError` untouched.
       } catch (err) {
+        // Surface the raw git error in the panel — silent
+        // `console.error` was hiding real bugs (the original
+        // symptom: "No commits yet" shown on repos that clearly had
+        // commits, because vcs_log was throwing and we swallowed it).
+        const msg = String(err);
         console.error("vcs_log failed:", err);
+        set({ historyError: msg });
       }
     },
 
     refreshBranches: async (vaultPath) => {
-      if (!vaultPath) {
+      if (!isRealVault(vaultPath)) {
         set({ branches: [] });
         return;
       }
@@ -285,20 +329,27 @@ export const useVcsStore = create<VcsState>((set, get) => {
     },
 
     refreshGraph: async (vaultPath, limit = 200) => {
-      if (!vaultPath) {
-        set({ graphHistory: [] });
+      if (!isRealVault(vaultPath)) {
+        set({ graphHistory: [], graphError: null });
         return;
       }
       try {
         const graphHistory = await vcsLogGraph(vaultPath, limit);
-        set({ graphHistory });
+        // Sticky-on-empty rule — see `refreshHistory` for the
+        // rationale.  Only clear `graphError` when real data
+        // arrives; an Ok([]) race must not wipe the diagnostic.
+        if (graphHistory.length > 0) {
+          set({ graphHistory, graphError: null });
+        }
       } catch (err) {
+        const msg = String(err);
         console.error("vcs_log_graph failed:", err);
+        set({ graphError: msg });
       }
     },
 
     refreshUntrackedPreview: async (vaultPath) => {
-      if (!vaultPath) {
+      if (!isRealVault(vaultPath)) {
         set({ untrackedPreviewCount: null });
         return;
       }
@@ -322,9 +373,14 @@ export const useVcsStore = create<VcsState>((set, get) => {
           initializing: false,
           untrackedPreviewCount: null,
         });
-        // After init, the History panel should show the initial
-        // snapshot commit immediately — kick a log refresh.
+        // After init the initial snapshot commit lands on `main`.
+        // Warm up ALL three lazy reads — History, GitGraph, and
+        // Branches — so the Changes panel shows a populated view the
+        // first time the user opens it instead of three empty cards
+        // that don't repaint until they manually hit refresh.
         void get().refreshHistory(vaultPath);
+        void get().refreshGraph(vaultPath);
+        void get().refreshBranches(vaultPath);
       } catch (err) {
         set({ initializing: false, lastError: String(err) });
         console.error("vcs_init failed:", err);
@@ -387,7 +443,13 @@ export const useVcsStore = create<VcsState>((set, get) => {
       try {
         const shortSha = await vcsCommit(vaultPath, message);
         await refreshNow(vaultPath);
+        // Every commit moves HEAD — invalidate all three derived views
+        // (history list, graph DAG, branch ahead/behind counts) in
+        // parallel so the panel never shows stale data.  Three tiny
+        // IPC calls, dominated by the commit itself.
         void get().refreshHistory(vaultPath);
+        void get().refreshGraph(vaultPath);
+        void get().refreshBranches(vaultPath);
         set({ committing: false });
         return shortSha;
       } catch (err) {
@@ -401,11 +463,13 @@ export const useVcsStore = create<VcsState>((set, get) => {
       set({ committing: true, lastError: null });
       try {
         const shortSha = await vcsCommitAll(vaultPath, message);
-        // Refresh status (now empty) and history (new top commit).
-        // Two tiny IPC calls; user latency is dominated by the
-        // commit itself anyway.
+        // Refresh status (now empty) and the three derived views
+        // (history, graph, branches) — same pattern as `commitStaged`.
+        // Three tiny IPC calls, dominated by the commit itself.
         await refreshNow(vaultPath);
         void get().refreshHistory(vaultPath);
+        void get().refreshGraph(vaultPath);
+        void get().refreshBranches(vaultPath);
         set({ committing: false });
         return shortSha;
       } catch (err) {
@@ -535,6 +599,8 @@ export const useVcsStore = create<VcsState>((set, get) => {
         initializing: false,
         staging: false,
         lastError: null,
+        historyError: null,
+        graphError: null,
         untrackedPreviewCount: null,
         branches: [],
         graphHistory: [],

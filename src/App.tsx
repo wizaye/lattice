@@ -172,6 +172,17 @@ export default function App() {
   // cleared instantly — otherwise the sidebar/pill briefly show numbers
   // from the OLD vault while the new refresh is in flight.
   //
+  // After the status refresh resolves, we ALSO warm up the three
+  // derived views (commit history, graph DAG, branches list) — but
+  // ONLY when the vault is actually tracked (`status.initialized`).
+  // The Changes panel used to lazy-load these on first render of
+  // each section, which left the user staring at empty cards after
+  // opening a vault until they clicked into history/branches.  By
+  // priming the store here we make the panel feel instant when the
+  // user navigates to it, regardless of which left view was last
+  // active.  All three IPCs are cheap (single `git` subprocess) and
+  // fire in parallel.
+  //
   // Re-runs only when `vaultPath` itself changes (NOT every render),
   // so the cost is essentially zero for normal use. The refresh call
   // is debounced inside `vcsStore` to coalesce rapid switches.
@@ -181,7 +192,23 @@ export default function App() {
       store.reset();
       return;
     }
-    void store.refresh(vaultPath);
+    let cancelled = false;
+    void (async () => {
+      await store.refresh(vaultPath);
+      if (cancelled) return;
+      // Re-read the store snapshot — `refresh` writes a new status
+      // synchronously before resolving, so this sees the fresh
+      // `initialized` flag rather than the stale closure value.
+      const fresh = useVcsStore.getState();
+      if (fresh.cacheKey !== vaultPath) return; // user switched again
+      if (!fresh.status?.initialized) return;
+      void fresh.refreshHistory(vaultPath, 100);
+      void fresh.refreshGraph(vaultPath, 200);
+      void fresh.refreshBranches(vaultPath);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [vaultPath]);
 
   const onTreeChange = useCallback((next: SplitTree | null) => {

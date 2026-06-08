@@ -1,5 +1,6 @@
 mod commands;
 mod git;
+mod sync;
 
 use tauri::Manager;
 
@@ -45,6 +46,24 @@ pub fn run() {
             git::vcs_branch_switch,
             git::vcs_branch_delete,
             git::vcs_log_graph,
+            // BYOC sync layer — bring-your-own-cloud (slice B):
+            // first iteration covers GitHub (Device Code Flow + git
+            // push/pull) and Google Drive (PKCE + appDataFolder
+            // upload).  OneDrive + Dropbox land in a later slice.
+            sync::byoc_list_providers,
+            sync::byoc_status,
+            sync::byoc_connect,
+            sync::byoc_disconnect,
+            sync::byoc_push,
+            sync::byoc_pull,
+            sync::byoc_sync_now,
+            // Storage-transparency + reveal helpers.  Pure read-only
+            // metadata commands; no side effects.  UI uses these to
+            // render "Tokens live in ..." + "Open remote" + "Reveal
+            // local manifest" actions in the kebab menu.
+            sync::byoc_storage_info,
+            sync::byoc_remote_url,
+            sync::byoc_manifest_path,
         ])
         .setup(|app| {
             // Set a larger default window size for the PKM workspace

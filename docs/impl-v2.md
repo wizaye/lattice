@@ -278,7 +278,7 @@ The plugin bundle ships in-tree at `crates/plugins-builtin/byoc-*` and is enable
 2. `byoc-gdrive` — Drive app-folder, PKCE + system browser.
 3. `byoc-onedrive` — Graph `/me/drive/special/approot`, MSAL.
 4. `byoc-dropbox` — `/Apps/Lattice/<vault>`, PKCE.
-5. `byoc-icloud` — macOS only in v1; Windows/Linux greyed out with tooltip.
+5. `byoc-icloud` — **descoped past v1** (see tractability table below); Windows/Linux greyed out with tooltip until then.
 6. `byoc-webdav` — generic fallback for Nextcloud, ownCloud, self-hosted (basic auth + bearer token).
 
 **Shared base crate** `byoc-core/` (Rust): trait `SyncProvider`, conflict UI helpers, retry/backoff, content-addressed upload/download. Adapters just implement the trait.
@@ -286,6 +286,28 @@ The plugin bundle ships in-tree at `crates/plugins-builtin/byoc-*` and is enable
 **Sync wire format:** each commit is `(commit-id.json, objects/<sha>...)` blobs. Provider is a dumb object store.
 
 **E2EE layered on top:** see §9. The sync layer never sees plaintext when encryption is enabled.
+
+#### 5.2.1 Per-provider tractability (researched 2026-06)
+Free-tier API ceilings + auth friction shape the ship order inside §5.2. Summary: GitHub is the cleanest, the three cloud-drive APIs are free but force us to bolt on an incremental-sync workaround, iCloud is too expensive to justify for v1.
+
+| Provider | Cost on the user side | Auth | Sync mechanism we have to build | Verdict |
+|---|---|---|---|---|
+| **GitHub** | Free (private repos unlimited) | OAuth Device Code or PAT | None — we shell out to system `git push/pull/fetch` (same binary VCS already uses, see [`lattice.md`](../memories/repo/lattice.md) VCS section). No HTTP rate limit on git protocol itself, only on REST metadata calls (5k/hr authed). | ✅ Ship first. Already 80% built — just needs the remote-add + push command. |
+| **Google Drive** | Free 15 GB tier | OAuth 2.0 PKCE + system browser, loopback redirect | Drive API v3 has no native push notifications for app-folder scope. **Workaround:** poll `changes.list` with a stored `startPageToken` every N minutes + react to `fileWatcher` events (the API returns 1 row per change so quotas stay generous). | ⚠️ Ship after GitHub. Sync loop is ~150 LOC + a backoff scheduler. |
+| **OneDrive** | Free 5 GB tier | MSAL (same PKCE pattern as Outlook in §1.2) | Graph `/me/drive/root/delta` returns a `@odata.nextLink` cursor we persist between sessions — closer to a real delta API than Drive's polling, but still client-driven, no webhooks at the consumer tier. | ⚠️ Same tractability as Drive. |
+| **Dropbox** | Free 2 GB tier | OAuth 2.0 PKCE | `/2/files/list_folder/continue` with a persisted cursor — identical pattern to OneDrive delta. Dropbox also has long-poll endpoints we can layer on for near-real-time updates. | ⚠️ Same tractability as Drive/OneDrive. |
+| **iCloud Drive** | Free 5 GB tier | CloudKit web auth token — but only issued to **signed apps** with an Apple Developer Program membership ($99/yr) and a registered iCloud container, **and** the sync container is only reachable from macOS (CloudKit JS in a webview works in theory but is permanently flaky outside Safari) | Native `NSFileCoordinator` + `NSMetadataQuery` watcher on a `~/Library/Mobile Documents/iCloud~com~lattice~app/` container, via a Swift sidecar bundled with the macOS build. Windows/Linux have no supported path. | ❌ **Descoped past v1.** Cost (Apple Dev account + signing + Swift sidecar + macOS-only support matrix) outweighs reach. Revisit when there's enterprise demand. |
+| **WebDAV** | Free (self-hosted) | Basic auth + bearer token | `PROPFIND` + `If-Match` etags. No incremental API; we scan etags on push. | ✅ Cheapest fallback to ship — covers Nextcloud/ownCloud/Stackmount/Hetzner Storage Box. |
+
+**Implications for the ship order** (reflected in §13):
+- Step 5 ("BYOC plugin host + first adapter") = GitHub only.
+- Step 17 ("Remaining BYOC providers") fans out Drive/OneDrive/Dropbox/WebDAV in parallel since they all reuse the same delta-cursor scheduler.
+- iCloud is **not** on the v1 queue; documented here so we don't re-litigate it.
+
+**Granular sync hooks (shared across all delta-based providers):**
+- Maintain `.lattice/sync-manifest.json` per provider — `{path, blake3_hash, last_known_remote_etag, last_pushed_at}`. SQLite if it grows past 10k rows.
+- Hook into the editor auto-save event already wired through `useEditorStore` — debounce 3s of idle, then push only the changed objects (BLAKE3 deduped against the manifest) through the provider's delta API. Big-bang full-vault uploads only happen on first connect.
+- Receive side runs the same delta cursor on a 60s timer (configurable); applies incoming objects through the VCS layer as a synthetic remote-side commit (`Sync from <provider> @ <ts>`) — keeps the commit graph honest and gives conflict UI something to point at.
 
 ### 5.3 BYOM (Bring Your Own Model)
 Same plugin contract, different host-API surface. Models are first-class providers.
@@ -324,6 +346,95 @@ Plugins compose these into prompts; the router ensures no chunk is sent to a pro
 - Sigsum (the same supply-chain proof system age uses) for release attestations.
 - Settings → Community plugins → browse / install / update / disable.
 - Quarantine on first run: capability prompt before granting net/keychain.
+
+### 5.5 Publishing pipeline — Obsidian-Publish replacement (Quartz SSG + free hosting)
+
+> Goal: one-click "Publish" button that turns the active vault (or a sub-folder of it) into a live, themed, interactive static site at a free `*.pages.dev` / `*.vercel.app` / `*.github.io` URL — without the user ever touching a terminal, paying for Obsidian Publish ($8/mo), or running a build server.
+
+This is **not** a sync feature (that's §5.2) and **not** another cloud account (we reuse the BYOC OAuth pattern). It's a separate compile-and-publish pipeline that runs locally and uploads HTML to free CDN tiers. Conceptually it sits beside BYOC under the plugin host because (a) the hosting providers authenticate the same way and (b) advanced users will want to swap the compiler.
+
+#### 5.5.1 Three layers
+1. **Editor (already shipped)** — vault is a folder of `.md` + `.canvas` + `.pdf`. Wikilinks, frontmatter, embeds all work.
+2. **Compiler** — bundled headless [Quartz v4](https://github.com/jackyzha0/quartz) running in a child Node process. Quartz already implements wikilink resolution, backlinks, interactive graph view, page popover previews, and full-text search — re-implementing any of that in our own pipeline would be wasted work. We just embed it.
+3. **Hosting adapter** — uploads the compiled `public/` directory to the user's choice of GitHub Pages / Cloudflare Pages / Vercel via REST. Tokens stored in the OS keychain (same `keyring-rs` slot we already use for BYOC).
+
+```text
+  vault/*.md  ──►  [ Quartz child process ]  ──►  public/*.html
+                            │                              │
+                            │                              ▼
+                            │                  [ Hosting adapter ]
+                            ▼                              │
+                  .lattice/publish.log                     ▼
+                                              user.pages.dev / .vercel.app / .github.io
+```
+
+#### 5.5.2 Bundling Quartz inside the Tauri app
+- Quartz is TypeScript/Node and depends on `npm` to install transitive deps. We can't ship a stripped CPython-style "frozen" Node runtime cheaply, so the choice is:
+  - **A. Bundle a portable Node + a pre-installed `quartz` tree inside `src-tauri/resources/quartz/`** (~80 MB unpacked, ~25 MB compressed). Pros: zero-network first run. Cons: app installer grows; Quartz upgrades require a Lattice release.
+  - **B. Ship without Node, detect `node` on PATH during onboarding, run `npx quartz ...` on demand.** Pros: tiny installer. Cons: dependency on user installing Node (some students won't have it).
+  - **Decision:** ship **B** for v1 with a one-time prompt + auto-install link to `nodejs.org`, **A** as a paid/enterprise SKU later. Lines up with the "VCS requires git" precedent (see [`lattice.md`](../memories/repo/lattice.md) VCS section) where we surface a download link instead of a generic error.
+- Child-process invocation lives in `src-tauri/src/publish.rs`:
+  ```rust
+  fn build_quartz(vault: &Path, out: &Path, layout: Layout) -> Result<BuildReport> {
+      // 1. Materialise a temp .quartz/ config dir derived from layout + user settings
+      // 2. Spawn: npx quartz build --directory <vault> --output <out>
+      // 3. Stream stdout/stderr back to the frontend via Tauri event for the progress UI
+  }
+  ```
+- IPC commands:
+  - `publish_preview(vault_path, layout)` → builds into `.lattice/publish-preview/` and returns the local URL we serve via a Tauri sidecar HTTP server. User can hit "Open preview" before uploading anywhere.
+  - `publish_deploy(vault_path, layout, host)` → builds + uploads + returns the live URL.
+  - `publish_status(vault_path)` → last build/upload metadata for the Settings → Publish panel.
+
+#### 5.5.3 Three layouts (user-selectable in the Publish settings panel)
+The user noted Quartz "gives us docs, notebook layouts" — we expose three:
+
+| Layout | Quartz config preset | Persona fit | What changes |
+|---|---|---|---|
+| **Garden** (default) | `quartz.config.ts` with `Component.Graph` enabled, full backlinks sidebar, table-of-contents per page | Students, researchers | The classic Quartz look — interactive graph, page popovers, dense backlink panel. Best for a personal wiki. |
+| **Docs** | `Component.Explorer` (collapsible tree), `Component.TableOfContents`, graph disabled, breadcrumb header | Engineers writing OSS docs | Reads like Docusaurus / VitePress. Folder structure is the navigation; graph view is hidden because docs sites don't need it. |
+| **Notebook** | `Component.RecentNotes(limit=20)` on home, chronological index, `Component.Tags` cloud, slides export via the existing reveal.js pipeline | Daily-note / journaling users | Front page is reverse-chronological feed of recent notes. Pairs with §2 Journaling. |
+
+Under the hood all three are the same Quartz install with a different generated `quartz.config.ts` — we never fork Quartz. Custom CSS overrides land in `.lattice/publish/theme.css` so users can tweak without losing upgrades.
+
+#### 5.5.4 Hosting adapters (free tiers only, all 100% headless)
+
+| Host | Free tier ceiling | API | Auth |
+|---|---|---|---|
+| **GitHub Pages** | Unlimited public, 1 GB / site | Push a generated repo via the existing `git` integration + commit a `.github/workflows/deploy.yml` workflow Quartz already provides | Reuses the BYOC-GitHub OAuth token from §5.2 — no new auth. |
+| **Cloudflare Pages** | 500 builds/mo, unlimited bandwidth, unlimited sites | [Direct Upload API](https://developers.cloudflare.com/pages/platform/direct-upload/) — `POST /accounts/{id}/pages/projects/{name}/deployments` with a multipart form of the built files. No GitHub required. | OAuth — Cloudflare API token paste during onboarding (no PKCE app yet). |
+| **Vercel** | 100 GB-hr serverless, unlimited static | `POST /v13/deployments` with a JSON manifest of `{file, sha, size}` entries + companion blob uploads | OAuth via [Vercel Integration](https://vercel.com/docs/rest-api#oauth) (PKCE) or pasted token. |
+
+All three are implemented behind a `PublishHost` trait that mirrors `SyncProvider` in shape — easy code review, easy parallel work.
+
+```rust
+#[async_trait]
+trait PublishHost {
+    async fn auth_start(&self, app: &AppHandle) -> Result<AuthUrl>;
+    async fn auth_complete(&self, code: &str) -> Result<HostToken>;
+    async fn deploy(&self, dir: &Path, project: &str) -> Result<DeploymentInfo>; // returns URL + log
+    async fn list_deployments(&self, project: &str) -> Result<Vec<DeploymentInfo>>;
+}
+```
+
+#### 5.5.5 UX (Settings → Publish + status pill)
+- New settings section "Publish" with: layout picker (3 cards), host picker (3 cards, badge per ready/connected), preview button, publish button, last-deployment URL + status.
+- StatusPill grows a small earth/cloud icon when a Publish target is connected; click navigates straight to the Publish settings — same pattern as the BYOC sync pill.
+- Per-vault config in `.lattice/publish.toml` so multiple vaults can publish independently:
+  ```toml
+  layout = "garden"
+  host = "cloudflare"
+  project = "my-notes"
+  exclude = ["private/**", "Inbox/**"]
+  last_deploy_url = "https://my-notes.pages.dev"
+  last_deploy_at = "2026-06-07T11:42:00Z"
+  ```
+
+#### 5.5.6 What we explicitly do NOT do
+- **No central Lattice publish server.** Compile is local, upload goes provider-direct, the user owns the project on the host. No middleman, no SLA on us.
+- **No real-time republish.** Each Publish click is a full Quartz rebuild + redeploy. Incremental builds are a v2 idea (Quartz supports them but caches add complexity not worth shipping in v1).
+- **No custom domains in v1.** Users get `*.pages.dev` / `*.vercel.app` / `*.github.io` only. Domain attachment is a one-line config in the host's dashboard the user can do themselves.
+- **Quartz v5.** As of 2026-06, Quartz is on v4. The user-shared write-up mentioned "v5" — we'll bump when it ships if the config surface stays compatible; until then v4 is what we target.
 
 ---
 
@@ -960,13 +1071,14 @@ This is the v2 build queue, built **on top of** the work already finished + the 
 14. **Importers — Notion + Siyuan (§11.3, §11.4).** Now that we have databases, Notion import is finally lossless.
 15. **CLI — `lattice` ratatui (§6).** Senior-engineer love letter; can be developed in parallel from step 5 onward.
 16. **Academic bundle polish — citation graph, lab-notebook template, AI assist (§8.3, §8.4, §8.5.12) + Stats for nerds (§12).** Builds on the §8.5 scaffolder shipped in step 10.
-17. **Remaining BYOC providers (Drive, OneDrive, Dropbox, iCloud, WebDAV).** Each one is a new file once the trait stabilizes.
-18. **Calendar tier B (Cal.com) + Apple Calendar.** Long tail.
-19. **Canvas extras phase 2 (§3.1 items 6-10) + research-paper exports (§3.2, §8.1–8.2).**
-20. **E2EE phases 2-5 (§9.9 steps 2-5).**
-21. **Community plugin marketplace (§5.4).**
+17. **Remaining BYOC providers (Drive, OneDrive, Dropbox, WebDAV) (§5.2.1).** Each one is a new file once the trait stabilizes; all four share the delta-cursor scheduler so they fan out in parallel. **iCloud is intentionally NOT on the v1 queue** (Apple Dev account + macOS-only signing makes the cost-to-reach ratio untenable; see §5.2.1).
+18. **Publishing pipeline — Quartz SSG + GitHub Pages / Cloudflare Pages / Vercel (§5.5).** The Obsidian-Publish replacement. Lands after Drive/OneDrive/Dropbox ship because (a) the BYOC-GitHub OAuth token from step 5 is reused by the GitHub Pages adapter, and (b) advanced users on the other clouds expect a publish target by then. The compile pipeline + 3 layouts (Garden/Docs/Notebook) all ship together — splitting them by layout would re-trigger Quartz config churn three times.
+19. **Calendar tier B (Cal.com) + Apple Calendar.** Long tail.
+20. **Canvas extras phase 2 (§3.1 items 6-10) + research-paper exports (§3.2, §8.1–8.2).**
+21. **E2EE phases 2-5 (§9.9 steps 2-5).**
+22. **Community plugin marketplace (§5.4).**
 
-Anything past step 21 is "v3" — Iroh P2P, MS Teams AI insights deep integration, real-time Automerge collaboration, full agentic AI flows.
+Anything past step 22 is "v3" — Iroh P2P, MS Teams AI insights deep integration, real-time Automerge collaboration, full agentic AI flows, custom-domain support for the publish pipeline.
 
 ---
 

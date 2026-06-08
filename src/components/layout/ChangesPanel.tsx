@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVaultStore } from "../../state/vaultStore";
 import { useVcsStore } from "../../state/vcsStore";
+import { useBYOCStore, type ProviderRowState } from "../../state/byocStore";
 import {
   statusGlyph,
   statusLabel,
   type BranchInfo,
   type FileChange,
 } from "../../lib/vcs";
+import type { ProviderId } from "../../lib/byoc";
 import {
   IcCheck,
   IcClose,
   IcCloud,
-  IcCloudUpload,
   IcCopy,
   IcDiff,
   IcDiscard,
@@ -20,7 +21,6 @@ import {
   IcHistory,
   IcRefresh,
   IcSparkle,
-  IcSync,
 } from "../common/Icons";
 import { GitGraph } from "./GitGraph";
 import "./ChangesPanel.css";
@@ -68,6 +68,8 @@ export function ChangesPanel() {
   const initializing = useVcsStore((s) => s.initializing);
   const staging = useVcsStore((s) => s.staging);
   const lastError = useVcsStore((s) => s.lastError);
+  const historyError = useVcsStore((s) => s.historyError);
+  const graphError = useVcsStore((s) => s.graphError);
   const untrackedPreviewCount = useVcsStore((s) => s.untrackedPreviewCount);
 
   const refresh = useVcsStore((s) => s.refresh);
@@ -139,6 +141,17 @@ export function ChangesPanel() {
     void refreshBranches(vaultPath);
   };
 
+  // Force a fresh history+graph fetch.  Wired to the Retry / Refresh
+  // buttons in the History empty-state cards (see below).  Clears
+  // the per-vault gate so the auto-fetch useEffect would also
+  // re-fire on the next render \u2014 belt + braces.
+  const onHistoryRetry = () => {
+    if (!vaultPath || vaultPath === "__mock__") return;
+    historyFetchedFor.current = null;
+    void refreshHistory(vaultPath, 100);
+    void refreshGraph(vaultPath, 200);
+  };
+
   // Extract sections via memo so the body of the component stays
   // declarative; cheap (just array refs from the snapshot).
   const staged = useMemo<FileChange[]>(() => status?.staged ?? [], [status]);
@@ -153,6 +166,44 @@ export function ChangesPanel() {
   const totalCount = staged.length + unstaged.length + untracked.length;
   const initialised = status?.initialized ?? false;
 
+  // ── BYOC sync wiring ─────────────────────────────────────────────
+  //
+  // The store keeps row state per (vault, provider).  We auto-load the
+  // provider catalogue once at boot and refresh status whenever the
+  // vault changes OR the user enables VCS (since sync gates on having
+  // a git repo to push).
+  const byocProviders = useBYOCStore((s) => s.providers);
+  const byocLoadProviders = useBYOCStore((s) => s.loadProviders);
+  const byocRefresh = useBYOCStore((s) => s.refresh);
+  const byocConnectAction = useBYOCStore((s) => s.connect);
+  const byocDisconnectAction = useBYOCStore((s) => s.disconnect);
+  const byocSyncNowAction = useBYOCStore((s) => s.syncNow);
+  const byocPushAction = useBYOCStore((s) => s.push);
+  const byocPullAction = useBYOCStore((s) => s.pull);
+  const byocStorageInfoAction = useBYOCStore((s) => s.storageInfo);
+  const byocRemoteUrlAction = useBYOCStore((s) => s.remoteUrl);
+  const byocManifestPathAction = useBYOCStore((s) => s.manifestPath);
+  const byocRowFor = useBYOCStore((s) => s.rowFor);
+  // Subscribe to the rows map itself so the panel re-renders when
+  // any provider's state changes (connect / sync / disconnect).
+  // Without this, `byocRowFor` is a stable function reference and
+  // zustand never notifies us of row mutations — the UI would freeze
+  // on the pre-click state forever.  We don't read this directly;
+  // it's a re-render trigger.
+  useBYOCStore((s) => s.rows);
+  const pendingDeviceCode = useBYOCStore((s) => s.pendingDeviceCode);
+  const clearDeviceCode = useBYOCStore((s) => s.clearDeviceCode);
+
+  useEffect(() => {
+    void byocLoadProviders();
+  }, [byocLoadProviders]);
+
+  useEffect(() => {
+    if (!initialised) return;
+    if (!vaultPath || vaultPath === "__mock__") return;
+    void byocRefresh(vaultPath);
+  }, [vaultPath, initialised, byocRefresh]);
+
   // Auto-fetch history + graph as soon as the panel knows the vault is
   // initialised — independent of whether the user has expanded the
   // History `<details>`.  Two reasons this can't wait for `onToggle`:
@@ -165,17 +216,45 @@ export function ChangesPanel() {
   //      starts empty, so even if the section is open we'd show the
   //      "No commits yet" empty-state until the user clicked refresh.
   //
+  // App-level vault-change effect (see `src/App.tsx`) ALSO primes
+  // the store on vault open so this panel feels instant when the
+  // user navigates to it for the first time.  Both paths are
+  // idempotent: the `historyFetchedFor` ref + the store's own
+  // `cacheKey` guard against duplicate IPCs.
+  //
   // The `historyFetchedFor` ref still gates the call so we don't
   // re-hit the IPC on every render — exactly the same once-per-vault
   // semantics the toggle handler enforces.
   useEffect(() => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath || vaultPath === "__mock__") {
+      // Vault closed / mock vault — clear the per-vault gates so
+      // re-opening the SAME vault path later re-fetches (otherwise
+      // the ref would still point at that path and the next mount
+      // would think it had already fetched).
+      historyFetchedFor.current = null;
+      branchesFetchedFor.current = null;
+      return;
+    }
     if (!initialised) return;
     if (historyFetchedFor.current === vaultPath) return;
     historyFetchedFor.current = vaultPath;
     void refreshHistory(vaultPath, 100);
     void refreshGraph(vaultPath, 200);
   }, [vaultPath, initialised, refreshHistory, refreshGraph]);
+
+  // Same auto-fetch pattern for Branches.  The Branches section is
+  // open-by-default (see the JSX below) so users land on a populated
+  // list after vault open / app restart instead of an empty card
+  // they have to expand + refresh to populate.  `vcs_branches` is a
+  // single `git for-each-ref` call — cheap enough to fire eagerly
+  // alongside the history warm-up.
+  useEffect(() => {
+    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!initialised) return;
+    if (branchesFetchedFor.current === vaultPath) return;
+    branchesFetchedFor.current = vaultPath;
+    void refreshBranches(vaultPath);
+  }, [vaultPath, initialised, refreshBranches]);
 
   // When we discover the vault isn't tracked, fetch the preview count
   // ONCE per vault so the Enable CTA can show "Enable & commit N files"
@@ -356,14 +435,14 @@ export function ChangesPanel() {
     if (!vaultPath) return;
     void refresh(vaultPath);
     // History / Branches are invalidated by commits, but a manual
-    // refresh is a good moment to re-pull them too — cheap calls.
-    if (historyFetchedFor.current === vaultPath) {
-      void refreshHistory(vaultPath, 100);
-      void refreshGraph(vaultPath, 200);
-    }
-    if (branchesFetchedFor.current === vaultPath) {
-      void refreshBranches(vaultPath);
-    }
+    // refresh is also our universal "get unstuck" path \u2014 ALWAYS
+    // re-pull both, regardless of whether the per-vault gate had
+    // fired before.  Previously we gated this on `*FetchedFor`,
+    // which meant a transient first-fetch failure could only be
+    // recovered by switching vaults (the gate was set BEFORE the\n    // IPC resolved and stayed burnt on failure).  Cheap calls, no\n    // reason to skip.
+    void refreshHistory(vaultPath, 100);
+    void refreshGraph(vaultPath, 200);
+    void refreshBranches(vaultPath);
   };
 
   // The mock vault uses the sentinel path "__mock__" which has no
@@ -637,6 +716,50 @@ export function ChangesPanel() {
                 Enable version control above to start recording history.
               </span>
             </div>
+          ) : (historyError || graphError) &&
+              graphHistory.length === 0 &&
+              history.length === 0 ? (
+            // Both log IPCs blew up (or the only one we tried did).
+            // Show the raw git error so the user can actually report
+            // the problem instead of staring at an "empty" panel.
+            // Retry clears the per-vault gates and re-fires both.
+            <div className="cp-empty cp-history-error">
+              <IcGitCommit />
+              <span className="cp-error-title">
+                Couldn&apos;t load commit history.
+              </span>
+              <code className="cp-error-msg">
+                {historyError ?? graphError}
+              </code>
+              <button
+                type="button"
+                className="cp-btn cp-btn-ghost cp-history-retry"
+                onClick={onHistoryRetry}
+              >
+                Retry
+              </button>
+            </div>
+          ) : graphHistory.length === 0 &&
+              history.length === 0 &&
+              status?.headShort ? (
+            // HEAD points at a real commit but both reads came back
+            // empty (and they didn't error — if they had we'd be in
+            // the branch above).  That's the warm-up still in flight,
+            // or the auto-fetch gate hasn't fired yet because the
+            // panel mounted before `status.initialized` flipped.
+            // Either way: kick a retry rather than lying with the
+            // "No commits yet" empty state.
+            <div className="cp-empty">
+              <IcGitCommit />
+              <span>Loading history…</span>
+              <button
+                type="button"
+                className="cp-btn cp-btn-ghost cp-history-retry"
+                onClick={onHistoryRetry}
+              >
+                Refresh
+              </button>
+            </div>
           ) : graphHistory.length === 0 && history.length === 0 ? (
             <div className="cp-empty">
               <IcGitCommit />
@@ -665,7 +788,13 @@ export function ChangesPanel() {
       </details>
 
       {/* ===== Branches ===== */}
-      <details className="cp-section" onToggle={onBranchesToggle}>
+      {/* Open by default for the same reason as History: the
+          Zustand store is in-memory only and the auto-fetch
+          `useEffect` above primes the list on vault open / app
+          restart, so collapsing it would just hide already-fetched
+          data.  `onToggle` still kicks a refresh the first time the
+          user re-expands an explicitly-collapsed section. */}
+      <details className="cp-section" open onToggle={onBranchesToggle}>
         <summary>
           <span className="cp-summary-row">
             <span className="cp-summary-title">
@@ -713,19 +842,39 @@ export function ChangesPanel() {
             <span className="cp-summary-title">
               <IcCloud /> Sync (BYOC)
             </span>
-            <span className={`cp-badge ${initialised ? "muted" : "danger"}`}>
-              {initialised ? "Off" : "VCS required"}
+            <span
+              className={`cp-badge ${
+                isMockVault
+                  ? syncBadge(vaultPath, byocRowFor) === "Off"
+                    ? "muted"
+                    : "muted"
+                  : initialised
+                    ? "muted"
+                    : "danger"
+              }`}
+            >
+              {isMockVault
+                ? syncBadge(vaultPath, byocRowFor) === "Off"
+                  ? "Demo vault"
+                  : `Demo · ${syncBadge(vaultPath, byocRowFor)}`
+                : initialised
+                  ? syncBadge(vaultPath, byocRowFor)
+                  : "VCS required"}
             </span>
           </span>
         </summary>
 
         <div className="cp-section-body">
-          {!initialised && !isMockVault ? (
+          {!isMockVault && !initialised ? (
             // Sync gates on VCS — there's nothing meaningful to push
             // until we have commits.  Surface this clearly so the
             // user knows the path: enable VCS → connect a provider →
             // push.  Saves them clicking Connect and getting an
             // opaque error.
+            //
+            // The demo vault skips this gate because its BYOC actions
+            // are fully simulated in `byocStore` (no real git commits
+            // required) — the goal there is to show the full UX.
             <>
               <div className="cp-empty">
                 <IcCloud />
@@ -735,66 +884,117 @@ export function ChangesPanel() {
               </div>
               <p className="cp-hint">
                 Sync pushes the vault's git history to your chosen
-                provider — GitHub, Google Drive, Dropbox, iCloud or
-                WebDAV. End-to-end encrypted before it leaves the
-                device.
+                provider — GitHub or Google Drive in this build,
+                OneDrive and Dropbox in the next slice. Tokens stay in
+                your OS keychain; we never proxy your data.
               </p>
             </>
           ) : (
             <>
-              <p className="cp-hint">
-                Bring your own cloud. Vault data is end-to-end encrypted
-                before it leaves the device. Slice 5 lights this up.
-              </p>
+              {isMockVault ? (
+                <p className="cp-hint cp-hint-demo">
+                  <strong>Demo mode.</strong> This is a UI walkthrough
+                  running against the in-memory mock vault. Connect /
+                  Sync simulate the real flow — nothing leaves your
+                  machine. Open a real folder via the vault picker to
+                  push your own files.
+                </p>
+              ) : (
+                <p className="cp-hint">
+                  Bring your own cloud. Tokens live in your OS
+                  keychain; no Lattice server sits between this app
+                  and your provider.
+                </p>
+              )}
 
               <ul className="cp-provider-list">
-                {BYOC_PROVIDERS.map((p) => (
-                  <li key={p.id} className="cp-provider">
-                    <span className="cp-provider-name">
-                      <span
-                        className="cp-provider-dot"
-                        data-color={p.color}
-                      />
-                      {p.label}
-                    </span>
-                    <button
-                      className="cp-btn tiny"
-                      title={`Connect ${p.label} (coming soon)`}
-                      disabled
-                    >
-                      {p.ready ? "Connect" : "Soon"}
-                    </button>
-                  </li>
-                ))}
+                {BYOC_PROVIDERS.map((p) => {
+                  // Real adapters (github, gdrive) read from the live
+                  // BYOC store; placeholder rows (onedrive, dropbox,
+                  // icloud, webdav) stay cosmetic until their adapter
+                  // lands in the next slice.
+                  const isReal =
+                    p.id === "github" || p.id === "gdrive";
+                  const providerMeta = byocProviders.find(
+                    (m) => m.id === p.id,
+                  );
+                  const configured = providerMeta?.configured ?? false;
+                  // Default to `true` for legacy / fallback so that
+                  // GitHub-style providers keep their full menu when
+                  // metadata is briefly missing.  Drive overrides both
+                  // to `false` server-side.
+                  const supportsPull = providerMeta?.supportsPull ?? true;
+                  const hasBrowsableRemote =
+                    providerMeta?.hasBrowsableRemote ?? true;
+                  const row: ProviderRowState = isReal
+                    ? byocRowFor(vaultPath, p.id as ProviderId)
+                    : EMPTY_PROVIDER_ROW;
+                  const pid = p.id as ProviderId;
+                  return (
+                    <BYOCProviderRow
+                      key={p.id}
+                      label={p.label}
+                      color={p.color}
+                      isReal={isReal}
+                      configured={configured}
+                      supportsPull={supportsPull}
+                      hasBrowsableRemote={hasBrowsableRemote}
+                      providerNote={providerMeta?.note ?? null}
+                      row={row}
+                      vaultPath={vaultPath}
+                      onConnect={() => {
+                        if (!vaultPath) return;
+                        void byocConnectAction(vaultPath, pid);
+                      }}
+                      onDisconnect={() => {
+                        if (!vaultPath) return;
+                        void byocDisconnectAction(vaultPath, pid);
+                      }}
+                      onSyncNow={() => {
+                        if (!vaultPath) return;
+                        void byocSyncNowAction(vaultPath, pid);
+                      }}
+                      onPush={() => {
+                        if (!vaultPath) return;
+                        void byocPushAction(vaultPath, pid);
+                      }}
+                      onPull={() => {
+                        if (!vaultPath) return;
+                        void byocPullAction(vaultPath, pid);
+                      }}
+                      getStorageInfo={() =>
+                        vaultPath
+                          ? byocStorageInfoAction(vaultPath, pid)
+                          : Promise.resolve(null)
+                      }
+                      getRemoteUrl={() =>
+                        vaultPath
+                          ? byocRemoteUrlAction(vaultPath, pid)
+                          : Promise.resolve(null)
+                      }
+                      getManifestPath={() =>
+                        vaultPath
+                          ? byocManifestPathAction(vaultPath, pid)
+                          : Promise.resolve(null)
+                      }
+                    />
+                  );
+                })}
               </ul>
-
-              <div className="cp-sync-actions">
-                <button
-                  className="cp-btn ghost"
-                  disabled
-                  title="Push local commits (coming soon)"
-                >
-                  <IcCloudUpload /> Push
-                </button>
-                <button
-                  className="cp-btn ghost"
-                  disabled
-                  title="Fetch remote changes (coming soon)"
-                >
-                  <IcRefresh /> Pull
-                </button>
-                <button
-                  className="cp-btn ghost"
-                  disabled
-                  title="Reconnect (coming soon)"
-                >
-                  <IcSync /> Resync
-                </button>
-              </div>
             </>
           )}
         </div>
       </details>
+
+      {/* Device-code modal — mounts only while a GitHub Device-Code
+          dance is mid-flight.  Outside the Sync section so the modal
+          isn't clipped by the section's overflow rules. */}
+      {pendingDeviceCode && (
+        <DeviceCodeModal
+          payload={pendingDeviceCode}
+          onClose={clearDeviceCode}
+        />
+      )}
 
       {/* Refresh hint pinned at the bottom — lets the user know the
           panel auto-refreshes but also exposes the manual trigger. */}
@@ -1375,25 +1575,25 @@ function formatRelativeTime(unixSeconds: number): string {
 }
 
 /**
- * BYOC providers shipped with v1 — see docs/impl-v2.md §5.2.
+ * BYOC providers shipped (or "soon") in the panel.  Slice B wires up
+ * `github` + `gdrive`; the other rows stay cosmetic until their Rust
+ * adapter lands.  Keep the `id` values in sync with `ProviderId` in
+ * `lib/byoc.ts` (kebab-case to match the Rust enum on the wire).
  *
- * Order is shown left-to-right by user-base / parity priority. `ready`
- * gates the connect CTA copy: once the Rust adapter lands we flip the
- * flag here and the button picks up the new label automatically. The
+ * Order is shown left-to-right by user-base / parity priority. The
  * dot color is purely cosmetic so the row reads at a glance.
  */
 const BYOC_PROVIDERS: Array<{
   id: string;
   label: string;
   color: "github" | "google" | "microsoft" | "dropbox" | "apple" | "webdav";
-  ready: boolean;
 }> = [
-  { id: "github", label: "GitHub", color: "github", ready: false },
-  { id: "gdrive", label: "Google Drive", color: "google", ready: false },
-  { id: "onedrive", label: "OneDrive", color: "microsoft", ready: false },
-  { id: "dropbox", label: "Dropbox", color: "dropbox", ready: false },
-  { id: "icloud", label: "iCloud Drive", color: "apple", ready: false },
-  { id: "webdav", label: "WebDAV", color: "webdav", ready: false },
+  { id: "github", label: "GitHub", color: "github" },
+  { id: "gdrive", label: "Google Drive", color: "google" },
+  { id: "onedrive", label: "OneDrive", color: "microsoft" },
+  { id: "dropbox", label: "Dropbox", color: "dropbox" },
+  { id: "icloud", label: "iCloud Drive", color: "apple" },
+  { id: "webdav", label: "WebDAV", color: "webdav" },
 ];
 
 // Re-export for the toolbar so the "More" menu can offer "Discard all"
@@ -1403,3 +1603,531 @@ export const ChangesPanelIcons = {
   Discard: IcDiscard,
   Refresh: IcRefresh,
 };
+
+// ────────────────────────────────────────────────────────────────────────
+// BYOC helpers
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Placeholder row for the not-yet-wired providers (OneDrive, Dropbox,
+ * iCloud, WebDAV).  Lets `ProviderRow` render uniformly without
+ * branching on real-vs-stub everywhere — the values are never read
+ * for those rows because we render the "Soon" button instead.
+ */
+const EMPTY_PROVIDER_ROW: ProviderRowState = {
+  connected: false,
+  accountLabel: null,
+  remoteLabel: null,
+  lastSyncAt: null,
+  lastError: null,
+  busy: false,
+};
+
+/**
+ * Tiny status pill copy for the Sync section header.  We don't try to
+ * surface every detail here — just an at-a-glance answer to "is sync
+ * doing anything?".  Errors take precedence over connection state so
+ * the user notices a failed push without expanding the section.
+ *
+ * Mock vault uses the same logic — `byocStore` mutates the same
+ * `rows` map keyed by `__mock__::<provider>` so the badge animates
+ * during simulated connects/syncs just like the real flow.
+ */
+function syncBadge(
+  vault: string | null,
+  rowFor: (v: string | null, p: ProviderId) => ProviderRowState,
+): string {
+  if (!vault) return "Off";
+  const gh = rowFor(vault, "github");
+  const gd = rowFor(vault, "gdrive");
+  if (gh.lastError || gd.lastError) return "Error";
+  if (gh.busy || gd.busy) return "Syncing…";
+  const connected = (gh.connected ? 1 : 0) + (gd.connected ? 1 : 0);
+  if (connected === 0) return "Off";
+  if (connected === 1) return "1 connected";
+  return `${connected} connected`;
+}
+
+/**
+ * One row in the BYOC provider list.  Encapsulates the kebab-menu
+ * open/close + storage-info fetch so the outer `ChangesPanel` doesn't
+ * grow another set of hooks per provider.
+ *
+ * Action surface:
+ *   - Primary button → Connect / Sync (push + pull)
+ *   - Kebab (⋮)      → Push only, Pull only*, Open remote*, Reveal
+ *                       token file, Reveal local manifest, Disconnect
+ *
+ *   * "Pull only" is hidden when `supportsPull` is false (e.g. Drive,
+ *     which is push-only in slice B).  "Open remote in browser" is
+ *     hidden when `hasBrowsableRemote` is false (e.g. Drive's
+ *     sandboxed `appDataFolder`).
+ *
+ * Storage descriptor is fetched lazily — only when the menu opens —
+ * so the panel mount stays cheap.  Cached after the first fetch since
+ * the path is stable for the (vault, provider) pair.
+ */
+function BYOCProviderRow({
+  label,
+  color,
+  isReal,
+  configured,
+  supportsPull,
+  hasBrowsableRemote,
+  providerNote,
+  row,
+  vaultPath,
+  onConnect,
+  onDisconnect,
+  onSyncNow,
+  onPush,
+  onPull,
+  getStorageInfo,
+  getRemoteUrl,
+  getManifestPath,
+}: {
+  label: string;
+  color: string;
+  isReal: boolean;
+  configured: boolean;
+  /** When false, hides "Pull only" in the kebab menu. */
+  supportsPull: boolean;
+  /**
+   * When false, hides "Open remote in browser" — there's no
+   * meaningful URL to navigate to (e.g. Drive `appDataFolder`).
+   */
+  hasBrowsableRemote: boolean;
+  providerNote: string | null | undefined;
+  row: ProviderRowState;
+  vaultPath: string | null;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onSyncNow: () => void;
+  onPush: () => void;
+  onPull: () => void;
+  getStorageInfo: () => Promise<{
+    backend: "dpapi-file" | "keychain";
+    path: string | null;
+    directory: string | null;
+    label: string;
+  } | null>;
+  getRemoteUrl: () => Promise<string | null>;
+  getManifestPath: () => Promise<string | null>;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [storage, setStorage] = useState<{
+    backend: "dpapi-file" | "keychain";
+    path: string | null;
+    directory: string | null;
+    label: string;
+  } | null>(null);
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
+  const [manifestAbs, setManifestAbs] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const kebabRef = useRef<HTMLButtonElement | null>(null);
+
+  // Fetch the lazy bits whenever the menu opens (and the row is
+  // connected — there's nothing to show otherwise).  Each fetch
+  // tolerates a null vault / non-real provider by short-circuiting.
+  useEffect(() => {
+    if (!menuOpen || !row.connected || !vaultPath || !isReal) return;
+    let cancelled = false;
+    void (async () => {
+      const [s, u, m] = await Promise.all([
+        getStorageInfo(),
+        getRemoteUrl(),
+        getManifestPath(),
+      ]);
+      if (cancelled) return;
+      setStorage(s);
+      setRemoteUrl(u);
+      setManifestAbs(m);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    menuOpen,
+    row.connected,
+    vaultPath,
+    isReal,
+    getStorageInfo,
+    getRemoteUrl,
+    getManifestPath,
+  ]);
+
+  // Close on outside-click / Escape — matches every other popover in
+  // the app.  Doesn't intercept the kebab itself (that toggles).
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t)) return;
+      if (kebabRef.current?.contains(t)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  const openRemote = async () => {
+    setMenuOpen(false);
+    if (!remoteUrl) return;
+    try {
+      const mod = await import("@tauri-apps/plugin-opener");
+      await mod.openUrl(remoteUrl);
+    } catch (err) {
+      // Tauri IPC isn't available (pure-browser dev mode, or the
+      // opener plugin failed).  Fall back to a regular window.open
+      // so the demo flow still feels complete in the browser.
+      console.warn("openUrl failed, falling back to window.open:", err);
+      try {
+        window.open(remoteUrl, "_blank", "noopener,noreferrer");
+      } catch (fallbackErr) {
+        console.warn("window.open fallback failed:", fallbackErr);
+      }
+    }
+  };
+
+  const revealPath = async (p: string | null) => {
+    setMenuOpen(false);
+    if (!p) return;
+    try {
+      const mod = await import("@tauri-apps/plugin-opener");
+      await mod.revealItemInDir(p);
+    } catch (err) {
+      console.warn("revealItemInDir failed:", err);
+    }
+  };
+
+  return (
+    <li className="cp-provider">
+      <span className="cp-provider-name">
+        <span className="cp-provider-dot" data-color={color} />
+        <span>
+          {label}
+          {isReal && row.connected && row.accountLabel && (
+            <span className="cp-provider-meta">
+              {" · "}
+              {row.accountLabel}
+              {row.remoteLabel && ` (${row.remoteLabel})`}
+            </span>
+          )}
+          {isReal && row.lastSyncAt && (
+            <span className="cp-provider-meta">
+              {" · synced "}
+              {formatRelativeTime(row.lastSyncAt)}
+            </span>
+          )}
+          {isReal && row.lastError && (
+            <span
+              className="cp-provider-meta cp-provider-error"
+              title={row.lastError}
+            >
+              {" · error"}
+            </span>
+          )}
+        </span>
+      </span>
+
+      {!isReal ? (
+        <div className="cp-sync-actions">
+          <button
+            className="cp-btn tiny"
+            title={`${label} adapter ships in the next slice.`}
+            disabled
+          >
+            Soon
+          </button>
+        </div>
+      ) : !configured ? (
+        <div className="cp-sync-actions">
+          <button
+            className="cp-btn tiny"
+            title={providerNote ?? `${label} client id not baked into this build`}
+            disabled
+          >
+            Not built
+          </button>
+        </div>
+      ) : row.connected ? (
+        <div className="cp-sync-actions">
+          <button
+            className="cp-btn tiny"
+            disabled={row.busy || !vaultPath}
+            onClick={onSyncNow}
+            title={`Pull then push to ${label}`}
+          >
+            {row.busy ? "Working…" : "Sync"}
+          </button>
+          <button
+            ref={kebabRef}
+            type="button"
+            className="cp-kebab-btn"
+            disabled={!vaultPath}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`${label} sync actions`}
+            title="More sync actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+          >
+            ⋮
+          </button>
+          {menuOpen && (
+            <div
+              ref={menuRef}
+              className="cp-provider-menu"
+              role="menu"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="cp-provider-menu-item"
+                disabled={row.busy}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onPush();
+                }}
+                title={`Upload local commits to ${label} without pulling`}
+              >
+                Push only
+              </button>
+              {supportsPull && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="cp-provider-menu-item"
+                  disabled={row.busy}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onPull();
+                  }}
+                  title={`Fetch remote changes from ${label} (fast-forward only)`}
+                >
+                  Pull only
+                </button>
+              )}
+              <div className="cp-provider-menu-sep" />
+              {hasBrowsableRemote && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="cp-provider-menu-item"
+                  disabled={!remoteUrl}
+                  onClick={openRemote}
+                  title={remoteUrl ?? "No remote URL available"}
+                >
+                  Open remote in browser
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                className="cp-provider-menu-item"
+                disabled={!storage?.path && !storage?.directory}
+                onClick={() =>
+                  revealPath(storage?.path ?? storage?.directory ?? null)
+                }
+                title={
+                  storage?.backend === "dpapi-file"
+                    ? "Open the folder containing the encrypted token file"
+                    : "Token lives in the OS keychain — no file to reveal"
+                }
+              >
+                Reveal token storage
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="cp-provider-menu-item"
+                disabled={!manifestAbs}
+                onClick={() => revealPath(manifestAbs)}
+                title="Open the .lattice/sync-manifest folder for this vault"
+              >
+                Reveal local manifest
+              </button>
+              <div className="cp-provider-menu-sep" />
+              <button
+                type="button"
+                role="menuitem"
+                className="cp-provider-menu-item danger"
+                disabled={row.busy}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDisconnect();
+                }}
+                title={`Forget the ${label} token (does not revoke the remote grant)`}
+              >
+                Disconnect
+              </button>
+              {storage && (
+                <div className="cp-provider-menu-footer">
+                  <strong>Tokens</strong>
+                  {storage.backend === "dpapi-file" ? (
+                    <>
+                      DPAPI-encrypted file
+                      <br />
+                      {storage.path ?? storage.directory ?? "(unknown path)"}
+                    </>
+                  ) : (
+                    <>OS keychain — {storage.label}</>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="cp-sync-actions">
+          <button
+            className="cp-btn tiny"
+            disabled={row.busy || !vaultPath}
+            onClick={onConnect}
+            title={`Connect ${label}`}
+          >
+            {row.busy ? "Connecting…" : "Connect"}
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * GitHub Device Code Flow modal.
+ *
+ * Mounts when the Rust side emits `byoc://device-code` (mid-OAuth).
+ * Shows the human-typeable `user_code` big + monospace next to a
+ * Copy button, plus a clickable link to the verification URL.  A
+ * lightweight countdown clock helps the user notice the 15-minute
+ * expiry without us blocking polling on the frontend.
+ *
+ * No close-on-success hook — the `byocStore.connect` action wipes the
+ * pending payload when the IPC resolves.  This component only owns
+ * the manual Close button (Escape + click backdrop also dismiss).
+ */
+function DeviceCodeModal({
+  payload,
+  onClose,
+}: {
+  payload: { userCode: string; verificationUri: string; expiresIn: number; interval: number };
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  // Countdown is purely cosmetic — the Rust poller is the source of
+  // truth for expiry.  Computed off mount time to dodge a render loop
+  // when the parent re-renders on store updates.
+  const expiresAt = useRef(Date.now() + payload.expiresIn * 1000);
+  const [remaining, setRemaining] = useState(payload.expiresIn);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const secs = Math.max(
+        0,
+        Math.floor((expiresAt.current - Date.now()) / 1000),
+      );
+      setRemaining(secs);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Escape closes — matches every other modal in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(payload.userCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.warn("clipboard write failed:", err);
+    }
+  };
+
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+
+  return (
+    <div
+      className="cp-modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="cp-modal" role="dialog" aria-modal="true">
+        <div className="cp-modal-head">
+          <span className="cp-modal-title">Connect GitHub</span>
+          <button
+            className="cp-iconbtn"
+            onClick={onClose}
+            title="Close (Esc)"
+            aria-label="Close"
+          >
+            <IcClose />
+          </button>
+        </div>
+        <div className="cp-modal-body">
+          <p className="cp-modal-step">
+            1. Open the verification page in your browser:
+          </p>
+          <a
+            className="cp-modal-link"
+            href={payload.verificationUri}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            {payload.verificationUri}
+          </a>
+          <p className="cp-modal-step">2. Enter this code:</p>
+          <div className="cp-modal-code">
+            <span className="cp-modal-code-text">{payload.userCode}</span>
+            <button
+              className="cp-btn tiny"
+              onClick={copyCode}
+              title="Copy code"
+            >
+              {copied ? (
+                <>
+                  <IcCheck /> Copied
+                </>
+              ) : (
+                <>
+                  <IcCopy /> Copy
+                </>
+              )}
+            </button>
+          </div>
+          <p className="cp-modal-foot">
+            Lattice will finish automatically once you approve in your
+            browser.
+            {remaining > 0 && (
+              <>
+                {" Code expires in "}
+                <strong>
+                  {mins}:{secs.toString().padStart(2, "0")}
+                </strong>
+                .
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
