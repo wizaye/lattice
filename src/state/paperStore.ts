@@ -27,7 +27,9 @@ import { create } from "zustand";
 import {
   paperCompile,
   paperCreate,
+  paperEmitBundle,
   paperListTemplates,
+  paperOpenOverleaf,
   paperSetCompileEngine,
   paperStatus,
   type EngineKind,
@@ -47,6 +49,12 @@ export interface PaperRowState {
   /** ISO-8601 UTC of the last successful compile.  Null until C1-compile lands. */
   lastCompiledAt: string | null;
   lastPdfPath: string | null;
+  /**
+   * Absolute path of the most-recent Overleaf-ready zip on disk
+   * (`<paper>/build/<slug>-overleaf.zip`).  Null until the user
+   * runs Export-zip or Send-to-Overleaf at least once.
+   */
+  lastBundlePath: string | null;
   /** Sticky error from the last failed action; null after a clean op. */
   lastError: string | null;
   /** True while a compile / preflight / bundle is in flight. */
@@ -60,6 +68,7 @@ const EMPTY_ROW: PaperRowState = {
   templateId: null,
   lastCompiledAt: null,
   lastPdfPath: null,
+  lastBundlePath: null,
   lastError: null,
   busy: false,
 };
@@ -92,6 +101,22 @@ interface PaperStore {
    */
   compile(paper: string): Promise<void>;
 
+  /**
+   * Build an Overleaf-ready zip at `<paper>/build/<slug>-overleaf.zip`
+   * and stash the path in `lastBundlePath`.  Returns the zip path on
+   * success, throws on failure (also surfaced into `lastError`).
+   */
+  emitBundle(paper: string): Promise<string>;
+
+  /**
+   * Build (or re-build) the Overleaf zip AND shell out to the OS to
+   * (1) open https://www.overleaf.com/project in the default browser,
+   * (2) reveal the zip in the OS file manager so the user can drag
+   * it into Overleaf's upload dialog.  No-throws (errors land in
+   * `lastError`).
+   */
+  openOverleaf(paper: string): Promise<void>;
+
   // ── Lifecycle ─────────────────────────────────────────────────────────
   /** Drop the cached row for a paper (e.g. when the user deletes it). */
   forgetPaper(paper: string): void;
@@ -104,6 +129,7 @@ const fromStatus = (s: PaperStatus): PaperRowState => ({
   templateId: s.templateId,
   lastCompiledAt: s.lastCompiledAt,
   lastPdfPath: s.lastPdfPath,
+  lastBundlePath: null,
   lastError: s.lastError,
   busy: false,
 });
@@ -131,7 +157,17 @@ export const usePaperStore = create<PaperStore>((set, get) => ({
     if (!paper) return EMPTY_ROW;
     try {
       const status = await paperStatus(paper);
-      const row = fromStatus(status);
+      const next = fromStatus(status);
+      // Preserve the client-only `lastBundlePath` across a status
+      // refresh — the Rust `PaperStatus` doesn't know about it
+      // (the zip lives in build/ which Rust treats as a cache, not
+      // canonical state) and we don't want a `setEngine` call to
+      // wipe the toolbar's "Reveal zip" affordance.
+      const prev = get().rows[paper];
+      const row: PaperRowState = {
+        ...next,
+        lastBundlePath: prev?.lastBundlePath ?? null,
+      };
       set((s) => ({ rows: { ...s.rows, [paper]: row } }));
       return row;
     } catch (e) {
@@ -198,6 +234,96 @@ export const usePaperStore = create<PaperStore>((set, get) => ({
           rows: {
             ...s.rows,
             [paper]: { ...cur, busy: false, lastPdfPath: pdfPath, lastError: null },
+          },
+        };
+      });
+    } catch (e) {
+      set((s) => {
+        const cur = s.rows[paper] ?? EMPTY_ROW;
+        return {
+          rows: {
+            ...s.rows,
+            [paper]: {
+              ...cur,
+              busy: false,
+              lastError: e instanceof Error ? e.message : String(e),
+            },
+          },
+        };
+      });
+    }
+  },
+
+  async emitBundle(paper) {
+    if (!isRealVault(paper)) {
+      throw new Error("paper path is required");
+    }
+    set((s) => {
+      const cur = s.rows[paper] ?? EMPTY_ROW;
+      return { rows: { ...s.rows, [paper]: { ...cur, busy: true, lastError: null } } };
+    });
+    try {
+      const zipPath = await paperEmitBundle(paper);
+      set((s) => {
+        const cur = s.rows[paper] ?? EMPTY_ROW;
+        return {
+          rows: {
+            ...s.rows,
+            [paper]: { ...cur, busy: false, lastBundlePath: zipPath, lastError: null },
+          },
+        };
+      });
+      return zipPath;
+    } catch (e) {
+      set((s) => {
+        const cur = s.rows[paper] ?? EMPTY_ROW;
+        return {
+          rows: {
+            ...s.rows,
+            [paper]: {
+              ...cur,
+              busy: false,
+              lastError: e instanceof Error ? e.message : String(e),
+            },
+          },
+        };
+      });
+      throw e;
+    }
+  },
+
+  async openOverleaf(paper) {
+    if (!isRealVault(paper)) {
+      throw new Error("paper path is required");
+    }
+    set((s) => {
+      const cur = s.rows[paper] ?? EMPTY_ROW;
+      return { rows: { ...s.rows, [paper]: { ...cur, busy: true, lastError: null } } };
+    });
+    try {
+      // Step 1 — re-emit the zip so the user always uploads the
+      // freshest sources (cheap, ~tens of ms on a typical paper).
+      const zipPath = await paperOpenOverleaf(paper);
+      // Step 2 — shell out to the OS:
+      //   (a) open https://www.overleaf.com/project in the browser,
+      //   (b) reveal the zip in the file manager so the user can
+      //       drag it into Overleaf's "Upload Project" dropzone.
+      // Dynamic import keeps the opener plugin off the cold-start
+      // bundle for users who never touch the paper toolbar.
+      try {
+        const opener = await import("@tauri-apps/plugin-opener");
+        await opener.openUrl("https://www.overleaf.com/project");
+        await opener.revealItemInDir(zipPath);
+      } catch (openErr) {
+        // Non-fatal — the zip is still on disk; surface as warning.
+        console.warn("openOverleaf: shell-out failed:", openErr);
+      }
+      set((s) => {
+        const cur = s.rows[paper] ?? EMPTY_ROW;
+        return {
+          rows: {
+            ...s.rows,
+            [paper]: { ...cur, busy: false, lastBundlePath: zipPath, lastError: null },
           },
         };
       });

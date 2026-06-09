@@ -108,7 +108,11 @@ pub fn compile(paper_abs: &Path) -> Result<PathBuf, String> {
 ///      comes before `02-related-work.md`).
 ///   3. bibliography.bib → emitted as `\bibliography{}` in the
 ///      template wrapper, not here.
-fn assemble_body(paper_abs: &Path) -> Result<String, String> {
+///
+/// `pub(super)` so the sibling `bundle` module can produce the SAME
+/// `main.tex` body as `compile()` (single source of truth — if we
+/// change the assembly here the Overleaf zip picks it up for free).
+pub(super) fn assemble_body(paper_abs: &Path) -> Result<String, String> {
     let mut out = String::new();
 
     // Abstract.
@@ -177,7 +181,12 @@ fn assemble_body(paper_abs: &Path) -> Result<String, String> {
 /// Bibliography: if `bibliography.bib` exists in the paper folder, we
 /// emit `\bibliography{../bibliography}` (latexmk/tectonic auto-detect
 /// the bibtex pass).  Otherwise the line is omitted.
-fn wrap_in_template(cfg: &PaperToml, body: &str) -> String {
+///
+/// `pub(super)` so the sibling `bundle` module produces an IDENTICAL
+/// `main.tex` to what `compile()` would generate — guarantees the
+/// Overleaf-cloud render matches local-tectonic render byte-for-byte
+/// (modulo Overleaf-side TeX-Live version drift).
+pub(super) fn wrap_in_template(cfg: &PaperToml, body: &str) -> String {
     let title = md_to_tex::convert_title(&cfg.meta.title);
     let mut authors_block = String::new();
     if !cfg.authors.entries.is_empty() {

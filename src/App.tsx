@@ -580,6 +580,41 @@ export default function App() {
     return () => window.removeEventListener("lattice-open-wikilink", handler);
   }, [openFile]);
 
+  // ---- Paper PDF auto-open ----------------------------------------------
+  // PaperToolbar fires `lattice-open-paper-pdf` after a successful
+  // compile.  We refresh the vault tree so the just-written
+  // `<paper>/build/main.pdf` shows up in `flatVault`, then route
+  // through `onOpenFileByPath` — which opens it as a real editor
+  // tab using `PdfView`.  This is what turns "Compile PDF" from
+  // "ok, the file is somewhere on disk" into a true preview.
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { absPath?: string }
+        | undefined;
+      const absPath = detail?.absPath;
+      if (!absPath) return;
+      try {
+        await useVaultStore.getState().refreshTree();
+      } catch (err) {
+        console.warn("lattice-open-paper-pdf: refreshTree failed:", err);
+      }
+      // vault.get is keyed by absolute path (see tauriApi.ts:147 —
+      // `id: node.path`) so we can pass `absPath` straight through.
+      const node = useVaultStore.getState().flatVault.get(absPath);
+      if (node) {
+        openFile(node);
+      } else {
+        console.warn(
+          "lattice-open-paper-pdf: PDF not found in vault after refresh:",
+          absPath,
+        );
+      }
+    };
+    window.addEventListener("lattice-open-paper-pdf", handler);
+    return () => window.removeEventListener("lattice-open-paper-pdf", handler);
+  }, [openFile]);
+
   // ---- Keyboard shortcuts -------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

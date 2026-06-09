@@ -19,6 +19,7 @@
 //!   * Every IPC DTO is `#[serde(rename_all = "camelCase")]` to match the
 //!     existing BYOC / VCS conventions.
 
+pub mod bundle;
 pub mod compile;
 pub mod md_to_tex;
 pub mod toml;
@@ -421,14 +422,56 @@ pub async fn paper_preflight(paper: String) -> Result<Vec<PreflightFinding>, Str
 
 #[tauri::command]
 pub async fn paper_emit_bundle(paper: String) -> Result<String, String> {
-    let _ = paper;
-    Err("paper_emit_bundle is not yet implemented (lands in phase C2 — bundle.rs + Overleaf)".to_string())
+    if paper.is_empty() {
+        return Err("paper path is empty".to_string());
+    }
+    let paper_abs = PathBuf::from(&paper);
+    if !paper_abs.is_dir() {
+        return Err(format!("paper folder not found: {}", paper_abs.display()));
+    }
+    if !paper_abs.join(".lattice").join("paper.toml").is_file() {
+        return Err(format!(
+            "no .lattice/paper.toml under {} \u{2014} not a paper folder",
+            paper_abs.display()
+        ));
+    }
+    // Zip writer + walkdir are blocking I/O — keep them off the IPC
+    // executor so the toolbar's busy spinner can render the in-flight
+    // state.
+    let zip = tokio::task::spawn_blocking(move || bundle::emit_bundle(&paper_abs))
+        .await
+        .map_err(|e| format!("paper_emit_bundle join error: {e}"))??;
+    Ok(zip.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 pub async fn paper_open_overleaf(paper: String) -> Result<String, String> {
-    let _ = paper;
-    Err("paper_open_overleaf is not yet implemented (lands in phase C2)".to_string())
+    // Same precondition checks as paper_emit_bundle — we re-bundle
+    // every time so the user always uploads the latest sources.
+    if paper.is_empty() {
+        return Err("paper path is empty".to_string());
+    }
+    let paper_abs = PathBuf::from(&paper);
+    if !paper_abs.is_dir() {
+        return Err(format!("paper folder not found: {}", paper_abs.display()));
+    }
+    if !paper_abs.join(".lattice").join("paper.toml").is_file() {
+        return Err(format!(
+            "no .lattice/paper.toml under {} \u{2014} not a paper folder",
+            paper_abs.display()
+        ));
+    }
+    // Generate (or regenerate) the zip on disk.  The frontend then
+    // shells out to plugin-opener to:
+    //   (1) open the containing folder in OS Explorer (so the user can
+    //       drag-drop the zip into Overleaf), AND
+    //   (2) open https://www.overleaf.com/project in the default
+    //       browser (the New Project page).
+    // We return the zip path so the TS layer can do both with one IPC.
+    let zip = tokio::task::spawn_blocking(move || bundle::emit_bundle(&paper_abs))
+        .await
+        .map_err(|e| format!("paper_open_overleaf join error: {e}"))??;
+    Ok(zip.to_string_lossy().to_string())
 }
 
 #[tauri::command]

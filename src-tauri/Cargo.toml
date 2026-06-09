@@ -147,6 +147,14 @@ globset = "0.4"
 # highlighting on the LaTeX side (the engine handles `\verbatim`).
 comrak = { version = "0.28", default-features = false }
 
+# Slice C phase C2 — Overleaf-ready zip bundle for paper_emit_bundle.
+#
+# `zip` is the reference pure-Rust ZIP writer.  We deliberately disable
+# default features (which pull in bzip2 → C compiler) and only enable
+# `deflate` (RFC 1951, pure-Rust via `flate2`) — that's the only
+# compression Overleaf accepts on upload anyway.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 [dev-dependencies]
 # Scratch directories for sync/manifest tests.  Auto-cleaned on Drop.
 tempfile = "3"
