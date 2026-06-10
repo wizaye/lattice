@@ -21,12 +21,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE};
 use reqwest::{Method, StatusCode};
-use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tokio::time::timeout;
 
 use super::error::SyncError;
+use super::keychain::{self, TokenSet};
 use super::oauth::{loopback_listen, random_state, random_verifier, s256_challenge};
 use super::{AccountInfo, ProviderId, ProviderStatus, PullResult, PushResult, SyncProvider};
 
@@ -54,8 +54,8 @@ const OAUTH_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// transparently recover from a 401.
 #[derive(Clone)]
 struct Tokens {
-    access: SecretString,
-    refresh: SecretString,
+    access: String,
+    refresh: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,28 +130,35 @@ impl OneDriveProvider {
     // workspace, adjust the two call sites below.
 
     fn tokens_load(&self, vault: &Path) -> Result<Tokens, SyncError> {
-        let bundle = crate::sync::keychain::load(ProviderId::Onedrive, vault)
-            .map_err(|e| SyncError::Oauth(format!("keychain read failed: {e}")))?;
+        let bundle = keychain::load(vault, ProviderId::Onedrive)
+            .map_err(|e| SyncError::Oauth(format!("keychain read failed: {e}")))?
+            .ok_or_else(|| SyncError::Oauth("OneDrive not connected for this vault".into()))?;
+        let refresh = bundle.refresh_token.ok_or_else(|| {
+            SyncError::Oauth("stored OneDrive token has no refresh_token".into())
+        })?;
         Ok(Tokens {
-            access: SecretString::new(bundle.access_token),
-            refresh: SecretString::new(bundle.refresh_token),
+            access: bundle.access_token,
+            refresh,
         })
     }
 
     fn tokens_save(&self, vault: &Path, t: &Tokens) -> Result<(), SyncError> {
-        crate::sync::keychain::save(
-            ProviderId::Onedrive,
+        keychain::store(
             vault,
-            crate::sync::keychain::TokenBundle {
-                access_token: t.access.expose_secret().to_string(),
-                refresh_token: t.refresh.expose_secret().to_string(),
+            ProviderId::Onedrive,
+            &TokenSet {
+                access_token: t.access.clone(),
+                refresh_token: Some(t.refresh.clone()),
+                expires_at: None,
+                scope: SCOPES.to_string(),
+                token_type: "Bearer".to_string(),
             },
         )
         .map_err(|e| SyncError::Oauth(format!("keychain write failed: {e}")))
     }
 
     fn tokens_clear(&self, vault: &Path) -> Result<(), SyncError> {
-        crate::sync::keychain::clear(ProviderId::Onedrive, vault)
+        keychain::delete(vault, ProviderId::Onedrive)
             .map_err(|e| SyncError::Oauth(format!("keychain clear failed: {e}")))
     }
 
@@ -193,8 +200,8 @@ impl OneDriveProvider {
             SyncError::Oauth("token response missing refresh_token — check offline_access scope".into())
         })?;
         Ok(Tokens {
-            access: SecretString::new(tr.access_token),
-            refresh: SecretString::new(refresh),
+            access: tr.access_token,
+            refresh,
         })
     }
 
@@ -202,7 +209,7 @@ impl OneDriveProvider {
         let form = [
             ("client_id", self.client_id.as_str()),
             ("grant_type", "refresh_token"),
-            ("refresh_token", current.refresh.expose_secret().as_str()),
+            ("refresh_token", current.refresh.as_str()),
             ("scope", SCOPES),
         ];
         let resp = self
@@ -227,10 +234,9 @@ impl OneDriveProvider {
         // one if a new one wasn't issued.
         let refresh = tr
             .refresh_token
-            .map(SecretString::new)
             .unwrap_or_else(|| current.refresh.clone());
         Ok(Tokens {
-            access: SecretString::new(tr.access_token),
+            access: tr.access_token,
             refresh,
         })
     }
@@ -247,7 +253,7 @@ impl OneDriveProvider {
         F: Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
     {
         let mut tokens = self.tokens_load(vault)?;
-        let first = build(&self.http, tokens.access.expose_secret())
+        let first = build(&self.http, tokens.access.as_str())
             .send()
             .await
             .map_err(|e| SyncError::Oauth(format!("graph request failed: {e}")))?;
@@ -258,7 +264,7 @@ impl OneDriveProvider {
         drop(first);
         tokens = self.refresh(&tokens).await?;
         self.tokens_save(vault, &tokens)?;
-        let retry = build(&self.http, tokens.access.expose_secret())
+        let retry = build(&self.http, tokens.access.as_str())
             .send()
             .await
             .map_err(|e| SyncError::Oauth(format!("graph retry failed: {e}")))?;
@@ -468,7 +474,7 @@ impl SyncProvider for OneDriveProvider {
         false
     }
 
-    async fn connect(&self, app: AppHandle, vault: &Path) -> Result<AccountInfo, SyncError> {
+    async fn connect(&self, _app: AppHandle, vault: &Path) -> Result<AccountInfo, SyncError> {
         if !self.configured() {
             return Err(SyncError::Oauth("OneDrive client_id not configured".into()));
         }
@@ -494,7 +500,7 @@ impl SyncProvider for OneDriveProvider {
             cc = urlencoding::encode(&challenge),
             st = urlencoding::encode(&state),
         );
-        if let Err(e) = tauri::api::shell::open(&app.shell_scope(), &authorize, None) {
+        if let Err(e) = tauri_plugin_opener::open_url(&authorize, None::<String>) {
             return Err(SyncError::Oauth(format!("failed to open browser: {e}")));
         }
 
@@ -513,11 +519,9 @@ impl SyncProvider for OneDriveProvider {
         self.tokens_save(vault, &tokens)?;
 
         Ok(AccountInfo {
-            provider: ProviderId::Onedrive,
             display_name: "OneDrive (AppFolder)".to_string(),
-            // ADJUST: AccountInfo fields may differ — fill in the
-            // minimum the trait actually requires.
-            ..Default::default()
+            account_email: None,
+            remote_label: Some("OneDrive AppFolder".to_string()),
         })
     }
 
@@ -534,13 +538,17 @@ impl SyncProvider for OneDriveProvider {
         match self.tokens_load(vault) {
             Ok(_) => Ok(ProviderStatus {
                 connected: true,
-                provider: ProviderId::Onedrive,
-                ..Default::default()
+                account_label: Some("OneDrive".to_string()),
+                remote_label: Some("OneDrive AppFolder".to_string()),
+                last_sync_at: None,
+                last_error: None,
             }),
             Err(_) => Ok(ProviderStatus {
                 connected: false,
-                provider: ProviderId::Onedrive,
-                ..Default::default()
+                account_label: None,
+                remote_label: None,
+                last_sync_at: None,
+                last_error: None,
             }),
         }
     }
