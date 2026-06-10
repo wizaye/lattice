@@ -97,9 +97,8 @@ const EMPTY_ROW: PublishRowState = {
   theme: null,
 };
 
-const MOCK_VAULT = "__mock__";
 const isRealVault = (v: string | null | undefined): v is string =>
-  typeof v === "string" && v.length > 0 && v !== MOCK_VAULT;
+  typeof v === "string" && v.length > 0;
 
 interface PublishStore {
   /** Cached host registry — populated lazily on first `refreshRegistries`. */

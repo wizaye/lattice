@@ -3,6 +3,7 @@ import type { FileNode } from "../../state/types";
 import { IcChevronDown, IcChevronRight } from "../common/Icons";
 import { setDragImageBelowCursor } from "../common/dragGhost";
 import { useVaultStore } from "../../state/vaultStore";
+import { useSettingsStore } from "../../state/settingsStore";
 import { renameEntry, createFolder as createFolderOnDisk, createFile as createFileOnDisk, deleteFile, deleteFolder } from "../../lib/tauriApi";
 import { renameAndUpdateLinks } from "../../lib/markdown";
 import { confirm, message } from "@tauri-apps/plugin-dialog";
@@ -154,6 +155,10 @@ function TreeRow({
 }) {
   const [open, setOpen] = useState(true);
   const selected = node.id === selectedId;
+  const showFileExtensions = useSettingsStore((s) => s.showFileExtensions);
+  const displayName = !showFileExtensions && node.kind === "file" && node.name.toLowerCase().endsWith(".md")
+    ? node.name.slice(0, -3)
+    : node.name;
 
   const onDragStart = (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = "copyMove";
@@ -237,7 +242,7 @@ function TreeRow({
           }}
         >
           <span className="tree-chev">{open ? <IcChevronDown /> : <IcChevronRight />}</span>
-          <span className="tree-label">{node.name}</span>
+          <span className="tree-label">{displayName}</span>
         </div>
         {open && (
           <>
@@ -285,7 +290,7 @@ function TreeRow({
       // screen and Chromium won't dismiss it just because we strip
       // the `title` attribute mid-display. Screen readers still get
       // the name via aria-label.
-      aria-label={node.name}
+      aria-label={displayName}
       // ── Drop-on-file ────────────────────────────────────────────────
       // File rows also accept drops so the user can "drag completely
       // outside" a folder. Without this, the browser's default
@@ -357,7 +362,7 @@ function TreeRow({
         }
       }}
     >
-      <span className="tree-label">{node.name}</span>
+      <span className="tree-label">{displayName}</span>
     </div>
   );
 }

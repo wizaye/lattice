@@ -3,12 +3,9 @@ import "./App.css";
 import type { FileNode, SplitTree, Tab } from "./state/types";
 import { useVaultStore } from "./state/vaultStore";
 import { useEditorStore } from "./state/editorStore";
+import { useSettingsStore } from "./state/settingsStore";
 import { pickVaultFolder, createFolder as createFolderOnDisk } from "./lib/tauriApi";
-import {
-  GRAPH_TAB_FILE_ID,
-  VAULT_NAME as MOCK_VAULT_NAME,
-  initialVault,
-} from "./state/mockVault";
+import { GRAPH_TAB_FILE_ID } from "./state/mockVault";
 import {
   findLeaf,
   leaves,
@@ -46,6 +43,11 @@ import { NewPaperModal } from "./components/modals/NewPaperModal";
 import { PublishWizard } from "./components/modals/PublishWizard";
 import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
+import { OnboardingShell } from "./components/onboarding/OnboardingShell";
+import {
+  useOnboardingStore,
+  shouldShowOnboarding,
+} from "./components/onboarding/state/onboardingStore";
 
 const LEFT_MIN = 160;
 const LEFT_DEFAULT = 240;
@@ -102,48 +104,37 @@ export default function App() {
   // VcsStore (history, errors, etc.) doesn't touch App.
   const dirtyCount = useVcsStore(selectDirtyCount);
 
-  // ── Bootstrap a mock vault on first mount ─────────────────────────────
-  // Without this, the file tree is empty on startup (nobody has picked a
-  // real folder yet) and GraphView spins forever waiting for vaultPath.
-  // We populate the vault store with the hard-coded `initialVault` and
-  // seed the editor store with every markdown body so `loadFile(id)`
-  // resolves instantly without going to disk. Using the synthetic path
-  // `__mock__` signals "in-memory only" to GraphView, which then builds
-  // the graph from the in-memory wikilinks instead of calling the Rust
-  // backend (which would error out on a non-existent folder path).
-  // Skipped if the user has already opened a real vault.
+  // ── Auto-restore the last opened vault on first mount ──────────────────
+  // Reads the persisted vault path from localStorage and silently re-opens
+  // it. If no path is stored the app starts with an empty file tree — the
+  // user picks a folder via the sidebar or Manage Vaults modal.
   useEffect(() => {
     const state = useVaultStore.getState();
     if (state.vaultPath || state.fileTree.length > 0) return;
+    if (!useSettingsStore.getState().autoRestoreVault) return;
 
-    const flat = new Map<string, FileNode>();
-    const walk = (n: FileNode) => {
-      flat.set(n.id, n);
-      n.children?.forEach(walk);
-    };
-    initialVault.forEach(walk);
-
-    useVaultStore.setState({
-      vaultPath: "__mock__",
-      vaultName: MOCK_VAULT_NAME,
-      fileTree: initialVault,
-      flatVault: flat,
-    });
-
-    // Pre-seed the editor store so loadFile resolves synchronously for
-    // every mock file (no disk call) and the graph indexer can read
-    // markdown bodies for wiki-link extraction.
-    const seeded: Record<string, string> = {};
-    flat.forEach((node) => {
-      if (node.kind === "folder" || node.kind === "graph") return;
-      if (typeof node.content === "string") {
-        seeded[node.id] = node.content;
+    try {
+      const lastPath = window.localStorage.getItem("lattice.lastVaultPath");
+      if (lastPath) {
+        void useVaultStore.getState().openVault(lastPath).catch(() => {
+          // Folder may have been moved/deleted — silently clear the stored path
+          window.localStorage.removeItem("lattice.lastVaultPath");
+        });
       }
-    });
-    useEditorStore.setState((prev) => ({
-      fileContents: { ...prev.fileContents, ...seeded },
-    }));
+    } catch {
+      /* localStorage disabled — start empty */
+    }
   }, []);
+
+  // ── Persist the current vault path whenever it changes ─────────────────
+  useEffect(() => {
+    if (!vaultPath) return;
+    try {
+      window.localStorage.setItem("lattice.lastVaultPath", vaultPath);
+    } catch {
+      /* ignore quota / disabled storage */
+    }
+  }, [vaultPath]);
 
   // Debounce timer ref for auto-saving file content to disk
   /** Write back the new body for a file (markdown or canvas). Updates
@@ -196,7 +187,7 @@ export default function App() {
   // is debounced inside `vcsStore` to coalesce rapid switches.
   useEffect(() => {
     const store = useVcsStore.getState();
-    if (!vaultPath || vaultPath === "__mock__") {
+    if (!vaultPath) {
       store.reset();
       return;
     }
@@ -204,11 +195,8 @@ export default function App() {
     void (async () => {
       await store.refresh(vaultPath);
       if (cancelled) return;
-      // Re-read the store snapshot — `refresh` writes a new status
-      // synchronously before resolving, so this sees the fresh
-      // `initialized` flag rather than the stale closure value.
       const fresh = useVcsStore.getState();
-      if (fresh.cacheKey !== vaultPath) return; // user switched again
+      if (fresh.cacheKey !== vaultPath) return;
       if (!fresh.status?.initialized) return;
       void fresh.refreshHistory(vaultPath, 100);
       void fresh.refreshGraph(vaultPath, 200);
@@ -381,6 +369,20 @@ export default function App() {
   const toggleTheme = useCallback(() => {
     setTheme((t) => (t === "dark" ? "light" : "dark"));
   }, []);
+
+  // ---- Settings CSS Injection ----------------------------------------------
+  const accentColor = useSettingsStore((s) => s.accentColor);
+  const fontSize = useSettingsStore((s) => s.fontSize);
+  const fontFamily = useSettingsStore((s) => s.fontFamily);
+  const density = useSettingsStore((s) => s.density);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--accent", accentColor);
+    root.style.setProperty("--editor-font-size", `${fontSize}px`);
+    root.style.setProperty("--font-text", fontFamily);
+    root.dataset.density = density;
+  }, [accentColor, fontSize, fontFamily, density]);
 
   const leftStartRef = useRef(LEFT_DEFAULT);
   const rightStartRef = useRef(RIGHT_DEFAULT);
@@ -631,10 +633,6 @@ export default function App() {
         leaf.id === activeLeafId ? openTabInLeaf(leaf, tab) : leaf,
       );
       if (next) setTree(next);
-      // Mock-vault files (vaultPath === "__mock__") already have their
-      // content seeded in editorStore by the bootstrap effect, so the
-      // loadFile call below short-circuits via the cache and never hits
-      // the (non-existent) Rust backend.
       useEditorStore.getState().loadFile(file.id).then((content) => {
         // Also update the vault store so the file tree has content for
         // backlinks/outgoing/tags computation
@@ -825,6 +823,16 @@ export default function App() {
     !rightCollapsed && !rightAnimating
       ? windowWidth - rightWidth - 3
       : null;
+
+  // ── Onboarding gate ────────────────────────────────────────────────────
+  // Show the onboarding wizard on first run. Once the user completes it
+  // (setting completedAt), shouldShowOnboarding returns false and the
+  // main workspace renders normally. The check is reactive via zustand.
+  const showOnboarding = useOnboardingStore(shouldShowOnboarding);
+
+  if (showOnboarding) {
+    return <OnboardingShell />;
+  }
 
   return (
     <div className="lattice-app">

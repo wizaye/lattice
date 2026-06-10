@@ -114,16 +114,12 @@ export interface PreflightFinding {
   line?: number | null;
 }
 
-// ─── Mock-vault gate ─────────────────────────────────────────────────────
-
-const MOCK_VAULT = "__mock__";
-
 /**
- * True iff `v` is a non-empty real vault path (not the mock sentinel).
+ * True iff `v` is a non-empty string.
  * Every paper IPC checks this first.
  */
 const isRealVault = (v: string | null | undefined): v is string =>
-  typeof v === "string" && v.length > 0 && v !== MOCK_VAULT;
+  typeof v === "string" && v.length > 0;
 
 // ─── Real commands (phase C1) ────────────────────────────────────────────
 
@@ -149,7 +145,7 @@ export async function paperListTemplates(vault: string | null): Promise<Template
  */
 export async function paperCreate(req: NewPaperRequest): Promise<NewPaperResult> {
   if (!isRealVault(req.vault)) {
-    throw new Error("Cannot create a paper in the mock vault.");
+    throw new Error("Vault path is empty.");
   }
   if (!req.title.trim()) {
     throw new Error("Paper title cannot be empty.");
@@ -170,7 +166,7 @@ export async function paperCreate(req: NewPaperRequest): Promise<NewPaperResult>
  */
 export async function paperQuickPdf(req: QuickPdfRequest): Promise<QuickPdfResult> {
   if (!isRealVault(req.vault)) {
-    throw new Error("Cannot export a PDF in the mock vault.");
+    throw new Error("Vault path is empty.");
   }
   if (!req.title.trim()) {
     throw new Error("Paper title cannot be empty.");
@@ -257,7 +253,7 @@ export async function paperDiff(paper: string): Promise<string | null> {
  * **Phase C5 — currently errors out.**
  */
 export async function paperByofImport(vault: string, zipPath: string): Promise<string> {
-  if (!isRealVault(vault)) throw new Error("Cannot import BYOF into the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string>("paper_byof_import", { vault, zipPath });
 }
 
@@ -267,13 +263,13 @@ export async function paperByofReImport(
   byofId: string,
   zipPath: string,
 ): Promise<string> {
-  if (!isRealVault(vault)) throw new Error("Cannot re-import BYOF into the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string>("paper_byof_re_import", { vault, byofId, zipPath });
 }
 
 /** **Phase C5 — currently errors out.** */
 export async function paperByofRemove(vault: string, byofId: string): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot remove BYOF from the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("paper_byof_remove", { vault, byofId });
 }
 

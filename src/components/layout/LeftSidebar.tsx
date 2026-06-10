@@ -103,11 +103,7 @@ export function LeftSidebar({
   // (the menu lives in a portal — see VaultPickerMenu.tsx).
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false);
   const vaultBtnRef = useRef<HTMLButtonElement>(null);
-  const knownVaults = [
-    "vijay's corp obsidian vault",
-    "BoQ",
-    vaultName,
-  ].filter((v, i, a) => a.indexOf(v) === i);
+  const knownVaults = [vaultName].filter(Boolean);
 
   const vaultPath = useVaultStore((s) => s.vaultPath);
   // Subscribe to VCS state ONLY for the bits the sidebar header /
@@ -211,7 +207,7 @@ export function LeftSidebar({
                 // the spinner is for cosmetics — the store debounces
                 // so spamming the click is harmless.
                 onClick={() => vaultPath && void vcsRefresh(vaultPath)}
-                disabled={!vaultPath || vaultPath === "__mock__"}
+                disabled={!vaultPath}
               >
                 <IcRefresh />
               </button>
