@@ -43,6 +43,7 @@ pub mod toml;
 
 pub use node_probe::ProbeReport;
 pub use toml::PublishToml;
+use toml::PublishTheme;
 
 // ─── Shared DTOs ─────────────────────────────────────────────────────────
 
@@ -142,6 +143,10 @@ pub struct PublishStatus {
     pub last_deploy_files: Option<u32>,
     pub last_deploy_bytes: Option<u64>,
     pub last_error: Option<String>,
+    /// User's UI customisations from `publish.toml [quartz.theme]`.
+    /// `None` when no config exists yet; the wizard renders an
+    /// `EMPTY_THEME` placeholder in that case.
+    pub theme: Option<PublishTheme>,
 }
 
 impl PublishStatus {
@@ -157,6 +162,7 @@ impl PublishStatus {
             last_deploy_files: None,
             last_deploy_bytes: None,
             last_error: None,
+            theme: None,
         }
     }
 }
@@ -298,6 +304,88 @@ fn synthesize_landing_page(content_dir: &Path, total_notes: u32) -> String {
     body
 }
 
+/// Translate a raw `npx quartz build` failure into a single-line
+/// summary that names the offending vault file when we can detect
+/// one.  The original `--- stdout ---` / `--- stderr ---` blocks are
+/// preserved beneath the summary so a deep dive is still possible.
+///
+/// **Patterns recognised today:**
+///   * `YAMLException: duplicated mapping key "<key>" … at line N`
+///     ⇒ scan stdout for `Transforming <path>` so we can name the
+///     last note Quartz was processing when it died (the lattice
+///     `note-properties` patch should make this near-impossible, but
+///     it's still useful when a NEW failure mode appears or when the
+///     patch was skipped because upstream changed bundle shape).
+///   * `YAMLException: <other>` ⇒ same surfacing without the key
+///     name.
+///
+/// Unrecognised errors are returned verbatim — never lose the
+/// original payload, never lie about what we don't understand.
+fn pretty_build_error(raw: &str, content_dir: &Path) -> String {
+    // Cheap pattern check — bail before doing any work if the build
+    // didn't fail in a way we can decode.
+    if !raw.contains("YAMLException") {
+        return raw.to_string();
+    }
+
+    // Pull out the duplicate-key name when present.
+    let dup_key = raw
+        .split("duplicated mapping key")
+        .nth(1)
+        .and_then(|tail| {
+            let trimmed = tail.trim_start_matches(|c: char| c == ' ' || c == ':');
+            // Expected forms: `"foo"` or `'foo'`
+            let quote = trimmed.chars().next()?;
+            if quote != '"' && quote != '\'' {
+                return None;
+            }
+            let rest = &trimmed[1..];
+            let end = rest.find(quote)?;
+            Some(rest[..end].to_string())
+        });
+
+    // The most recent `Transforming <path>` line in stdout tells us
+    // which note Quartz was processing when it died.  Path is
+    // relative to `<quartz>/content/` ⇒ rewrite to relative to the
+    // vault root so the user can find it.
+    let offender = raw
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let s = line.trim();
+            s.strip_prefix("Transforming ").map(|rest| rest.to_string())
+        })
+        .map(|p| {
+            // Quartz logs absolute paths under content/ — strip the
+            // content_dir prefix so we show "Notes/Foo.md" instead
+            // of the long noisy version.
+            let p = std::path::Path::new(&p);
+            p.strip_prefix(content_dir)
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|_| p.display().to_string())
+        });
+
+    let summary = match (offender.as_deref(), dup_key.as_deref()) {
+        (Some(file), Some(key)) => format!(
+            "YAML error in your vault: duplicate frontmatter key `{key}` in `{file}`. \
+             Open that note and remove the duplicate."
+        ),
+        (Some(file), None) => format!(
+            "YAML error in your vault: malformed frontmatter in `{file}`. \
+             Open that note and check the `---` block at the top."
+        ),
+        (None, Some(key)) => format!(
+            "YAML error in your vault: duplicate frontmatter key `{key}`. \
+             Check your notes' `---` frontmatter blocks."
+        ),
+        (None, None) => format!(
+            "YAML error in your vault — check your notes' `---` frontmatter blocks."
+        ),
+    };
+
+    format!("{summary}\n\n--- full quartz output ---\n{raw}")
+}
+
 // ─── IPC commands — REAL ─────────────────────────────────────────────────
 
 /// Probe Node / npm / npx versions on `PATH`.  Used as the very first
@@ -355,6 +443,7 @@ pub async fn publish_status(vault: String) -> Result<PublishStatus, String> {
         last_deploy_files: cfg.state.last_deploy_files,
         last_deploy_bytes: cfg.state.last_deploy_bytes,
         last_error: cfg.state.last_error.clone(),
+        theme: Some(cfg.quartz.theme.clone()),
     })
 }
 
@@ -457,6 +546,47 @@ pub async fn publish_auth_pick(
     Err("publish_auth_pick: not yet implemented (lands in phase D2)".to_string())
 }
 
+/// Update the user's Quartz UI customisations.
+///
+/// Writes the new theme into `publish.toml [quartz.theme]` AND
+/// immediately re-applies the patch to `quartz.config.yaml` so the
+/// next `publish_build` (and the in-tree config the user might be
+/// inspecting) reflect the change without an explicit re-init.
+///
+/// Cheap operation — pure file IO, no network, no subprocess.  The
+/// frontend awaits this before refreshing `publish_status` so the
+/// wizard's Apply button has clear "saving → saved" feedback.
+#[tauri::command]
+pub async fn publish_set_theme(vault: String, theme: PublishTheme) -> Result<(), String> {
+    let root = vault_dir(&vault)?;
+    let toml_path = publish_toml_path(&root);
+    if !toml_path.exists() {
+        return Err(
+            "publish_set_theme: vault is not initialised for publishing — \
+             run the publishing wizard first"
+                .to_string(),
+        );
+    }
+    let quartz_root = quartz_dir(&root);
+
+    tokio::task::spawn_blocking(move || {
+        let mut cfg = PublishToml::load(&toml_path)?;
+        cfg.quartz.theme = theme;
+        cfg.save(&toml_path)?;
+
+        // Re-apply against the in-tree quartz.config.yaml if the
+        // scaffold exists.  When it doesn't (theme set before
+        // publish_init finishes — shouldn't happen but defensive),
+        // skip silently; the next build will pick it up.
+        if quartz_root.join("quartz.config.yaml").exists() {
+            quartz::ensure_scaffold(&quartz_root, Some(&cfg.quartz.theme))?;
+        }
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| format!("publish_set_theme join error: {e}"))?
+}
+
 /// Run the full build pipeline: filter the vault → copy markdown into
 /// `<quartz>/content/` → run `npx quartz build`.
 ///
@@ -488,7 +618,11 @@ pub async fn publish_build(vault: String) -> Result<String, String> {
         //    or `publish_init` was interrupted mid-scaffold), run
         //    `quartz create` + `plugin install --from-config` now.
         //    Idempotent no-op if the scaffold already exists.
-        quartz::ensure_scaffold(&quartz_root).map_err(|e| {
+        //
+        //    Also re-applies the user's UI customisations
+        //    (`[quartz.theme]`) so the wizard's Customise step
+        //    reflects on every build without an explicit re-init.
+        quartz::ensure_scaffold(&quartz_root, Some(&cfg.quartz.theme)).map_err(|e| {
             cfg.state.last_error = Some(e.clone());
             let _ = cfg.save(&toml_path);
             e
@@ -557,11 +691,17 @@ pub async fn publish_build(vault: String) -> Result<String, String> {
 
         // 4. Build.
         let public_dir = quartz::npx_quartz_build(&quartz_root).map_err(|e| {
+            // Translate Quartz's noisy stderr into a friendlier
+            // single-line summary when we can recognise the failure
+            // mode (e.g. duplicate YAML frontmatter keys).  The full
+            // stdout/stderr is preserved underneath so a deep dive
+            // is still possible.
+            let pretty = pretty_build_error(&e, &content_dir);
             // Persist the failure so the UI can surface it in the
             // status pill on the next status poll.
-            cfg.state.last_error = Some(e.clone());
+            cfg.state.last_error = Some(pretty.clone());
             let _ = cfg.save(&toml_path);
-            e
+            pretty
         })?;
 
         // 5. Persist success state.

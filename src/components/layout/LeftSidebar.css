@@ -12,14 +12,25 @@
 .ls-toolbar {
   display: flex;
   align-items: center;
-  justify-content: center;
+  /* flex-start (not center) keeps the section title pinned to the
+     left edge and lets the spacer push action buttons to the right.
+     With justify-content: center the whole label-plus-buttons cluster
+     drifted to the middle of the panel as soon as the sidebar was
+     wide enough to leave any free space (visible after dragging the
+     splitter wider). */
+  justify-content: flex-start;
   gap: 4px;
   height: 30px;
   padding: 0 8px;
   flex-shrink: 0;
 }
 
-.ls-toolbar-spacer { display: none; }
+/* Flexible spacer between the section title and the trailing icon
+   buttons (refresh / more). It used to be display:none, which made
+   the parent's justify-content:center bunch everything into the
+   middle. Giving it flex:1 makes the layout behave like a proper
+   header toolbar: title left, buttons right. */
+.ls-toolbar-spacer { flex: 1 1 auto; min-width: 0; }
 .ls-toolbar-label {
   font-size: 11px;
   font-weight: 600;

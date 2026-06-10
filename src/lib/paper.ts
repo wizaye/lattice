@@ -72,6 +72,29 @@ export interface NewPaperResult {
   openRelPath: string;
 }
 
+/**
+ * Input payload for `paper_quick_pdf` — the "just give me a PDF, do not
+ * scaffold a project into my vault" path.  Mirrors `NewPaperRequest` but
+ * adds `seedMarkdown` so the produced PDF contains the user's own
+ * content (when supplied) instead of the template's dummy example text.
+ */
+export interface QuickPdfRequest {
+  vault: string;
+  /** Vault-relative folder where the PDF should land. Empty = root. */
+  parentRel?: string;
+  title: string;
+  templateId: string;
+  authors?: NewPaperAuthor[];
+  /** Body to use as the only section in the temp scaffold. */
+  seedMarkdown?: string | null;
+}
+
+/** Result returned by `paper_quick_pdf` — only the PDF, no project. */
+export interface QuickPdfResult {
+  pdfAbsPath: string;
+  pdfRelPath: string;
+}
+
 /** Returned by `paper_status` for a folder under a paper. */
 export interface PaperStatus {
   exists: boolean;
@@ -132,6 +155,27 @@ export async function paperCreate(req: NewPaperRequest): Promise<NewPaperResult>
     throw new Error("Paper title cannot be empty.");
   }
   return invoke<NewPaperResult>("paper_create", { req });
+}
+
+/**
+ * Render markdown straight to PDF without leaving a project scaffold in
+ * the vault.  The Rust side scaffolds into the OS temp directory,
+ * optionally replaces the dummy sections with `seedMarkdown`, compiles,
+ * copies only the produced PDF into the chosen vault folder, then
+ * deletes the temp scaffold.
+ *
+ * Use this for the "PDF (local)" output mode in the New Paper wizard
+ * when the user expects "I picked PDF, I want a PDF — not a folder full
+ * of template example files."
+ */
+export async function paperQuickPdf(req: QuickPdfRequest): Promise<QuickPdfResult> {
+  if (!isRealVault(req.vault)) {
+    throw new Error("Cannot export a PDF in the mock vault.");
+  }
+  if (!req.title.trim()) {
+    throw new Error("Paper title cannot be empty.");
+  }
+  return invoke<QuickPdfResult>("paper_quick_pdf", { req });
 }
 
 /**
@@ -231,4 +275,79 @@ export async function paperByofReImport(
 export async function paperByofRemove(vault: string, byofId: string): Promise<void> {
   if (!isRealVault(vault)) throw new Error("Cannot remove BYOF from the mock vault.");
   await invoke("paper_byof_remove", { vault, byofId });
+}
+
+// ─── Engine preflight + install (LaTeX) ─────────────────────────────────
+
+/**
+ * Which install strategy the Rust backend would use.  Matches the
+ * kebab-case `EngineInstaller` enum in
+ * `src-tauri/src/paper/engine_install.rs`.  `null` means the host has
+ * no supported installer; the UI should fall back to showing the
+ * manual install URL.
+ *
+ * - `direct`: HTTPS download of the Tectonic binary from GitHub
+ *   releases into `%LOCALAPPDATA%\Lattice\bin\`.  Used on Windows
+ *   because Tectonic is not in the winget catalog.
+ * - `homebrew` / `apt` / `cargo`: shell out to the named package
+ *   manager on macOS / Linux.
+ */
+export type EngineInstaller = "direct" | "homebrew" | "apt" | "cargo";
+
+/** Per-engine availability row inside `EngineProbe.engines`. */
+export interface EngineAvailability {
+  binary: string;
+  available: boolean;
+}
+
+/**
+ * Returned by `paperEngineProbe` / `paperEngineInstall`.  Mirrors the
+ * Rust `EngineProbe` DTO exactly.
+ */
+export interface EngineProbe {
+  /** True iff ANY supported engine is on PATH. */
+  anyEngine: boolean;
+  /**
+   * Binary the compile pipeline would actually pick (matches
+   * `pick_engine` priority order in `paper/compile.rs`).  `null`
+   * when `anyEngine` is false.
+   */
+  preferred: string | null;
+  engines: EngineAvailability[];
+  /**
+   * Which installer Lattice would invoke for one-click install.
+   * `null` means manual install only.
+   */
+  installer: EngineInstaller | null;
+}
+
+/**
+ * Fast read-only probe of the local LaTeX engines.  Used by the New
+ * Paper modal + PaperToolbar to show a "missing engine → Install" banner
+ * BEFORE the user picks PDF as the output and hits Create.
+ */
+export async function paperEngineProbe(): Promise<EngineProbe> {
+  return invoke<EngineProbe>("paper_engine_probe");
+}
+
+/**
+ * Install Tectonic via the detected strategy: direct GitHub-release
+ * download on Windows (into `%LOCALAPPDATA%\Lattice\bin\`), or the
+ * OS package manager elsewhere (brew / apt-get / cargo).  Long-
+ * running — UI should show a spinner.  Returns the post-install
+ * `EngineProbe`; on success `anyEngine` will be `true` and the modal
+ * can proceed to compile.
+ *
+ * Errors:
+ *   * No installer available — message points at manual install URL.
+ *   * Download / installer failed — message includes the stderr tail
+ *     or HTTP status, so the user can diagnose (firewall, proxy,
+ *     GitHub asset moved, …).
+ *   * Installer succeeded but PATH still stale — message asks the
+ *     user to restart Lattice.  Note: the direct-download path
+ *     prepends its bin dir to the current process PATH, so this
+ *     branch is only reachable for the package-manager installers.
+ */
+export async function paperEngineInstall(): Promise<EngineProbe> {
+  return invoke<EngineProbe>("paper_engine_install");
 }

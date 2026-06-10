@@ -30,13 +30,31 @@ import {
   publishPreview,
   publishPreviewStop,
   publishProbe,
+  publishSetTheme,
   publishStatus,
   type HostId,
   type HostInfo,
   type ProbeReport,
   type PublishStatus,
   type PublishTemplateInfo,
+  type QuartzTheme,
 } from "../lib/publish";
+
+/**
+ * Default theme used to seed the wizard's Customise step before the
+ * vault has been initialised (and as the value the row falls back to
+ * when `publishStatus` returns `theme: null`).  Mirrors the
+ * `PublishTheme::default()` impl in `src-tauri/src/publish/toml.rs` —
+ * keep these in sync.
+ */
+export const DEFAULT_QUARTZ_THEME: QuartzTheme = {
+  pageTitle: "",
+  pageTitleSuffix: "",
+  palette: "default",
+  typography: "default",
+  popovers: true,
+  spa: true,
+};
 
 /** Per-vault row state — the unit of UI rendering. */
 export interface PublishRowState {
@@ -56,6 +74,11 @@ export interface PublishRowState {
   busy: boolean;
   /** Live preview URL while a preview server is running; null otherwise. */
   previewUrl: string | null;
+  /**
+   * User's Quartz UI customisations.  Null when the vault hasn't been
+   * initialised (the wizard renders `DEFAULT_QUARTZ_THEME` then).
+   */
+  theme: QuartzTheme | null;
 }
 
 const EMPTY_ROW: PublishRowState = {
@@ -71,6 +94,7 @@ const EMPTY_ROW: PublishRowState = {
   lastError: null,
   busy: false,
   previewUrl: null,
+  theme: null,
 };
 
 const MOCK_VAULT = "__mock__";
@@ -109,6 +133,12 @@ interface PublishStore {
   previewStop(vault: string): Promise<void>;
   /** **Phase D5 — currently surfaces "not yet implemented" into `lastError`.** */
   deploy(vault: string): Promise<void>;
+  /**
+   * Persist the user's Quartz UI customisations.  Rust side patches
+   * `quartz.config.yaml` in place; the row is refreshed on success
+   * so the wizard form re-hydrates from the just-saved values.
+   */
+  setTheme(vault: string, theme: QuartzTheme): Promise<void>;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────
   /** Drop the cached row for a vault (e.g. on vault switch). */
@@ -128,6 +158,7 @@ const fromStatus = (s: PublishStatus): PublishRowState => ({
   lastError: s.lastError,
   busy: false,
   previewUrl: null,
+  theme: s.theme,
 });
 
 const errMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -240,6 +271,22 @@ export const usePublishStore = create<PublishStore>((set, get) => {
           // come straight from the post-deploy publish.toml [state].
           await get().refreshStatus(vault);
           return {};
+        },
+      );
+    },
+
+    async setTheme(vault, theme) {
+      if (!isRealVault(vault)) throw new Error("Cannot customise the mock vault site.");
+      await runWithBusy(
+        (mut) => patchRow(vault, mut),
+        async () => {
+          await publishSetTheme(vault, theme);
+          // Optimistic patch — Rust persists synchronously and
+          // re-applies to quartz.config.yaml, so the in-memory row
+          // now matches disk.  A follow-up refreshStatus would also
+          // work; the optimistic path keeps the wizard's "Saved"
+          // microcopy snappy.
+          return { theme };
         },
       );
     },

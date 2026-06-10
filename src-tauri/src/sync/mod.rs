@@ -20,6 +20,7 @@ pub mod gdrive;
 pub mod keychain;
 pub mod manifest;
 pub mod oauth;
+pub mod onedrive;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +39,7 @@ pub use error::SyncError;
 pub enum ProviderId {
     Github,
     Gdrive,
+    Onedrive,
 }
 
 impl ProviderId {
@@ -45,6 +47,7 @@ impl ProviderId {
         match self {
             ProviderId::Github => "github",
             ProviderId::Gdrive => "gdrive",
+            ProviderId::Onedrive => "onedrive",
         }
     }
 }
@@ -173,6 +176,9 @@ fn provider(id: ProviderId) -> Arc<dyn SyncProvider> {
     match id {
         ProviderId::Github => Arc::new(github::GithubProvider::new()),
         ProviderId::Gdrive => Arc::new(gdrive::GdriveProvider::new()),
+        ProviderId::Onedrive => Arc::new(onedrive::OneDriveProvider::new(
+            option_env!("LATTICE_ONEDRIVE_CLIENT_ID").unwrap_or("").to_string(),
+        )),
     }
 }
 
@@ -198,7 +204,7 @@ fn vault_dir(path: &str) -> Result<PathBuf, SyncError> {
 
 #[tauri::command]
 pub fn byoc_list_providers() -> Vec<ProviderInfo> {
-    [ProviderId::Github, ProviderId::Gdrive]
+    [ProviderId::Github, ProviderId::Gdrive, ProviderId::Onedrive]
         .into_iter()
         .map(|id| {
             let p = provider(id);
@@ -216,6 +222,7 @@ pub fn byoc_list_providers() -> Vec<ProviderInfo> {
                         match id {
                             ProviderId::Github => "GITHUB",
                             ProviderId::Gdrive => "GOOGLE",
+                            ProviderId::Onedrive => "ONEDRIVE",
                         }
                     ))
                 },
@@ -370,6 +377,8 @@ pub fn byoc_remote_url(
             // browse to it.  Return None so the UI hides / disables
             // the "Open remote" affordance entirely.
             ProviderId::Gdrive => None,
+            // OneDrive's AppFolder is similarly sandboxed.
+            ProviderId::Onedrive => None,
         }
     });
     Ok(url)

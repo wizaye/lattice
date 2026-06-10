@@ -21,6 +21,7 @@
 
 pub mod bundle;
 pub mod compile;
+pub mod engine_install;
 pub mod md_to_tex;
 pub mod toml;
 pub mod templates;
@@ -141,6 +142,45 @@ pub struct NewPaperResult {
     /// Relative path to open in the editor after create — by default
     /// `sections/01-introduction.md`.
     pub open_rel_path: String,
+}
+
+/// Input payload for `paper_quick_pdf` — the "I just want a PDF, not a
+/// project" path.  Scaffolds into a temp directory (outside the vault),
+/// optionally seeds the body with the user's currently-open markdown,
+/// compiles, copies ONLY the PDF into the vault, then deletes the temp
+/// scaffold.  This addresses the user complaint that picking "PDF" in
+/// the New Paper wizard filled their folder with template example files.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickPdfRequest {
+    /// Absolute vault root path.
+    pub vault: String,
+    /// Vault-relative folder where the produced PDF should land.
+    /// Empty string = vault root.
+    #[serde(default)]
+    pub parent_rel: String,
+    /// Title — used as the PDF filename (`<slug>.pdf`) and as the
+    /// `[meta].title` baked into the LaTeX template.
+    pub title: String,
+    /// Template id (controls Typst vs Tectonic styling).
+    pub template_id: String,
+    #[serde(default)]
+    pub authors: Vec<NewPaperAuthor>,
+    /// If `Some`, this markdown body is used as the only section in
+    /// the scaffold (replacing the template's dummy intro / related /
+    /// method / results / discussion / conclusion seeds).  If `None`,
+    /// the template's full example content is compiled instead.
+    #[serde(default)]
+    pub seed_markdown: Option<String>,
+}
+
+/// Result returned by `paper_quick_pdf`.  No paper folder is reported
+/// because there isn't one — only a PDF was written into the vault.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickPdfResult {
+    pub pdf_abs_path: String,
+    pub pdf_rel_path: String,
 }
 
 /// Read by `paper_status`.  All fields optional so the IPC works on a
@@ -354,6 +394,179 @@ pub async fn paper_create(req: NewPaperRequest) -> Result<NewPaperResult, String
     })
 }
 
+/// "Just give me a PDF" path — scaffolds into the OS temp dir, optionally
+/// seeds the body with the caller's markdown, compiles, copies the PDF
+/// into `<vault>/<parent_rel>/<slug>.pdf`, then deletes the scaffold.
+///
+/// Why this exists: the New Paper wizard's `paper_create` always writes
+/// a full project tree (sections/, figures/, bibliography.bib, dummy
+/// example .md files) into the vault.  Users who pick "PDF (local)" as
+/// the output were ending up with that whole tree polluting their vault
+/// even though they only wanted a single PDF artefact.  This IPC keeps
+/// the vault clean: only the rendered PDF lands on disk.
+///
+/// Cleanup uses a RAII guard so a panic in the compile pipeline still
+/// removes the temp scaffold.
+#[tauri::command]
+pub async fn paper_quick_pdf(req: QuickPdfRequest) -> Result<QuickPdfResult, String> {
+    let vault = vault_dir(&req.vault)?;
+
+    if req.title.trim().is_empty() {
+        return Err("paper title is empty".to_string());
+    }
+
+    let template = templates::built_in_templates()
+        .into_iter()
+        .find(|t| t.id == req.template_id)
+        .ok_or_else(|| {
+            format!(
+                "unknown template id: {} (BYOF templates land in phase C5)",
+                req.template_id
+            )
+        })?;
+
+    // ── Resolve destination PDF path inside the vault ────────────────
+    let slug = slugify(&req.title);
+    let parent_abs = join_inside_vault(&vault, &req.parent_rel)?;
+    if !parent_abs.is_dir() {
+        std::fs::create_dir_all(&parent_abs)
+            .map_err(|e| format!("failed to create parent {}: {}", parent_abs.display(), e))?;
+    }
+    let mut pdf_dst = parent_abs.join(format!("{}.pdf", slug));
+    if pdf_dst.exists() {
+        let mut placed = false;
+        for n in 2u32..=99 {
+            let cand = parent_abs.join(format!("{}-{}.pdf", slug, n));
+            if !cand.exists() {
+                pdf_dst = cand;
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            return Err(format!(
+                "could not find a free PDF filename under {} for slug {}",
+                parent_abs.display(),
+                slug
+            ));
+        }
+    }
+
+    // ── Build a unique temp scaffold directory ───────────────────────
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let temp_paper = std::env::temp_dir()
+        .join(format!("lattice-paper-{}-{}-{}", slug, pid, stamp));
+
+    // RAII guard: even if the compile pipeline panics, drop removes
+    // the temp scaffold so we don't leak GBs into the user's temp dir.
+    struct TempPaperGuard(PathBuf);
+    impl Drop for TempPaperGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let guard = TempPaperGuard(temp_paper.clone());
+
+    // ── Build the scaffold + compile on the blocking pool ────────────
+    let req_inner = req.clone();
+    let template_inner = template.clone();
+    let temp_paper_inner = temp_paper.clone();
+    let pdf_dst_inner = pdf_dst.clone();
+
+    let final_pdf = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
+        // Synthetic NewPaperRequest fed to write_scaffold + PaperToml.
+        // The `vault`/`parent_rel` fields are unused by those helpers
+        // (they only read `title`, `template_id`, `authors`).
+        let np_req = NewPaperRequest {
+            vault: String::new(),
+            parent_rel: String::new(),
+            title: req_inner.title.clone(),
+            template_id: req_inner.template_id.clone(),
+            authors: req_inner.authors.clone(),
+        };
+
+        templates::write_scaffold(&temp_paper_inner, &template_inner, &np_req)
+            .map_err(|e| format!("failed to write paper scaffold: {}", e))?;
+
+        // If the caller supplied seed markdown (i.e. the user's
+        // currently-open note), replace the template's dummy sections
+        // with the seed body so the resulting PDF contains the user's
+        // own words rather than placeholder text.
+        if let Some(seed) = &req_inner.seed_markdown {
+            let sections_dir = temp_paper_inner.join("sections");
+            if let Ok(entries) = std::fs::read_dir(&sections_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let _ = std::fs::remove_file(&p);
+                    }
+                }
+            }
+            // Also blank out the abstract so the user's content
+            // isn't preceded by the template's "Replace this
+            // paragraph with your ~250-word abstract..." filler.
+            let _ = std::fs::write(
+                temp_paper_inner.join("abstract.md"),
+                "# Abstract\n\n",
+            );
+            std::fs::write(sections_dir.join("01-content.md"), seed)
+                .map_err(|e| format!("failed to write seed section: {}", e))?;
+        }
+
+        // Emit paper.toml.
+        let cfg = PaperToml::new_for(&template_inner, &np_req);
+        let toml_dir = temp_paper_inner.join(".lattice");
+        std::fs::create_dir_all(&toml_dir)
+            .map_err(|e| format!("failed to create .lattice dir: {}", e))?;
+        cfg.save(&toml_dir.join("paper.toml"))?;
+
+        // Compile in the temp scaffold.
+        let pdf_src = compile::compile(&temp_paper_inner)?;
+
+        // Copy ONLY the PDF into the vault.
+        if pdf_dst_inner.exists() {
+            let _ = std::fs::remove_file(&pdf_dst_inner);
+        }
+        std::fs::copy(&pdf_src, &pdf_dst_inner).map_err(|e| {
+            format!(
+                "failed to copy {} to {}: {}",
+                pdf_src.display(),
+                pdf_dst_inner.display(),
+                e
+            )
+        })?;
+
+        Ok(pdf_dst_inner)
+    })
+    .await
+    .map_err(|e| format!("paper_quick_pdf join error: {e}"))??;
+
+    // Drop the guard now that we're done — explicit so the order is
+    // obvious to readers (compile finished successfully, scaffold can go).
+    drop(guard);
+
+    // Build a vault-relative path for the frontend.
+    let canon_vault = vault
+        .canonicalize()
+        .map_err(|e| format!("failed to canonicalise vault: {}", e))?;
+    let canon_pdf = final_pdf
+        .canonicalize()
+        .map_err(|e| format!("failed to canonicalise pdf: {}", e))?;
+    let pdf_rel = canon_pdf
+        .strip_prefix(&canon_vault)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| canon_pdf.to_string_lossy().to_string());
+
+    Ok(QuickPdfResult {
+        pdf_abs_path: final_pdf.to_string_lossy().to_string(),
+        pdf_rel_path: pdf_rel,
+    })
+}
+
 /// Read `.lattice/paper.toml` + (later) `.lattice/paper-state.json` for
 /// the given paper folder.  Returns `{ exists: false }` when the folder
 /// doesn't have a `paper.toml` (i.e. the active editor file isn't in a
@@ -416,8 +629,57 @@ pub async fn paper_compile(paper: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn paper_preflight(paper: String) -> Result<Vec<PreflightFinding>, String> {
-    let _ = paper;
-    Err("paper_preflight is not yet implemented (lands in phase C7)".to_string())
+    // Paper-folder check first so callers get a clear error when they
+    // pass the wrong path (matches the other paper_* IPCs' contract).
+    if paper.is_empty() {
+        return Err("paper path is empty".to_string());
+    }
+    let paper_abs = PathBuf::from(&paper);
+    if !paper_abs.is_dir() {
+        return Err(format!("paper folder not found: {}", paper_abs.display()));
+    }
+    if !paper_abs.join(".lattice").join("paper.toml").is_file() {
+        return Err(format!(
+            "no .lattice/paper.toml under {} \u{2014} not a paper folder",
+            paper_abs.display()
+        ));
+    }
+
+    // Run the engine probe off the IPC executor — `--version` probes
+    // are blocking I/O and we don't want to stall the runtime.
+    let probe = tokio::task::spawn_blocking(engine_install::probe_blocking)
+        .await
+        .map_err(|e| format!("paper_preflight join error: {e}"))?;
+
+    let mut findings = Vec::new();
+    if probe.any_engine {
+        if let Some(preferred) = probe.preferred {
+            findings.push(PreflightFinding {
+                severity: PreflightSeverity::Info,
+                message: format!("LaTeX engine detected: {}", preferred),
+                file: None,
+                line: None,
+            });
+        }
+    } else {
+        let installer_hint = match probe.installer {
+            Some(i) => format!(
+                " — Lattice can install Tectonic via {}.",
+                i.label()
+            ),
+            None => " — no supported package manager (winget / brew / apt-get / cargo) on PATH; install Tectonic from https://tectonic-typesetting.github.io/install".to_string(),
+        };
+        findings.push(PreflightFinding {
+            severity: PreflightSeverity::Warning,
+            message: format!(
+                "No LaTeX engine found on PATH (tectonic / latexmk / pdflatex / xelatex).{}",
+                installer_hint
+            ),
+            file: None,
+            line: None,
+        });
+    }
+    Ok(findings)
 }
 
 #[tauri::command]

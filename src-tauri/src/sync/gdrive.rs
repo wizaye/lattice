@@ -14,7 +14,6 @@
 //!     ├── refs-heads-main.txt  — 40-char sha (text)
 //!     └── obj-<blake3>.bin     — zlib blob, addressed by content hash
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -280,6 +279,7 @@ fn require_token(vault: &Path) -> Result<TokenSet, SyncError> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: wire into delta-sync
 struct RemoteManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     head: Option<String>,
@@ -575,6 +575,7 @@ fn current_branch(vault: &Path) -> Result<String, SyncError> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+#[allow(dead_code)] // TODO: wire into delta-sync
 fn head_sha(vault: &Path) -> Result<String, SyncError> {
     let out = git(vault, &["rev-parse", "HEAD"])?;
     if !out.status.success() {

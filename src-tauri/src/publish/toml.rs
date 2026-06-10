@@ -92,6 +92,13 @@ pub struct PublishQuartz {
     pub plugins: Vec<String>,
     /// Bundled template id — `"garden"` / `"docs"` / `"notebook"`.
     pub template: String,
+    /// User-tunable site UI knobs.  Surfaced by the wizard's
+    /// "Customise" step and applied to `quartz.config.yaml` on every
+    /// `ensure_scaffold` (i.e. on every build).  Keeping this here in
+    /// `publish.toml` — not directly in `quartz.config.yaml` — means a
+    /// re-clone or upstream Quartz upgrade doesn't lose the user's
+    /// preferences.
+    pub theme: PublishTheme,
 }
 
 impl Default for PublishQuartz {
@@ -101,6 +108,60 @@ impl Default for PublishQuartz {
             version_range: "^5".to_string(),
             plugins: Vec::new(),
             template: "garden".to_string(),
+            theme: PublishTheme::default(),
+        }
+    }
+}
+
+/// User-tunable Quartz site UI knobs.  Maps to a curated subset of
+/// `configuration.*` and `configuration.theme.*` keys in
+/// `quartz.config.yaml`.
+///
+/// Deliberately **not** a 1:1 mirror of Quartz's config:
+///   * Colours are exposed as a small set of named presets + an
+///     optional accent override.  Surfacing all 9 colour slots × 2
+///     modes (light + dark) would mean 18 hex inputs in the wizard;
+///     not a v1 UX.
+///   * Fonts are exposed as typography presets, also for UX brevity.
+///   * Plugin add/remove + per-component layout positioning are NOT
+///     here — those are heavier mutations of the `plugins:` and
+///     `layout:` YAML blocks; they need a different patch strategy
+///     (out of scope for this slice).
+///
+/// Empty / `None` fields fall back to the Quartz template defaults —
+/// the patcher simply skips fields the user hasn't customised so the
+/// upstream YAML stays untouched.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PublishTheme {
+    /// Site title shown in the top-left + browser tab + RSS feed.
+    /// Empty = leave the upstream default in place.
+    pub page_title: String,
+    /// Suffix appended to the browser tab title only (e.g. " · My Garden").
+    pub page_title_suffix: String,
+    /// Named colour preset; controls `theme.colors.lightMode.secondary`
+    /// + `tertiary` (and the same pair in `darkMode`).  See
+    /// `palette_colors()` for the recipes.  `"default"` leaves Quartz's
+    /// own palette intact.
+    pub palette: String,
+    /// Named typography preset; controls `theme.typography.header/body/code`.
+    /// `"default"` leaves the upstream Schibsted/Source/IBM stack in place.
+    pub typography: String,
+    /// Quartz `enablePopovers` — link previews on hover.
+    pub popovers: bool,
+    /// Quartz `enableSPA` — client-side routing.
+    pub spa: bool,
+}
+
+impl Default for PublishTheme {
+    fn default() -> Self {
+        Self {
+            page_title: String::new(),
+            page_title_suffix: String::new(),
+            palette: "default".to_string(),
+            typography: "default".to_string(),
+            popovers: true,
+            spa: true,
         }
     }
 }
@@ -267,6 +328,11 @@ mod tests {
         assert_eq!(d.meta.schema, 1);
         assert_eq!(d.quartz.version, "5");
         assert_eq!(d.quartz.template, "garden");
+        assert_eq!(d.quartz.theme.palette, "default");
+        assert_eq!(d.quartz.theme.typography, "default");
+        assert!(d.quartz.theme.popovers);
+        assert!(d.quartz.theme.spa);
+        assert!(d.quartz.theme.page_title.is_empty());
         assert_eq!(d.preview.bind, "127.0.0.1");
         assert_eq!(d.preview.ttl_secs, 1800);
         assert!(d.deploy.require_preview_before_first_deploy);

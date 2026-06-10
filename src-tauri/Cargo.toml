@@ -85,7 +85,7 @@ keyring = { version = "3", default-features = false, features = ["apple-native",
 # aarch64-pc-windows-msvc (Snapdragon X / arm64 dev boxes) clang and
 # MSVC are not part of the default toolchain, and Schannel works
 # perfectly fine for talking to github.com / googleapis.com.
-reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream", "multipart", "blocking"] }
 
 # tokio is pulled in transitively by Tauri 2 but we add an explicit entry so
 # the loopback redirect server in sync/oauth.rs can spawn a TcpListener.
@@ -154,6 +154,27 @@ comrak = { version = "0.28", default-features = false }
 # `deflate` (RFC 1951, pure-Rust via `flate2`) — that's the only
 # compression Overleaf accepts on upload anyway.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Slice C phase C3 — in-process Typst engine for paper_compile.
+#
+# `typst` is the language + compiler crate; `typst-pdf` renders the
+# compiled `Document` to a PDF byte vector.  `typst-kit` provides
+# `FontSearcher` for resolving system fonts without us having to
+# re-implement font enumeration per OS.  Pinned to 0.13 — newer
+# Typst releases change the `World` trait surface, so a deliberate
+# upgrade is needed when bumping.
+typst = "0.13"
+typst-pdf = "0.13"
+typst-kit = { version = "0.13", default-features = false, features = ["fonts"] }
+
+# `pulldown-cmark` for the markdown → Typst converter.  Smaller,
+# pull-style parser; we don't need comrak's full GFM AST for the
+# subset we map to Typst.
+pulldown-cmark = { version = "0.10", default-features = false }
+
+# Slice C phase C3 — ergonomic error enums for the typst compile path
+# (`TypstCompileError`) without hand-rolling Display/Error/From impls.
+thiserror = "1"
 
 [dev-dependencies]
 # Scratch directories for sync/manifest tests.  Auto-cleaned on Drop.

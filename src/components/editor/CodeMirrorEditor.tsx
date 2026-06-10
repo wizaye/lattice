@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EditorState, RangeSetBuilder, Transaction } from "@codemirror/state";
+import { EditorState, RangeSetBuilder, StateEffect, StateField, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -40,6 +40,7 @@ import {
 import { useVaultStore } from "../../state/vaultStore";
 import { useEditorStore } from "../../state/editorStore";
 import type { FileNode } from "../../state/types";
+import type { JumpToLineDetail } from "../../lib/backlinks";
 
 // ── Theme ──
 // Uses the app's own CSS tokens (set in App.css for both `:root` and
@@ -252,6 +253,47 @@ const wikilinkStyle = EditorView.baseTheme({
   ".cm-wikilink:hover": {
     backgroundColor: "var(--hover)",
     textDecorationColor: "var(--accent)",
+  },
+});
+
+// ── Flash-line decoration (backlink jump-to-line target highlight) ──
+// Why: clicking a backlink snippet in the right sidebar dispatches
+// `lattice-jump-to-line` with a 1-based source line. The listener
+// below scrolls the editor and fires `flashLineEffect.of(line)`; the
+// state field paints a single-line decoration that the theme styles
+// with a transient `var(--selection)` background. After ~1.2s the
+// listener fires `clearFlashLineEffect.of(null)` and the background
+// fades back to transparent via CSS transition.
+const flashLineEffect = StateEffect.define<number>();
+const clearFlashLineEffect = StateEffect.define<null>();
+
+const flashLineField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(set, tr) {
+    set = set.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(flashLineEffect)) {
+        const ln = e.value;
+        if (ln >= 1 && ln <= tr.state.doc.lines) {
+          set = Decoration.set([
+            Decoration.line({ class: "cm-flash-line" }).range(
+              tr.state.doc.line(ln).from,
+            ),
+          ]);
+        }
+      } else if (e.is(clearFlashLineEffect)) {
+        set = Decoration.none;
+      }
+    }
+    return set;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+const flashLineTheme = EditorView.baseTheme({
+  ".cm-flash-line": {
+    backgroundColor: "var(--selection)",
+    transition: "background-color 1.2s ease-out",
   },
 });
 
@@ -556,6 +598,8 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         syntaxHighlighting(markdownHighlight),
         wikilinkPlugin,
         wikilinkStyle,
+        flashLineField,
+        flashLineTheme,
         listHangingIndent,
         autocompletion({
           override: [wikilinkCompletions],
@@ -649,6 +693,49 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Jump-to-line bridge (backlink snippet → editor line). Listens
+  // globally because multiple CodeMirror editors may be mounted across
+  // panes; we self-filter by `filePath`. Scrolls the target line to
+  // vertical center, places the cursor at column 0, and paints a
+  // transient `.cm-flash-line` highlight that fades after ~1.2s.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<JumpToLineDetail>).detail;
+      if (!detail || detail.fileId !== filePath) return;
+      const view = viewRef.current;
+      if (!view) return;
+      const total = view.state.doc.lines;
+      const ln = Math.max(1, Math.min(total, Math.floor(detail.line)));
+      const lineInfo = view.state.doc.line(ln);
+      const col = Math.max(
+        0,
+        Math.min(lineInfo.length, Math.floor(detail.column ?? 0)),
+      );
+      const anchor = lineInfo.from + col;
+      view.dispatch({
+        selection: { anchor },
+        effects: [
+          EditorView.scrollIntoView(anchor, { y: "center" }),
+          flashLineEffect.of(ln),
+        ],
+      });
+      // Clear the flash after a short delay so the highlight feels
+      // like a momentary pulse rather than a permanent mark.
+      const id = window.setTimeout(() => {
+        const v = viewRef.current;
+        if (!v) return;
+        v.dispatch({ effects: clearFlashLineEffect.of(null) });
+      }, 1200);
+      return () => window.clearTimeout(id);
+    };
+    window.addEventListener("lattice-jump-to-line", handler as EventListener);
+    return () =>
+      window.removeEventListener(
+        "lattice-jump-to-line",
+        handler as EventListener,
+      );
+  }, [filePath]);
 
   return (
     <div

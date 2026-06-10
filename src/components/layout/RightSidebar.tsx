@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type {
   BacklinkGroup,
+  JumpToLineDetail,
   MentionGroup,
   Snippet,
 } from "../../lib/backlinks";
@@ -38,6 +39,9 @@ type Props = {
   onOpenFile?: (fileId: string) => void;
   /** Resolve an unresolved outgoing-link name to a file id, if possible. */
   onOpenByName?: (name: string) => void;
+  /** When true, the OS draws no top-right window-control cluster — so the
+      rs-header doesn't need to reserve room for it. */
+  isMac?: boolean;
 };
 
 const VIEW_TITLES: Record<RightView, string> = {
@@ -56,10 +60,10 @@ const VIEW_TITLES: Record<RightView, string> = {
  *
  * The Backlinks view now shows a stats strip (mentions, files, unlinked)
  * + an expandable list of snippets per source file. Clicking a snippet
- * opens that file. The header has NO right-padding reservation for the
- * window controls; its icons sit at the natural left edge, and the
- * floating window controls (z-index 100) simply cover them when the
- * sidebar is narrow.
+ * opens that file. On Windows/Linux the header reserves
+ * `--win-controls-w` worth of right padding so that the panel-switcher
+ * icons (and the drag region) never slip under the floating
+ * Minimize/Maximize/Close cluster, no matter how wide the sidebar gets.
  */
 export function RightSidebar({
   hasOpenFile,
@@ -71,6 +75,7 @@ export function RightSidebar({
   headings,
   onOpenFile,
   onOpenByName,
+  isMac,
 }: Props) {
   const [view, setView] = useState<RightView>("links");
 
@@ -88,42 +93,54 @@ export function RightSidebar({
   return (
     <>
       {/* Header — view switcher (Links / Outgoing / Tags / Saved / Outline) */}
-      <div className="col-header rs-header" data-tauri-drag-region>
-        <button
-          className={`icon-btn${view === "links" ? " active" : ""}`}
-          title="Backlinks"
-          onClick={() => setView("links")}
-        >
-          <IcLink />
-        </button>
-        <button
-          className={`icon-btn${view === "outgoing" ? " active" : ""}`}
-          title="Outgoing links"
-          onClick={() => setView("outgoing")}
-        >
-          <IcLinkOff />
-        </button>
-        <button
-          className={`icon-btn${view === "tags" ? " active" : ""}`}
-          title="Tags"
-          onClick={() => setView("tags")}
-        >
-          <IcTag />
-        </button>
-        <button
-          className={`icon-btn${view === "saved" ? " active" : ""}`}
-          title="Saved"
-          onClick={() => setView("saved")}
-        >
-          <IcArchive />
-        </button>
-        <button
-          className={`icon-btn${view === "outline" ? " active" : ""}`}
-          title="Outline"
-          onClick={() => setView("outline")}
-        >
-          <IcList />
-        </button>
+      <div
+        className="col-header rs-header"
+        data-tauri-drag-region
+        style={isMac ? undefined : { paddingRight: "var(--win-controls-w)" }}
+      >
+        {/* Wrap the panel-switcher buttons in a flex-shrink container that
+            clips at its own content edge. With `overflow: hidden` and a
+            min-width of 0, the buttons get visually clipped at the
+            rs-header's content box (i.e. before the reserved
+            window-controls strip) instead of overflowing into the padding
+            zone where Minimize/Maximize/Close sit. */}
+        <div className="rs-header-tabs">
+          <button
+            className={`icon-btn${view === "links" ? " active" : ""}`}
+            title="Backlinks"
+            onClick={() => setView("links")}
+          >
+            <IcLink />
+          </button>
+          <button
+            className={`icon-btn${view === "outgoing" ? " active" : ""}`}
+            title="Outgoing links"
+            onClick={() => setView("outgoing")}
+          >
+            <IcLinkOff />
+          </button>
+          <button
+            className={`icon-btn${view === "tags" ? " active" : ""}`}
+            title="Tags"
+            onClick={() => setView("tags")}
+          >
+            <IcTag />
+          </button>
+          <button
+            className={`icon-btn${view === "saved" ? " active" : ""}`}
+            title="Saved"
+            onClick={() => setView("saved")}
+          >
+            <IcArchive />
+          </button>
+          <button
+            className={`icon-btn${view === "outline" ? " active" : ""}`}
+            title="Outline"
+            onClick={() => setView("outline")}
+          >
+            <IcList />
+          </button>
+        </div>
         <div className="rs-header-drag" data-tauri-drag-region />
       </div>
 
@@ -314,7 +331,21 @@ function BacklinkGroupItem({
             <li
               key={`${s.line}-${i}`}
               className="rs-bl-snip"
-              onClick={() => onOpen?.(group.fileId)}
+              onClick={() => {
+                onOpen?.(group.fileId);
+                // Defer so a freshly-mounted editor for this file has its
+                // listener attached before we fire. CodeMirror editors
+                // self-filter by fileId, so this is harmless for non-target
+                // editors mounted in other panes.
+                setTimeout(() => {
+                  window.dispatchEvent(
+                    new CustomEvent<JumpToLineDetail>(
+                      "lattice-jump-to-line",
+                      { detail: { fileId: group.fileId, line: s.line } },
+                    ),
+                  );
+                }, 0);
+              }}
               title={`Line ${s.line} · click to open`}
             >
               <span className="rs-bl-line">L{s.line}</span>

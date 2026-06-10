@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IcClose, IcLinkExternal, IcRefresh } from "../common/Icons";
-import { usePublishStore } from "../../state/publishStore";
-import type { HostId } from "../../lib/publish";
+import { DEFAULT_QUARTZ_THEME, usePublishStore } from "../../state/publishStore";
+import type { HostId, QuartzTheme } from "../../lib/publish";
 import { publishInit } from "../../lib/publish";
 import "./PublishWizard.css";
 
@@ -29,15 +29,43 @@ type Props = {
 
 const MOCK_VAULT = "__mock__";
 
-type Step = 0 | 1 | 2 | 3 | 4;
+type Step = 0 | 1 | 2 | 3 | 4 | 5;
 const STEPS: { label: string }[] = [
   { label: "Environment" },
   { label: "Host" },
   { label: "Template" },
   { label: "Connect" },
+  { label: "Customise" },
   { label: "Preview" },
 ];
-const LAST_STEP: Step = 4;
+const LAST_STEP: Step = 5;
+
+/**
+ * Palette presets surfaced in the Customise step.  Hex values mirror
+ * `palette_colors()` in `src-tauri/src/publish/quartz.rs` — keep in
+ * sync.  The two-swatch preview (`secondary` + `tertiary`) maps to
+ * Quartz's link colour + graph hover colour.
+ */
+const PALETTE_PRESETS: { id: string; label: string; secondary: string; tertiary: string }[] = [
+  { id: "default", label: "Default (Quartz)", secondary: "#284b63", tertiary: "#84a59d" },
+  { id: "ocean", label: "Ocean", secondary: "#1f6feb", tertiary: "#388bfd" },
+  { id: "forest", label: "Forest", secondary: "#2f7d32", tertiary: "#66bb6a" },
+  { id: "sunset", label: "Sunset", secondary: "#d84315", tertiary: "#ff7043" },
+  { id: "berry", label: "Berry", secondary: "#8e24aa", tertiary: "#ba68c8" },
+  { id: "mono", label: "Mono", secondary: "#333333", tertiary: "#777777" },
+];
+
+/**
+ * Typography presets surfaced in the Customise step.  Font triples
+ * mirror `typography_fonts()` in `quartz.rs` — keep in sync.
+ */
+const TYPOGRAPHY_PRESETS: { id: string; label: string; hint: string }[] = [
+  { id: "default", label: "Default (Quartz)", hint: "Schibsted Grotesk · Source Sans Pro · IBM Plex Mono" },
+  { id: "modern-serif", label: "Modern serif", hint: "Crimson Pro · Inter · JetBrains Mono" },
+  { id: "geometric-sans", label: "Geometric sans", hint: "Inter · Inter · JetBrains Mono" },
+  { id: "brutalist", label: "Brutalist", hint: "Space Grotesk · Space Grotesk · Space Mono" },
+  { id: "elegant", label: "Elegant", hint: "Cormorant Garamond · Libre Franklin · IBM Plex Mono" },
+];
 
 export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   const probe = usePublishStore((s) => s.probe);
@@ -54,6 +82,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   const buildAction = usePublishStore((s) => s.build);
   const previewAction = usePublishStore((s) => s.preview);
   const previewStopAction = usePublishStore((s) => s.previewStop);
+  const setThemeAction = usePublishStore((s) => s.setTheme);
 
   const isMockVault = vaultPath === MOCK_VAULT || !vaultPath;
 
@@ -63,6 +92,13 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  // Customise-step form state.  Hydrated lazily from `row.theme` when
+  // the user lands on step 4 (rather than every row update) so the
+  // input cursor doesn't jump on background refreshes.
+  const [theme, setLocalTheme] = useState<QuartzTheme>(DEFAULT_QUARTZ_THEME);
+  const [themeHydrated, setThemeHydrated] = useState(false);
+  const [applyingTheme, setApplyingTheme] = useState(false);
+  const [themeSavedAt, setThemeSavedAt] = useState<number | null>(null);
 
   // ── Reset on close ────────────────────────────────────────────────────
   useEffect(() => {
@@ -72,8 +108,10 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     setTemplateId(null);
     setError(null);
     setProbing(false);
-    setConnecting(false);
-  }, [open]);
+    setConnecting(false);    setLocalTheme(DEFAULT_QUARTZ_THEME);
+    setThemeHydrated(false);
+    setApplyingTheme(false);
+    setThemeSavedAt(null);  }, [open]);
 
   // ── Esc closes ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -111,6 +149,23 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     setTemplateId(templates[0]?.id ?? null);
   }, [templates, templateId]);
 
+  // ── Hydrate the Customise form when the user lands on step 4 ────────
+  //
+  //   Pull from `row.theme` if it exists (vault was connected on a
+  //   previous run) or fall back to the empty-string defaults with a
+  //   sensible auto-derived `pageTitle = vaultName`.  Done only once
+  //   per modal-open so background refreshes don't reset the form
+  //   while the user is typing.
+  useEffect(() => {
+    if (step !== 4 || themeHydrated) return;
+    const seed: QuartzTheme = row?.theme ?? {
+      ...DEFAULT_QUARTZ_THEME,
+      pageTitle: vaultName ?? "",
+    };
+    setLocalTheme(seed);
+    setThemeHydrated(true);
+  }, [step, themeHydrated, row?.theme, vaultName]);
+
   const reProbe = useCallback(async () => {
     setProbing(true);
     setError(null);
@@ -130,6 +185,10 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     if (step === 2) return templateId !== null;
     // Step 3 → advance only after Connect succeeds (row.exists).
     if (step === 3) return row?.exists === true;
+    // Step 4 (Customise) — advance is always allowed once connected;
+    // the Apply button is independent (the user can skip without
+    // pressing it and the saved-on-disk theme stays untouched).
+    if (step === 4) return row?.exists === true;
     return false;
   }, [step, probe, hostId, templateId, isMockVault, row]);
 
@@ -153,13 +212,29 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
       // Refresh row so canAdvance sees `exists: true` and so the
       // preview step shows the connected host/template.
       await refreshStatus(vaultPath);
-      setStep(LAST_STEP);
+      // Advance into the Customise step — the user picks site title,
+      // palette, typography, etc. before getting to the preview.
+      setStep(4);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setConnecting(false);
     }
   }, [isMockVault, vaultPath, hostId, templateId, refreshStatus]);
+
+  const onApplyTheme = useCallback(async () => {
+    if (!vaultPath || isMockVault) return;
+    setApplyingTheme(true);
+    setError(null);
+    try {
+      await setThemeAction(vaultPath, theme);
+      setThemeSavedAt(Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApplyingTheme(false);
+    }
+  }, [vaultPath, isMockVault, setThemeAction, theme]);
 
   const onBuild = useCallback(async () => {
     if (!vaultPath) return;
@@ -407,7 +482,152 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
 
           {step === 4 && (
             <>
-              <div className="pw-section-title">Step 5 · Build &amp; preview</div>
+              <div className="pw-section-title">Step 5 · Customise the site</div>
+              <div className="pw-hint">
+                These changes are written to <code>publish.toml</code> and
+                merged into <code>quartz.config.yaml</code> on every build.
+                Skip this step to keep the bundled defaults.
+              </div>
+
+              <div className="pw-form">
+                <label className="pw-form-row">
+                  <span className="pw-form-label">Site title</span>
+                  <input
+                    type="text"
+                    className="pw-input"
+                    placeholder="My digital garden"
+                    value={theme.pageTitle}
+                    onChange={(e) =>
+                      setLocalTheme((t) => ({ ...t, pageTitle: e.target.value }))
+                    }
+                    disabled={applyingTheme || isMockVault}
+                  />
+                </label>
+
+                <label className="pw-form-row">
+                  <span className="pw-form-label">Title suffix</span>
+                  <input
+                    type="text"
+                    className="pw-input"
+                    placeholder="— a Lattice garden"
+                    value={theme.pageTitleSuffix}
+                    onChange={(e) =>
+                      setLocalTheme((t) => ({ ...t, pageTitleSuffix: e.target.value }))
+                    }
+                    disabled={applyingTheme || isMockVault}
+                  />
+                </label>
+
+                <div className="pw-form-row">
+                  <span className="pw-form-label">Palette</span>
+                  <div className="pw-swatch-grid">
+                    {PALETTE_PRESETS.map((p) => {
+                      const active = theme.palette === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`pw-swatch${active ? " active" : ""}`}
+                          onClick={() =>
+                            setLocalTheme((t) => ({ ...t, palette: p.id }))
+                          }
+                          aria-pressed={active}
+                          disabled={applyingTheme || isMockVault}
+                          title={`${p.label} (${p.secondary} / ${p.tertiary})`}
+                        >
+                          <span className="pw-swatch-dots">
+                            <span
+                              className="pw-swatch-dot"
+                              style={{ background: p.secondary }}
+                            />
+                            <span
+                              className="pw-swatch-dot"
+                              style={{ background: p.tertiary }}
+                            />
+                          </span>
+                          <span className="pw-swatch-label">{p.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label className="pw-form-row">
+                  <span className="pw-form-label">Typography</span>
+                  <select
+                    className="pw-input"
+                    value={theme.typography}
+                    onChange={(e) =>
+                      setLocalTheme((t) => ({ ...t, typography: e.target.value }))
+                    }
+                    disabled={applyingTheme || isMockVault}
+                  >
+                    {TYPOGRAPHY_PRESETS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label} — {t.hint}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="pw-form-row pw-form-row-check">
+                  <input
+                    type="checkbox"
+                    checked={theme.popovers}
+                    onChange={(e) =>
+                      setLocalTheme((t) => ({ ...t, popovers: e.target.checked }))
+                    }
+                    disabled={applyingTheme || isMockVault}
+                  />
+                  <span>
+                    <strong>Hover-card popovers</strong>
+                    <br />
+                    <span className="pw-hint pw-hint-inline">
+                      Preview internal links on hover. Off for cleaner mobile UX.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="pw-form-row pw-form-row-check">
+                  <input
+                    type="checkbox"
+                    checked={theme.spa}
+                    onChange={(e) =>
+                      setLocalTheme((t) => ({ ...t, spa: e.target.checked }))
+                    }
+                    disabled={applyingTheme || isMockVault}
+                  />
+                  <span>
+                    <strong>Single-page navigation</strong>
+                    <br />
+                    <span className="pw-hint pw-hint-inline">
+                      Smooth client-side routing. Off forces full page loads.
+                    </span>
+                  </span>
+                </label>
+
+                <div
+                  style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                >
+                  <button
+                    type="button"
+                    className="pw-btn primary"
+                    onClick={onApplyTheme}
+                    disabled={applyingTheme || isMockVault}
+                  >
+                    {applyingTheme ? "Saving…" : "Apply customisations"}
+                  </button>
+                  {themeSavedAt && !applyingTheme && (
+                    <span className="pw-hint pw-hint-inline">Saved.</span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {step === 5 && (
+            <>
+              <div className="pw-section-title">Step 6 · Build &amp; preview</div>
               <div className="pw-hint">
                 Build the Quartz site from your vault and serve it on a
                 throw-away local port. Use this to spot-check the layout
@@ -535,6 +755,15 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                   </button>
                 )}
               </>
+            ) : step === 4 ? (
+              <button
+                type="button"
+                className="pw-btn primary"
+                onClick={onNext}
+                disabled={!canAdvance || applyingTheme}
+              >
+                Next
+              </button>
             ) : (
               <button
                 type="button"

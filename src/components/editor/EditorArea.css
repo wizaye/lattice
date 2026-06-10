@@ -9,7 +9,21 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-width: 0;
+  /* The editor contents have a non-trivial minimum layout footprint:
+     tab strip chrome (tab + new-tab + actions ≈ 170 px) and the
+     doc-header back/forward + centered title need room to read.
+     If we let editor-area shrink below this, the .pane-actions
+     buttons (flex-shrink: 0 by design — they must stay clickable)
+     get pushed past the column's right edge and visibly overlap the
+     right sidebar.
+
+     Instead we keep editor-area at a comfortable minimum and let the
+     OUTER `.col.editor` (which has `overflow: hidden`) clip the
+     overflowing right portion when the user drags a sidebar all the
+     way in. End result mirrors VS Code / Obsidian: the editor visibly
+     slides under the opposing sidebar instead of melting into
+     compressed glyph soup. */
+  min-width: 320px;
   min-height: 0;
   height: 100%;
   background: var(--bg-editor);
@@ -43,6 +57,12 @@
   flex-shrink: 0;
   position: relative;
   z-index: 2;
+  /* Defence-in-depth: even with .editor-area's min-width floor, if a
+     future change ever lets the tabbar's children request more than
+     the parent can give, clip them at the tabbar so they NEVER paint
+     past the column edge into the right sidebar. */
+  overflow: hidden;
+  min-width: 0;
 }
 /* Top-strip seam at the absolute bottom of the tab strip.
    The active tab is a short pill floating inside the 36 px strip
@@ -114,6 +134,11 @@
   flex-shrink: 0;
   position: relative;
   z-index: 1;
+  /* Same defence-in-depth as .pane-tabbar — the doc-header's centered
+     absolute title and the nav/action button groups should never bleed
+     past the editor column when it's been squeezed thin. */
+  overflow: hidden;
+  min-width: 0;
 }
 
 .pane-doc-nav {

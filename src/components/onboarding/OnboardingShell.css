@@ -234,3 +234,166 @@
   color: var(--text-normal);
   background: var(--hover);
 }
+
+/* Step 3 — Vault picker. Three stacked sections (open / create / recents)
+   plus a "current vault" chip up top once one is chosen.  All chrome
+   uses the same design tokens as the persona cards so the wizard reads
+   as one continuous visual language. */
+.ob-vault-current {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 0 0 16px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 12px;
+  overflow: hidden;
+}
+.ob-vault-current-label {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.ob-vault-current-path {
+  color: var(--text-normal);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ob-vault-section {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 0 0 12px;
+  background: var(--bg-editor);
+}
+.ob-vault-section-head {
+  margin-bottom: 10px;
+}
+.ob-vault-section-head .ob-h2 {
+  margin-top: 0;
+}
+.ob-vault-section-head .ob-p {
+  margin-bottom: 0;
+}
+
+.ob-vault-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ob-vault-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-family: inherit;
+}
+.ob-vault-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.ob-vault-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ob-vault-preview {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 8px;
+  background: var(--bg-menu);
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  font-size: 11px;
+  overflow: hidden;
+}
+.ob-vault-preview-label {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.ob-vault-preview-path {
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ob-vault-recents {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ob-vault-recent-row {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+.ob-vault-recent-row:hover {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+.ob-vault-recent-row:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ob-vault-recent-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ob-vault-recent-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.ob-vault-loading {
+  margin-top: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-editor);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+.ob-vault-error {
+  margin-top: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #ff6b6b;
+  background: color-mix(in srgb, #ff6b6b 12%, var(--bg-editor));
+  border: 1px solid color-mix(in srgb, #ff6b6b 50%, var(--border-strong));
+  border-radius: 6px;
+}

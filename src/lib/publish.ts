@@ -75,6 +75,34 @@ export interface PublishTemplateInfo {
   bundleReady: boolean;
 }
 
+/**
+ * User's UI customisations for the bundled Quartz site.  Mirrors
+ * `PublishTheme` in `src-tauri/src/publish/toml.rs`.  Pushed to Rust
+ * via `publishSetTheme`, persisted to `publish.toml [quartz.theme]`,
+ * and surgically merged into `quartz.config.yaml` on every build by
+ * `quartz::ensure_scaffold`.
+ *
+ * The presets ("default" / "ocean" / "forest" / "sunset" / "mono" /
+ * "berry" for `palette`; "default" / "modern-serif" / "geometric-sans"
+ * / "brutalist" / "elegant" for `typography`) are intentionally
+ * curated — v2 may add a "custom" sentinel that unlocks full hex /
+ * font-name inputs.
+ */
+export interface QuartzTheme {
+  /** Site title shown in the masthead.  Empty = keep upstream default. */
+  pageTitle: string;
+  /** Appended to every page's `<title>`.  Empty allowed. */
+  pageTitleSuffix: string;
+  /** Palette preset id — see comment above. */
+  palette: string;
+  /** Typography preset id — see comment above. */
+  typography: string;
+  /** Hover-card link previews. */
+  popovers: boolean;
+  /** Single-page-app client routing (off = full page navigations). */
+  spa: boolean;
+}
+
 /** Returned by `publish_status`. */
 export interface PublishStatus {
   /** False until `publish_init` (phase D2) writes the config. */
@@ -88,6 +116,8 @@ export interface PublishStatus {
   lastDeployFiles: number | null;
   lastDeployBytes: number | null;
   lastError: string | null;
+  /** Null until `publish_init` runs. */
+  theme: QuartzTheme | null;
 }
 
 // ─── Mock-vault gate ─────────────────────────────────────────────────────
@@ -153,6 +183,7 @@ export async function publishStatus(vault: string): Promise<PublishStatus> {
       lastDeployFiles: null,
       lastDeployBytes: null,
       lastError: null,
+      theme: null,
     };
   }
   return invoke<PublishStatus>("publish_status", { vault });
@@ -194,6 +225,17 @@ export async function publishAuthPick(
 ): Promise<void> {
   if (!isRealVault(vault)) throw new Error("Cannot pick a host project for the mock vault.");
   await invoke("publish_auth_pick", { vault, hostId, projectIdOrNewName });
+}
+
+/**
+ * Persist the user's Quartz UI customisations and immediately patch
+ * `<vault>/.lattice/publish/quartz/quartz.config.yaml` so the next
+ * build (or preview reload) picks them up.  Cheap (file IO only —
+ * no network, no npm).  Rejected on the mock vault.
+ */
+export async function publishSetTheme(vault: string, theme: QuartzTheme): Promise<void> {
+  if (!isRealVault(vault)) throw new Error("Cannot customise the mock vault site.");
+  await invoke("publish_set_theme", { vault, theme });
 }
 
 /** **Phase D3 — currently errors out.**  Returns the path to the build output. */

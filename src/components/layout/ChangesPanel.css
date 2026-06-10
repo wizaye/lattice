@@ -58,11 +58,26 @@
   justify-content: space-between;
   gap: 8px;
   width: calc(100% - 18px);
+  /* The row needs an explicit min-width so the title child can
+     actually shrink-to-fit inside its flex parent. Without this the
+     title's intrinsic content width forced the badge to wrap (visible
+     bug at narrow sidebar widths where "Demo vault" broke onto a
+     second line and the gray pill background no longer hugged the
+     text). */
+  min-width: 0;
 }
 .cp-summary-title {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* Let the title truncate with an ellipsis when the badge needs the
+     remaining room. Previously the title kept its intrinsic width
+     and the row wrapped instead, which broke the badge layout. */
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cp-summary-title .codicon {
   font-size: var(--icon-xs);
@@ -84,6 +99,13 @@
   font-weight: 700;
   text-transform: none;
   letter-spacing: 0;
+  /* Keep the pill on a single line and prevent it from shrinking
+     when the row runs out of room — the title ellipsises first.
+     Without nowrap, labels like "Demo vault" wrapped to two lines
+     inside a 16px-tall pill and the gray background looked
+     misaligned with the text. */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .cp-badge.muted {
   background: color-mix(in srgb, var(--text-faint) 18%, transparent);
@@ -113,6 +135,12 @@
   color: var(--text-faint);
   font-style: italic;
   font-size: 12px;
+  /* Cap the card width so the muted pill doesn't sprawl across a
+     wide sidebar (visible when the user drags the splitter to its
+     max width). The text inside is short enough that anything past
+     ~360px just looks like wasted horizontal space. */
+  max-width: 360px;
+  align-self: flex-start;
 }
 .cp-empty .codicon {
   font-size: 14px;
@@ -184,8 +212,18 @@
 .cp-commit-actions {
   display: flex;
   align-items: center;
+  /* flex-wrap so the three buttons (Suggest / Commit all / Commit
+     staged) drop to a second row instead of clipping or pushing the
+     primary action off-screen when the sidebar is narrow. */
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+}
+/* Let the buttons shrink within the row before wrapping kicks in,
+   and give them a sane min-width so the labels don't truncate. */
+.cp-commit-actions .cp-btn {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* ---------- Buttons ---------- */

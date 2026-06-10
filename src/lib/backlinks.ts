@@ -56,6 +56,14 @@ export type MentionGroup = {
 export type OutgoingRef = { name: string };
 export type HeadingRef = { level: number; text: string };
 
+/** Payload for the `lattice-jump-to-line` CustomEvent. Lines are 1-based
+ *  (matches CodeMirror `doc.line(n)` and `Snippet.line`). */
+export type JumpToLineDetail = {
+  fileId: string;
+  line: number;
+  column?: number;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;

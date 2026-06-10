@@ -372,10 +372,44 @@ fn run_cmd(label: &str, cmd: &mut std::process::Command, timeout: Duration) -> R
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("{label}: spawn failed: {e}"))?;
-    match child.wait_timeout(timeout) {
+
+    // Drain stdout/stderr on background threads.  If we left them
+    // sitting in their pipes and only called `wait_timeout`, a chatty
+    // engine (Tectonic emits megabytes of bundle-fetch progress on
+    // first run) would fill the OS pipe buffer (4–8 KB on Windows)
+    // within seconds and block on its next write.  The child would
+    // then sit forever waiting for the parent to read, the parent
+    // would sit forever waiting for the child to exit, and the modal
+    // would freeze on "Compiling PDF…" until the configured timeout
+    // killed the process.
+    let stdout_handle = child.stdout.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+            buf
+        })
+    });
+    let stderr_handle = child.stderr.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut s, &mut buf);
+            buf
+        })
+    });
+
+    let wait_result = child.wait_timeout(timeout);
+
+    let stdout = stdout_handle
+        .and_then(|h| h.join().ok())
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let stderr = stderr_handle
+        .and_then(|h| h.join().ok())
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+
+    match wait_result {
         Ok(Some(status)) => {
-            let stdout = drain(child.stdout.take());
-            let stderr = drain(child.stderr.take());
             if status.success() {
                 Ok(())
             } else {
@@ -406,15 +440,6 @@ fn run_cmd(label: &str, cmd: &mut std::process::Command, timeout: Duration) -> R
             Err(format!("{label}: wait failed: {e}"))
         }
     }
-}
-
-fn drain<R: std::io::Read>(reader: Option<R>) -> String {
-    let Some(mut r) = reader else {
-        return String::new();
-    };
-    let mut buf = Vec::new();
-    let _ = r.read_to_end(&mut buf);
-    String::from_utf8_lossy(&buf).into_owned()
 }
 
 fn truncate_tail(s: &str, n: usize) -> String {

@@ -8,6 +8,14 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Prepend Lattice's own bin dir (where `paper_engine_install`
+    // drops tectonic.exe) to PATH for the entire Lattice process.
+    // Idempotent — safe to call on every launch.  Without this,
+    // tectonic installed in a previous Lattice session would not
+    // be on PATH until the user manually added it via the Windows
+    // System Properties dialog.
+    paper::engine_install::prepend_bin_dir_to_path();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -73,6 +81,7 @@ pub fn run() {
             // matching slice lands.  See docs/paper-export-plan.md.
             paper::paper_list_templates,
             paper::paper_create,
+            paper::paper_quick_pdf,
             paper::paper_status,
             paper::paper_set_compile_engine,
             paper::paper_compile,
@@ -83,6 +92,12 @@ pub fn run() {
             paper::paper_byof_import,
             paper::paper_byof_re_import,
             paper::paper_byof_remove,
+            // LaTeX-engine preflight (probe + install).  Backs the
+            // New-Paper modal's inline "Install Tectonic" banner so
+            // users on fresh boxes never dead-end with a folder + no
+            // usable PDF.
+            paper::engine_install::paper_engine_probe,
+            paper::engine_install::paper_engine_install,
             // Slice D — publishing (vault → Quartz v5 site → host).
             // Phase D1 ships publish_probe + publish_list_hosts +
             // publish_list_templates + publish_status end-to-end;
@@ -97,6 +112,7 @@ pub fn run() {
             publish::publish_auth_start,
             publish::publish_auth_complete,
             publish::publish_auth_pick,
+            publish::publish_set_theme,
             publish::publish_build,
             publish::publish_preview,
             publish::publish_preview_stop,

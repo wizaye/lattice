@@ -302,3 +302,97 @@
   color: var(--text-normal);
 }
 .pw-banner strong { color: var(--text-normal); }
+
+/* ─── Customise step (step 5) ─────────────────────────────────────────── */
+.pw-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pw-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pw-form-row.pw-form-row-check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+.pw-form-row.pw-form-row-check input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.pw-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.pw-input {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-editor);
+  color: var(--text-normal);
+}
+.pw-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.pw-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pw-hint-inline {
+  display: inline;
+  font-weight: 400;
+}
+
+/* Palette swatch picker */
+.pw-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.pw-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-editor);
+  color: var(--text-normal);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.pw-swatch:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+}
+.pw-swatch.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-editor));
+}
+.pw-swatch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pw-swatch-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.pw-swatch-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, #000 35%, transparent);
+}
+.pw-swatch-label {
+  font-size: 12px;
+  font-weight: 600;
+}

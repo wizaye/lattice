@@ -28,8 +28,8 @@ import {
 import { Step0Splash } from "./steps/Step0Splash";
 import { Step1Welcome } from "./steps/Step1Welcome";
 import { Step2Persona } from "./steps/Step2Persona";
+import { Step3Vault } from "./steps/Step3Vault";
 import {
-  Step3Vault,
   Step4Theme,
   Step5Sync,
   Step6Encryption,

@@ -322,6 +322,14 @@ a:hover { text-decoration: underline; }
   flex: 1 1 auto;
   background: var(--bg-editor);
   min-width: 0;
+  /* Clip the editor's intrinsic-width contents (tab bar, graph view
+     canvas, etc.) to its own column so that when the user drags a
+     sidebar all the way in and the editor shrinks to a sliver, the
+     overflowing content does not bleed under / paint over the
+     opposing sidebar. Without this clip the tab labels and pane
+     bodies kept rendering at their natural width and showed through
+     the rsidebar's transparent background. */
+  overflow: hidden;
 }
 
 .col-header {

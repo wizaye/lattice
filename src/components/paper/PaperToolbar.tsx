@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePaperStore } from "../../state/paperStore";
+import {
+  paperEngineInstall,
+  paperEngineProbe,
+  type EngineInstaller,
+  type EngineProbe,
+} from "../../lib/paper";
 import "./PaperToolbar.css";
 
 /**
  * PaperToolbar — slim strip rendered above the markdown editor for
  * files that live inside a paper project.  Owns the Compile / Open /
- * Export-zip / Send-to-Overleaf actions plus the status pill and a
- * sticky error banner.
+ * Send-to-Overleaf actions plus an output-format select, the status
+ * pill and a sticky error banner.
  *
  * Inputs:
  *   - `paperAbsPath` — absolute path to the paper root (the directory
@@ -17,16 +23,22 @@ import "./PaperToolbar.css";
  *   - On mount (and whenever `paperAbsPath` changes), kicks off a
  *     status refresh so the toolbar reflects on-disk state without
  *     waiting for the user to click Compile.
- *   - Compile delegates to `paperStore.compile(paperAbsPath)`.  On
- *     success we fire `lattice-open-paper-pdf` (window CustomEvent)
- *     so `App.tsx` can open the freshly-built PDF inline in the
- *     editor tab strip — same pattern as `lattice-open-new-paper`.
- *   - Export-zip delegates to `paperStore.emitBundle` and reveals the
- *     resulting zip in the OS file manager.
- *   - Send-to-Overleaf delegates to `paperStore.openOverleaf`, which
- *     re-emits the zip AND opens https://www.overleaf.com/project +
- *     reveals the zip so the user can drag-drop into Overleaf's
- *     upload dialog.
+ *   - Compile honours the output-format select:
+ *       * "pdf"  → `paperStore.compile(paperAbsPath)` only (the local
+ *                  tectonic / latexmk / pdflatex pipeline).  On
+ *                  success we fire `lattice-open-paper-pdf` (window
+ *                  CustomEvent) so `App.tsx` opens the freshly-built
+ *                  PDF inline in the editor tab strip.
+ *       * "zip"  → `paperStore.emitBundle(paperAbsPath)` only — never
+ *                  invokes LaTeX, never requires a local engine.
+ *                  Reveals the resulting zip in the OS file manager
+ *                  so the user can drag-drop into Overleaf.
+ *       * "both" → runs PDF then zip sequentially.  If PDF compile
+ *                  fails (no engine on PATH), the zip is still
+ *                  emitted — the user can fall back to Overleaf for
+ *                  the cloud render without a second click.
+ *   - Send-to-Overleaf is the one-click cloud path: builds the zip
+ *     AND opens https://www.overleaf.com/project + reveals the zip.
  *   - When `lastError` contains "No LaTeX engine", we render an
  *     inline tip pointing the user at Send-to-Overleaf — without
  *     this the no-local-TeX-install case looks like a hard failure
@@ -39,6 +51,30 @@ import "./PaperToolbar.css";
 type Props = {
   paperAbsPath: string;
 };
+
+type OutputMode = "pdf" | "zip" | "both";
+
+const OUTPUT_OPTIONS: ReadonlyArray<{
+  value: OutputMode;
+  label: string;
+  title: string;
+}> = [
+  {
+    value: "pdf",
+    label: "PDF (local)",
+    title: "Compile to PDF using the local LaTeX engine (tectonic / latexmk / pdflatex)",
+  },
+  {
+    value: "zip",
+    label: "LaTeX project (.zip)",
+    title: "Bundle main.tex + references.bib + assets/ into an Overleaf-ready zip — no local LaTeX needed",
+  },
+  {
+    value: "both",
+    label: "Both (PDF + .zip)",
+    title: "Compile the PDF AND emit the Overleaf zip in one click",
+  },
+];
 
 const fmtTime = (iso: string | null): string | null => {
   if (!iso) return null;
@@ -76,6 +112,13 @@ export function PaperToolbar({ paperAbsPath }: Props) {
   const emitBundle = usePaperStore((s) => s.emitBundle);
   const openOverleaf = usePaperStore((s) => s.openOverleaf);
 
+  // Output-format select: PDF (local), LaTeX zip (Overleaf-ready),
+  // or both.  Kept as local state — the choice is per-toolbar-session
+  // and intentionally does not persist across vault opens (defaults
+  // are friendlier than a stale "zip only" sticky setting on a fresh
+  // machine).
+  const [outputMode, setOutputMode] = useState<OutputMode>("pdf");
+
   useEffect(() => {
     if (!paperAbsPath) return;
     void refreshStatus(paperAbsPath);
@@ -101,9 +144,50 @@ export function PaperToolbar({ paperAbsPath }: Props) {
     );
   }, [lastPdfPath, paperAbsPath]);
 
-  const onCompile = useCallback(() => {
-    void compile(paperAbsPath);
-  }, [paperAbsPath, compile]);
+  const onCompile = useCallback(async () => {
+    // Honour the output-format select.  We intentionally do not
+    // early-return on PDF failure when mode === "both" — the zip is
+    // a useful fallback (the most common "compile failed" cause on a
+    // fresh machine is "no LaTeX engine on PATH", and the zip is
+    // exactly the workaround for that).  `compile`/`emitBundle`
+    // already populate `lastError` on the row when they throw, so we
+    // just swallow here.
+    if (outputMode === "pdf") {
+      void compile(paperAbsPath);
+      return;
+    }
+    if (outputMode === "zip") {
+      try {
+        const zipPath = await emitBundle(paperAbsPath);
+        try {
+          const mod = await import("@tauri-apps/plugin-opener");
+          await mod.revealItemInDir(zipPath);
+        } catch (err) {
+          console.warn("revealItemInDir failed:", err);
+        }
+      } catch {
+        /* lastError already set */
+      }
+      return;
+    }
+    // mode === "both"
+    try {
+      await compile(paperAbsPath);
+    } catch {
+      /* lastError already set — continue to zip anyway */
+    }
+    try {
+      const zipPath = await emitBundle(paperAbsPath);
+      try {
+        const mod = await import("@tauri-apps/plugin-opener");
+        await mod.revealItemInDir(zipPath);
+      } catch (err) {
+        console.warn("revealItemInDir failed:", err);
+      }
+    } catch {
+      /* lastError already set */
+    }
+  }, [outputMode, paperAbsPath, compile, emitBundle]);
 
   const onOpenPdf = useCallback(async () => {
     if (!lastPdfPath) return;
@@ -117,23 +201,6 @@ export function PaperToolbar({ paperAbsPath }: Props) {
     }
   }, [lastPdfPath]);
 
-  const onExportZip = useCallback(async () => {
-    try {
-      const zipPath = await emitBundle(paperAbsPath);
-      // Reveal the zip in the OS file manager so the user can grab
-      // it.  Non-fatal if it fails (the path is still in the
-      // toolbar's hint text below).
-      try {
-        const mod = await import("@tauri-apps/plugin-opener");
-        await mod.revealItemInDir(zipPath);
-      } catch (err) {
-        console.warn("revealItemInDir failed:", err);
-      }
-    } catch {
-      // emitBundle already populated `lastError`; nothing to do here.
-    }
-  }, [emitBundle, paperAbsPath]);
-
   const onOpenOverleaf = useCallback(() => {
     void openOverleaf(paperAbsPath);
   }, [openOverleaf, paperAbsPath]);
@@ -145,6 +212,63 @@ export function PaperToolbar({ paperAbsPath }: Props) {
   const title = row?.title ?? null;
   const noEngine = isNoEngineError(lastError);
 
+  // ── Engine install affordance ────────────────────────────────────────
+  // When the user hits the "No LaTeX engine" wall we offer a
+  // one-click install via the platform-appropriate installer (direct
+  // GitHub-release download on Windows; brew / apt-get / cargo
+  // elsewhere).  The probe runs lazily ONLY when noEngine is
+  // true so the toolbar stays cheap for the happy path.
+  const [enginePreflight, setEnginePreflight] = useState<EngineProbe | null>(null);
+  const [engineInstalling, setEngineInstalling] = useState(false);
+  const [engineInstallError, setEngineInstallError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!noEngine) {
+      // Reset so a future no-engine error re-probes a fresh state
+      // (e.g. user installed Tectonic externally, hit compile,
+      // expects the toolbar to know).
+      setEnginePreflight(null);
+      setEngineInstallError(null);
+      return;
+    }
+    let cancelled = false;
+    paperEngineProbe()
+      .then((p) => {
+        if (cancelled) return;
+        setEnginePreflight(p);
+      })
+      .catch(() => {
+        /* swallow — banner falls back to "manual install" copy */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [noEngine]);
+
+  const onInstallEngine = useCallback(async () => {
+    setEngineInstalling(true);
+    setEngineInstallError(null);
+    try {
+      const after = await paperEngineInstall();
+      setEnginePreflight(after);
+      // Engine is now on PATH — clear the row's lastError so the
+      // banner self-dismisses and the user can hit Compile again
+      // without a stale "no engine" error sitting there.
+      if (after.anyEngine) {
+        usePaperStore.setState((s) => {
+          const cur = s.rows[paperAbsPath];
+          if (!cur) return s;
+          return {
+            rows: { ...s.rows, [paperAbsPath]: { ...cur, lastError: null } },
+          };
+        });
+      }
+    } catch (e) {
+      setEngineInstallError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEngineInstalling(false);
+    }
+  }, [paperAbsPath]);
+
   const status = useMemo(() => {
     if (busy) return "Working…";
     if (lastError) return null; // error rendered separately
@@ -153,18 +277,47 @@ export function PaperToolbar({ paperAbsPath }: Props) {
     return "Not yet compiled";
   }, [busy, lastError, lastCompiledAt]);
 
+  // Compile-button label tracks the select so the primary action is
+  // self-describing.  "Compile" alone reads ambiguous now that the
+  // button can produce a zip with no LaTeX run.
+  const compileLabel = useMemo(() => {
+    if (busy) return "Working…";
+    if (outputMode === "zip") return "Build .zip";
+    if (outputMode === "both") return "Compile both";
+    return "Compile PDF";
+  }, [busy, outputMode]);
+
+  const activeOption = OUTPUT_OPTIONS.find((o) => o.value === outputMode);
+  const compileTitle = activeOption?.title ?? "";
+
   return (
     <>
       <div className="paper-toolbar" data-testid="paper-toolbar">
         <span className="paper-toolbar-title">{title ?? "Paper"}</span>
+        <label className="paper-toolbar-select-wrap" title="Choose what Compile produces">
+          <span className="paper-toolbar-select-label">Output</span>
+          <select
+            className="paper-toolbar-select"
+            value={outputMode}
+            onChange={(e) => setOutputMode(e.target.value as OutputMode)}
+            disabled={busy}
+            data-testid="paper-toolbar-output-select"
+          >
+            {OUTPUT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value} title={opt.title}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           className="paper-toolbar-btn primary"
           onClick={onCompile}
           disabled={busy}
-          title="Compile this paper to PDF via tectonic / latexmk / pdflatex"
+          title={compileTitle}
         >
-          {busy ? "Working…" : "Compile PDF"}
+          {compileLabel}
         </button>
         <button
           type="button"
@@ -178,22 +331,13 @@ export function PaperToolbar({ paperAbsPath }: Props) {
         <button
           type="button"
           className="paper-toolbar-btn"
-          onClick={onExportZip}
+          onClick={onOpenOverleaf}
           disabled={busy}
           title={
             lastBundlePath
-              ? `Last zip: ${lastBundlePath}`
-              : "Build an Overleaf-ready zip with main.tex, references.bib, and assets/"
+              ? `Last zip: ${lastBundlePath} — opens Overleaf and reveals the zip`
+              : "Build the zip and open Overleaf — drag-drop to compile in the cloud (no local LaTeX install needed)"
           }
-        >
-          Export .zip
-        </button>
-        <button
-          type="button"
-          className="paper-toolbar-btn"
-          onClick={onOpenOverleaf}
-          disabled={busy}
-          title="Build the zip and open Overleaf — drag-drop to compile in the cloud (no local LaTeX install needed)"
         >
           Send to Overleaf
         </button>
@@ -210,8 +354,29 @@ export function PaperToolbar({ paperAbsPath }: Props) {
           {noEngine && (
             <div className="paper-toolbar-error-hint">
               No local LaTeX engine on your PATH (tectonic / latexmk / pdflatex /
-              xelatex). Click <strong>Send to Overleaf</strong> above to compile
-              in the cloud — no install needed.
+              xelatex). Switch <strong>Output</strong> to <strong>LaTeX project
+              (.zip)</strong> and click Build, or use <strong>Send to
+              Overleaf</strong> to compile in the cloud — no install needed.
+              {enginePreflight?.installer && (
+                <div className="paper-toolbar-engine-install">
+                  <button
+                    type="button"
+                    className="paper-toolbar-btn primary"
+                    onClick={onInstallEngine}
+                    disabled={engineInstalling}
+                    title={`Install Tectonic via ${INSTALLER_LABEL[enginePreflight.installer]}`}
+                  >
+                    {engineInstalling
+                      ? `Installing via ${INSTALLER_LABEL[enginePreflight.installer]}…`
+                      : `Install Tectonic via ${INSTALLER_LABEL[enginePreflight.installer]}`}
+                  </button>
+                  {engineInstallError && (
+                    <div className="paper-toolbar-engine-install-error">
+                      {engineInstallError}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -219,3 +384,10 @@ export function PaperToolbar({ paperAbsPath }: Props) {
     </>
   );
 }
+
+const INSTALLER_LABEL: Record<EngineInstaller, string> = {
+  direct: "direct download",
+  homebrew: "Homebrew",
+  apt: "apt-get",
+  cargo: "cargo",
+};

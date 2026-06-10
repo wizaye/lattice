@@ -1,11 +1,25 @@
-/* Right sidebar — icons flow naturally at the left edge of the header.
-   The floating window controls (top-right, z-index 100) cover whichever
-   icons would land underneath when the sidebar is narrowed. */
+/* Right sidebar — on Windows/Linux the inline style on .rs-header
+   reserves `--win-controls-w` worth of right-padding so the panel
+   switcher icons never slip beneath the floating
+   Minimize/Maximize/Close cluster (which sits at top:0 right:0,
+   z-index 100). On macOS no win-controls cluster exists, so the
+   inline padding is omitted and the icons reach the edge.
+
+   The .rs-header-tabs inner wrapper clips icons at the rs-header's
+   content edge — necessary because CSS `overflow: hidden` clips at
+   the padding box, not the content box, so without this wrapper the
+   icons would still spill into the reserved padding zone. */
 
 .rs-header {
   gap: 2px;
-  /* no padding-right reservation — icons slide under the window controls
-     as the sidebar shrinks */
+  overflow: hidden;
+}
+
+.rs-header-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
 }
 

@@ -69,6 +69,57 @@
   color: var(--accent);
 }
 
+/*
+ * Output-format selector — small inline pair of "Output" label +
+ * native <select>.  Sits between the title and the primary Compile
+ * button so the user picks the artifact first, then triggers the
+ * pipeline.  Native <select> is intentional: it inherits the OS
+ * dropdown styling (and keyboard a11y) for free, and the strip is
+ * already dense — a custom popover would crowd the row.
+ */
+.paper-toolbar-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.paper-toolbar-select-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.paper-toolbar-select {
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-editor);
+  color: var(--text-normal);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 110ms ease, background 110ms ease;
+}
+
+.paper-toolbar-select:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.paper-toolbar-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.paper-toolbar-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .paper-toolbar-spacer {
   flex: 1 1 auto;
 }
@@ -105,4 +156,28 @@
 }
 .paper-toolbar-error-hint strong {
   color: var(--accent);
+}
+
+/* One-click engine-install row, embedded inside the no-engine hint
+ * so the actionable button sits right next to the explanatory copy.
+ * Spaced from the hint text via margin-top, NOT a border, to match
+ * the hint's friendly tone (this is "fix it for me", not "another
+ * problem to read"). */
+.paper-toolbar-engine-install {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.paper-toolbar-engine-install .paper-toolbar-btn {
+  align-self: flex-start;
+}
+.paper-toolbar-engine-install-error {
+  color: var(--text-error);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 6px;
+  background: color-mix(in srgb, var(--text-error) 8%, transparent);
+  border-radius: 4px;
 }

@@ -47,12 +47,17 @@ import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
 
 const LEFT_MIN = 160;
-const LEFT_MAX = 520;
 const LEFT_DEFAULT = 240;
 const RIGHT_MIN = 200;
-const RIGHT_MAX = 520;
 const RIGHT_DEFAULT = 280;
 const STRIP_W = 36;
+// Auto-collapse threshold: dragging the splitter inward past this
+// many pixels below the panel's minimum width snaps the panel into
+// collapsed mode (matches the VS Code / Obsidian convention). The
+// stored width is preserved so toggling the panel open later
+// restores it to its previous size.
+const LEFT_COLLAPSE_AT = LEFT_MIN - 40;
+const RIGHT_COLLAPSE_AT = RIGHT_MIN - 40;
 
 function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
   // Open the GraphView by default so the user lands on something
@@ -381,6 +386,18 @@ export default function App() {
 
   const [dragging, setDragging] = useState<"left" | "right" | null>(null);
 
+  // Track window width so the resize clamps know how much room is
+  // actually available between the two sidebars. We only care about
+  // x-axis changes for the splitter math, but innerHeight is cheap.
+  const [windowWidth, setWindowWidth] = useState<number>(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const beginLeftDrag = useCallback(() => {
     leftStartRef.current = leftWidth;
     setDragging("left");
@@ -391,16 +408,130 @@ export default function App() {
   }, [rightWidth]);
   const endDrag = useCallback(() => setDragging(null), []);
 
-  const onLeftDelta = useCallback((d: number) => {
-    setLeftWidth(
-      Math.max(LEFT_MIN, Math.min(LEFT_MAX, leftStartRef.current + d)),
-    );
-  }, []);
-  const onRightDelta = useCallback((d: number) => {
-    setRightWidth(
-      Math.max(RIGHT_MIN, Math.min(RIGHT_MAX, rightStartRef.current - d)),
-    );
-  }, []);
+  // The active cap for each sidebar respects the OPPOSING side's
+  // MIN width: when stretched fully, the opposing sidebar should
+  // still get at least its MIN reserved. Without this, the opposing
+  // sidebar's header content (e.g., the right sidebar's tabbed
+  // panel strip) gets squeezed into a region too narrow for its
+  // intrinsic chrome and ends up sliding under the floating
+  // window-controls cluster (min/max/close). Matches Obsidian where
+  // each sidebar's drag-handle stops at exactly the point where the
+  // other sidebar would be reduced to its minimum.
+  const leftMaxDynamic = Math.max(
+    LEFT_MIN,
+    windowWidth - STRIP_W - (rightCollapsed ? 0 : RIGHT_MIN),
+  );
+  const rightMaxDynamic = Math.max(
+    RIGHT_MIN,
+    windowWidth - STRIP_W - (leftCollapsed ? 0 : LEFT_MIN),
+  );
+
+  // Refs mirror the collapsed state so the pointer-move callback
+  // (which uses a stale closure) can read the current value without
+  // re-creating itself on every state change.
+  const leftCollapsedRef = useRef(leftCollapsed);
+  const rightCollapsedRef = useRef(rightCollapsed);
+  useEffect(() => {
+    leftCollapsedRef.current = leftCollapsed;
+  }, [leftCollapsed]);
+  useEffect(() => {
+    rightCollapsedRef.current = rightCollapsed;
+  }, [rightCollapsed]);
+  // Refs for the current widths too — the drag handler reads them
+  // (for the push-the-opposing-sidebar-inward behaviour below) but we
+  // do NOT want them in the useCallback deps, because that would
+  // rebind the window pointermove listener on every pixel of every
+  // drag, causing visible jitter.
+  const leftWidthRef = useRef(leftWidth);
+  const rightWidthRef = useRef(rightWidth);
+  useEffect(() => {
+    leftWidthRef.current = leftWidth;
+  }, [leftWidth]);
+  useEffect(() => {
+    rightWidthRef.current = rightWidth;
+  }, [rightWidth]);
+
+  const onLeftDelta = useCallback(
+    (d: number) => {
+      const requested = leftStartRef.current + d;
+      // Past the collapse threshold? Snap shut and stop tracking
+      // width updates for the rest of this drag.
+      if (requested < LEFT_COLLAPSE_AT) {
+        if (!leftCollapsedRef.current) {
+          setLeftAnimating(false);
+          setLeftCollapsed(true);
+        }
+        return;
+      }
+      // Drag came back from the collapse zone — re-open the panel
+      // mid-drag so the user can keep adjusting without releasing.
+      if (leftCollapsedRef.current) {
+        setLeftAnimating(false);
+        setLeftCollapsed(false);
+      }
+      // Hard cap: the OPPOSING sidebar must always retain at least
+      // RIGHT_MIN visible. Past this point the drag stops growing.
+      const hardCap = Math.max(
+        LEFT_MIN,
+        windowWidth - STRIP_W - (rightCollapsedRef.current ? 0 : RIGHT_MIN),
+      );
+      const newLeft = Math.max(LEFT_MIN, Math.min(hardCap, requested));
+      setLeftWidth(newLeft);
+      // PUSH behaviour: once the editor is squeezed to 0, further
+      // dragging pushes the right sidebar inward — never below
+      // RIGHT_MIN. We do NOT push back when the user reverses the
+      // drag; the right keeps its squeezed width until the user
+      // grabs its own handle (matches Obsidian).
+      if (!rightCollapsedRef.current) {
+        const remainingForRight = windowWidth - STRIP_W - newLeft;
+        if (rightWidthRef.current > remainingForRight) {
+          setRightWidth(Math.max(RIGHT_MIN, remainingForRight));
+        }
+      }
+    },
+    [windowWidth],
+  );
+  const onRightDelta = useCallback(
+    (d: number) => {
+      // Right-side delta is inverted: moving the cursor RIGHT shrinks
+      // the right sidebar, so subtract.
+      const requested = rightStartRef.current - d;
+      if (requested < RIGHT_COLLAPSE_AT) {
+        if (!rightCollapsedRef.current) {
+          setRightAnimating(false);
+          setRightCollapsed(true);
+        }
+        return;
+      }
+      if (rightCollapsedRef.current) {
+        setRightAnimating(false);
+        setRightCollapsed(false);
+      }
+      const hardCap = Math.max(
+        RIGHT_MIN,
+        windowWidth - STRIP_W - (leftCollapsedRef.current ? 0 : LEFT_MIN),
+      );
+      const newRight = Math.max(RIGHT_MIN, Math.min(hardCap, requested));
+      setRightWidth(newRight);
+      if (!leftCollapsedRef.current) {
+        const remainingForLeft = windowWidth - STRIP_W - newRight;
+        if (leftWidthRef.current > remainingForLeft) {
+          setLeftWidth(Math.max(LEFT_MIN, remainingForLeft));
+        }
+      }
+    },
+    [windowWidth],
+  );
+
+  // If the window shrinks (or the OTHER sidebar grows) and our
+  // current width is now above the dynamic cap, ease back down to
+  // the cap so the sidebars don't end up overlapping.
+  useEffect(() => {
+    if (leftWidth > leftMaxDynamic) setLeftWidth(leftMaxDynamic);
+  }, [leftMaxDynamic, leftWidth]);
+  useEffect(() => {
+    if (rightWidth > rightMaxDynamic) setRightWidth(rightMaxDynamic);
+  }, [rightMaxDynamic, rightWidth]);
 
   const leftPointerDown = useDragResize("x", onLeftDelta, endDrag);
   const rightPointerDown = useDragResize("x", onRightDelta, endDrag);
@@ -653,16 +784,23 @@ export default function App() {
   }, [tree, activeLeafId]);
 
   // ---- Resize handle X positions (full-height overlays) ------------------
-  // x = left edge of the handle. Hidden while the sidebar is mid-animation
-  // so the handle doesn’t snap to the final position before the column
-  // catches up.
+  // x = left edge of the handle, in pixels. Hidden while the sidebar
+  // is mid-animation so the handle doesn't snap to the final position
+  // before the column catches up.
+  //
+  // Both handles are expressed in the same units (pixels off the left
+  // edge of the viewport). Previously the right handle used a CSS
+  // calc() string while the left used a pure number — under fractional
+  // device-pixel ratios those two strategies rounded differently, so
+  // the two handles drifted by a sub-pixel and the splitter felt
+  // misaligned. Now they share a single anchor: windowWidth.
   const leftHandleX =
     !leftCollapsed && !leftAnimating
       ? STRIP_W + leftWidth - 3 /* center the 6px zone on the edge */
       : null;
   const rightHandleX =
     !rightCollapsed && !rightAnimating
-      ? `calc(100% - ${rightWidth + 3}px)`
+      ? windowWidth - rightWidth - 3
       : null;
 
   return (
@@ -751,6 +889,7 @@ export default function App() {
             outgoing={outgoing}
             tags={tags}
             headings={headings}
+            isMac={isMac}
             onOpenFile={(fileId) => {
               const f = vault.get(fileId);
               if (f) openFile(f);
@@ -848,6 +987,11 @@ export default function App() {
         vaultName={vaultName}
         onClose={closeNewPaper}
         onOpenPath={onOpenFileByPath}
+        activeMarkdown={
+          activeFile && activeFile.kind === "file"
+            ? { name: activeFile.name, body: activeFile.content ?? "" }
+            : null
+        }
       />
 
       {/* ===== Publish wizard (Slice D) ===== */}
