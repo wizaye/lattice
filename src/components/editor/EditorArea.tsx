@@ -1786,7 +1786,7 @@ function SplitMenuButton({
         createPortal(
           <div
             ref={menuRef}
-            className="split-menu tab-context-menu"
+            className="split-menu"
             role="menu"
             style={menuStyle}
           >
@@ -1870,7 +1870,7 @@ function TabbarOptionsMenu({
         createPortal(
           <div
             ref={menuRef}
-            className="split-menu tabbar-menu tab-context-menu"
+            className="split-menu tabbar-menu"
             role="menu"
             style={menuStyle}
           >
@@ -1997,7 +1997,7 @@ function DocMoreMenu({
         createPortal(
           <div
             ref={menuRef}
-            className="split-menu doc-more-menu tab-context-menu"
+            className="split-menu doc-more-menu"
             role="menu"
             style={menuStyle}
           >
@@ -2533,7 +2533,7 @@ function GraphMoreMenu({
         createPortal(
           <div
             ref={menuRef}
-            className="split-menu doc-more-menu tab-context-menu"
+            className="split-menu doc-more-menu"
             role="menu"
             style={menuStyle}
           >
