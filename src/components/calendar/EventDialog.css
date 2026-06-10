@@ -1,0 +1,164 @@
+/* ---------------------------------------------------------------------
+ * v2 §1.5 — EventDialog (create / edit a local event).
+ *
+ * Pattern matches NewPaperModal: fixed-position scrim + centred
+ * dialog with a top-right close button.  Smaller footprint than
+ * NewPaperModal because this form is just 5 fields.
+ * --------------------------------------------------------------------- */
+
+.evd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 24px;
+  animation: evd-fade 140ms ease-out;
+}
+:root[data-theme="light"] .evd-overlay {
+  background: rgba(0, 0, 0, 0.35);
+}
+@keyframes evd-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.evd-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100%);
+  background: var(--bg-app, var(--bg));
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  box-shadow:
+    0 28px 60px rgba(0, 0, 0, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: evd-pop 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  overflow: hidden;
+}
+@keyframes evd-pop {
+  from { transform: translateY(10px) scale(0.985); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.evd-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 3;
+}
+
+.evd-header {
+  padding: 16px 56px 12px 18px;
+  border-bottom: 1px solid var(--border-soft, var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.evd-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal, var(--fg));
+}
+.evd-subtitle {
+  font-size: 12px;
+  color: var(--text-muted, var(--fg-muted));
+}
+
+.evd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+
+.evd-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 10px;
+}
+
+.evd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.evd-field > span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, var(--fg-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.evd-field input,
+.evd-field textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-normal, var(--fg));
+  background: var(--bg-input, var(--panel-2, rgba(127, 127, 127, 0.08)));
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 6px;
+  padding: 6px 8px;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+.evd-field input:focus,
+.evd-field textarea:focus {
+  border-color: var(--accent, #3b82f6);
+}
+.evd-field textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.evd-error {
+  font-size: 12px;
+  color: var(--danger, #ef4444);
+  border: 1px solid currentColor;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.evd-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft, var(--border));
+  margin-top: 4px;
+  padding: 12px 0 0 0;
+}
+
+.evd-btn {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 120ms ease, filter 120ms ease;
+}
+.evd-btn-secondary {
+  background: transparent;
+  border-color: var(--border, rgba(127, 127, 127, 0.3));
+  color: var(--text-normal, var(--fg));
+}
+.evd-btn-secondary:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.1));
+}
+.evd-btn-primary {
+  background: var(--accent, #3b82f6);
+  color: var(--accent-fg, white);
+}
+.evd-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.evd-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

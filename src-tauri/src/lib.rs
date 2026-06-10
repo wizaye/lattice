@@ -1,5 +1,7 @@
+mod calendar;
 mod commands;
 mod git;
+mod journal;
 mod paper;
 mod publish;
 mod sync;
@@ -120,6 +122,28 @@ pub fn run() {
             publish::publish_disconnect,
             publish::publish_open_dashboard,
             publish::publish_open_live,
+            // v2 §2 — Journaling (Logseq-style daily notes).
+            // Storage: <vault>/journals/YYYY-MM-DD.md.  Settings live
+            // at <vault>/.lattice/journal.json so each vault carries
+            // its own folder / template / filename-format config.
+            // Ctrl+Shift+D in App.tsx routes through journal_open_today.
+            journal::journal_open_today,
+            journal::journal_open_date,
+            journal::journal_list_dates,
+            journal::journal_streak,
+            journal::journal_get_settings,
+            journal::journal_set_settings,
+            // v2 §1 — Calendar (unified internal model + Local provider).
+            // The four network providers (Outlook A / Cal.com B /
+            // Google C / Apple C) ship as stubs in `cal_list_providers`
+            // today; their auth flows land in the next slice without
+            // changing the IPC surface here.
+            calendar::cal_list_events,
+            calendar::cal_create_event,
+            calendar::cal_update_event,
+            calendar::cal_delete_event,
+            calendar::cal_list_providers,
+            calendar::cal_today_local,
         ])
         .setup(|app| {
             // Set a larger default window size for the PKM workspace

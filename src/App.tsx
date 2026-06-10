@@ -23,6 +23,7 @@ import { EditorArea } from "./components/editor/EditorArea";
 import { WindowControls } from "./components/layout/TopBar";
 import { StatusPill } from "./components/layout/StatusPill";
 import { useVcsStore, selectDirtyCount } from "./state/vcsStore";
+import { useJournalStore } from "./state/journalStore";
 import {
   type BacklinkGroup,
   type MentionGroup,
@@ -751,6 +752,28 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
+      // v2 §2.4 — Ctrl/Cmd+Shift+D opens today's daily-note.  Checked
+      // BEFORE the unshifted single-letter handlers below so Shift+D
+      // doesn't accidentally hit the `D` branch of any future addition.
+      if (e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const vault = useVaultStore.getState().vaultPath;
+        if (!vault || vault === "__mock__") return;
+        void (async () => {
+          try {
+            const result = await useJournalStore
+              .getState()
+              .openToday(vault);
+            // Refresh the vault tree so the freshly-created file
+            // appears in the file pane before we route the open.
+            await useVaultStore.getState().refreshTree();
+            onOpenFileByPath(result.path);
+          } catch (err) {
+            console.error("[journal] Ctrl+Shift+D failed:", err);
+          }
+        })();
+        return;
+      }
       if (e.key.toLowerCase() === "b") {
         e.preventDefault();
         toggleLeftSidebar();
@@ -781,7 +804,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tree, activeLeafId]);
+  }, [tree, activeLeafId, onOpenFileByPath]);
 
   // ---- Resize handle X positions (full-height overlays) ------------------
   // x = left edge of the handle, in pixels. Hidden while the sidebar
@@ -819,7 +842,13 @@ export default function App() {
           )}
         </div>
         <div className="col-body">
-          <LeftActivityStrip onOpenGraph={onOpenGraph} />
+          <LeftActivityStrip
+            view={leftView}
+            onChangeView={setLeftView}
+            leftCollapsed={leftCollapsed}
+            onToggleSidebar={toggleLeftSidebar}
+            onOpenGraph={onOpenGraph}
+          />
         </div>
       </div>
 
@@ -839,6 +868,7 @@ export default function App() {
             files={vaultNodes}
             selectedId={activeFile?.id ?? null}
             onOpenFile={openFile}
+            onOpenFileByPath={onOpenFileByPath}
             theme={theme}
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}

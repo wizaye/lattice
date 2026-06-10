@@ -17,7 +17,6 @@ import {
   IcRefresh,
   IcSearch,
   IcSortAZ,
-  IcSourceControl,
   IcSun,
 } from "../common/Icons";
 import { FileTree, type InlineEditState } from "../filetree/FileTree";
@@ -25,13 +24,27 @@ import { useVaultStore } from "../../state/vaultStore";
 import { useVcsStore } from "../../state/vcsStore";
 import { VaultPickerMenu } from "../modals/VaultPickerMenu";
 import { ChangesPanel } from "./ChangesPanel";
+import { CalendarPanel } from "../calendar/CalendarPanel";
 import "./LeftSidebar.css";
 
 // `changes` is the VCS + BYOC home (see docs/impl-v2.md §4 + §5.2).
 // It's deep-linked from the status-pill sync indicator so the same
-// surface is reachable from both the sidebar header and the bottom-
+// surface is reachable from both the activity strip and the bottom-
 // right corner of the app — single source of truth for "sync state".
-export type LeftView = "files" | "search" | "bookmarks" | "changes";
+//
+// `calendar` (v2 §1.5) hosts the unified calendar surface — events
+// (today: local; later: Outlook/Google/Apple/Cal.com) + the journal
+// CTA (v2 §2.3) so the calendar IS the daily-notes entry point.
+//
+// Both `changes` and `calendar` are entered through the L-strip
+// (see [`LeftActivityStrip`]) so the header here only carries the
+// in-vault navigation tabs (files / search / bookmarks).
+export type LeftView =
+  | "files"
+  | "search"
+  | "bookmarks"
+  | "changes"
+  | "calendar";
 
 type Props = {
   vaultName: string;
@@ -40,6 +53,13 @@ type Props = {
   files: FileNode[];
   selectedId: string | null;
   onOpenFile: (file: FileNode) => void;
+  /**
+   * Open an arbitrary vault file by absolute path.  Forwarded down
+   * to the [`CalendarPanel`] so clicking "Open today's journal" or
+   * an event's linked note lands in a tab using the same code path
+   * the file tree uses.
+   */
+  onOpenFileByPath: (path: string) => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onOpenSettings: () => void;
@@ -67,6 +87,7 @@ export function LeftSidebar({
   files,
   selectedId,
   onOpenFile,
+  onOpenFileByPath,
   theme,
   onToggleTheme,
   onOpenSettings,
@@ -120,13 +141,6 @@ export function LeftSidebar({
           onClick={() => onChangeView("bookmarks")}
         >
           <IcBookmark />
-        </button>
-        <button
-          className={`icon-btn${view === "changes" ? " active" : ""}`}
-          title="Changes (version control & sync)"
-          onClick={() => onChangeView("changes")}
-        >
-          <IcSourceControl />
         </button>
         <div className="ls-header-drag" data-tauri-drag-region />
         {isMac && (
@@ -206,6 +220,15 @@ export function LeftSidebar({
               </button>
             </>
           )}
+          {view === "calendar" && (
+            <>
+              <span className="ls-toolbar-label">Calendar</span>
+              <span className="ls-toolbar-spacer" />
+              {/* The panel itself owns the +Event button + view
+                  switcher — keeping the global sidebar toolbar
+                  uncluttered.  This row just labels the surface. */}
+            </>
+          )}
         </div>
 
         {/* Active view — keyed on `view` so React remounts the subtree
@@ -231,6 +254,9 @@ export function LeftSidebar({
               <div className="ls-empty">No bookmarks yet.</div>
             )}
             {view === "changes" && <ChangesPanel />}
+            {view === "calendar" && (
+              <CalendarPanel onOpenFileByPath={onOpenFileByPath} />
+            )}
           </div>
         </div>
       </div>

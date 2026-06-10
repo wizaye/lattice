@@ -4,41 +4,121 @@ import {
   IcGraph,
   IcGrid,
   IcKanban,
+  IcSourceControl,
   IcTerminal,
 } from "../common/Icons";
+import type { LeftView } from "./LeftSidebar";
 
 /**
  * Vertical icon column for the L-strip body.
  *
- * Only "Graph view" is wired today \u2014 the other glyphs are placeholders
- * for features that haven't shipped (Canvas pane, Calendar, Files
- * search, Terminal, Kanban). Earlier they were silently inert, which
- * read as broken buttons. We now mark them `disabled` so the cursor
- * shows the not-allowed state, the title surfaces "(Coming soon)",
- * and visually they sit dimmed instead of pretending to be active.
+ * Mirrors VS Code's activity bar: each icon is a "view" entry that
+ * either toggles the sidebar open (when clicking an *inactive* view,
+ * or when the sidebar is collapsed) or collapses the sidebar (when
+ * clicking the *currently active* view while the sidebar is already
+ * open).  Owning the routing here — instead of in the sidebar
+ * header — keeps the two columns honest: the strip is always
+ * visible, so view-switching is always one click away even when the
+ * sidebar is collapsed.
+ *
+ * Live entries today: Graph, Calendar, Source-control (changes).
+ * The other glyphs are placeholders for features that haven't
+ * shipped (Canvas pane, all-files search, Terminal, Kanban) and
+ * stay `disabled` so the cursor shows the not-allowed state and the
+ * title surfaces "(Coming soon)".
  */
-export function LeftActivityStrip({ onOpenGraph }: { onOpenGraph?: () => void }) {
-  const icons = [
-    { Icon: IcGraph, title: "Graph view", onClick: onOpenGraph },
-    { Icon: IcGrid, title: "Canvas (Coming soon)", onClick: undefined },
-    { Icon: IcCalendar, title: "Calendar (Coming soon)", onClick: undefined },
-    { Icon: IcFiles, title: "All files (Coming soon)", onClick: undefined },
-    { Icon: IcTerminal, title: "Terminal (Coming soon)", onClick: undefined },
-    { Icon: IcKanban, title: "Kanban (Coming soon)", onClick: undefined },
+type Props = {
+  /** The currently-selected sidebar view. Used to highlight the
+   *  active strip icon and to drive the toggle-collapse behaviour. */
+  view: LeftView;
+  /** Switch the sidebar to a different view. */
+  onChangeView: (v: LeftView) => void;
+  /** Whether the sidebar column is currently collapsed. */
+  leftCollapsed: boolean;
+  /** Toggle the sidebar's collapsed state. Called when re-clicking
+   *  the already-active view (collapse) or when clicking any view
+   *  while the sidebar is hidden (expand). */
+  onToggleSidebar: () => void;
+  /** Open the standalone graph window (already wired before this
+   *  refactor — not routed through the sidebar). */
+  onOpenGraph?: () => void;
+};
+
+type StripEntry =
+  | { kind: "view"; Icon: typeof IcCalendar; title: string; target: LeftView }
+  | { kind: "action"; Icon: typeof IcCalendar; title: string; onClick?: () => void }
+  | { kind: "disabled"; Icon: typeof IcCalendar; title: string };
+
+export function LeftActivityStrip({
+  view,
+  onChangeView,
+  leftCollapsed,
+  onToggleSidebar,
+  onOpenGraph,
+}: Props) {
+  // Route a view click: switch view + ensure the sidebar is open,
+  // unless we're re-clicking the active view while the sidebar is
+  // open — in which case collapse.
+  const routeView = (target: LeftView) => {
+    if (!leftCollapsed && view === target) {
+      onToggleSidebar();
+      return;
+    }
+    onChangeView(target);
+    if (leftCollapsed) onToggleSidebar();
+  };
+
+  const entries: StripEntry[] = [
+    { kind: "action", Icon: IcGraph, title: "Graph view", onClick: onOpenGraph },
+    { kind: "view", Icon: IcCalendar, title: "Calendar & daily notes", target: "calendar" },
+    {
+      kind: "view",
+      Icon: IcSourceControl,
+      title: "Changes (version control & sync)",
+      target: "changes",
+    },
+    { kind: "disabled", Icon: IcGrid, title: "Canvas (Coming soon)" },
+    { kind: "disabled", Icon: IcFiles, title: "All files (Coming soon)" },
+    { kind: "disabled", Icon: IcTerminal, title: "Terminal (Coming soon)" },
+    { kind: "disabled", Icon: IcKanban, title: "Kanban (Coming soon)" },
   ];
+
   return (
     <div className="lstrip-body">
-      {icons.map(({ Icon, title, onClick }, i) => (
-        <button
-          key={i}
-          className="icon-btn lstrip-icon"
-          title={title}
-          disabled={!onClick}
-          onClick={onClick}
-        >
-          <Icon />
-        </button>
-      ))}
+      {entries.map((entry, i) => {
+        const { Icon, title } = entry;
+        if (entry.kind === "view") {
+          const active = !leftCollapsed && view === entry.target;
+          return (
+            <button
+              key={i}
+              className={`icon-btn lstrip-icon${active ? " active" : ""}`}
+              title={title}
+              onClick={() => routeView(entry.target)}
+            >
+              <Icon />
+            </button>
+          );
+        }
+        if (entry.kind === "action") {
+          return (
+            <button
+              key={i}
+              className="icon-btn lstrip-icon"
+              title={title}
+              disabled={!entry.onClick}
+              onClick={entry.onClick}
+            >
+              <Icon />
+            </button>
+          );
+        }
+        return (
+          <button key={i} className="icon-btn lstrip-icon" title={title} disabled>
+            <Icon />
+          </button>
+        );
+      })}
     </div>
   );
 }

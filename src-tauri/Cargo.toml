@@ -176,6 +176,23 @@ pulldown-cmark = { version = "0.10", default-features = false }
 # (`TypstCompileError`) without hand-rolling Display/Error/From impls.
 thiserror = "1"
 
+# ----------------------------------------------------------------------------
+# v2 §1 (Calendar) + v2 §2 (Journaling).
+#
+# Both modules need date math: today in the user's local time zone,
+# YYYY-MM-DD parsing for journal filenames, week-range computation for
+# the calendar grid, and ISO-8601 round-tripping for the unified
+# `CalEvent`.  Pulling `chrono` once is far cheaper (and far less
+# error-prone) than hand-rolling leap-year math on top of
+# `std::time::SystemTime`.
+#
+# - `clock`  — enables `Local::now()` (transitively pulls `iana-time-zone`
+#              for cross-platform local-zone lookup).
+# - `serde`  — derives Serialize/Deserialize for `DateTime<Utc>` so the
+#              `CalEvent` IPC type round-trips through `serde_json`.
+# - default features (`std`, `wasmbind`-off, `oldtime`-off) are kept.
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+
 [dev-dependencies]
 # Scratch directories for sync/manifest tests.  Auto-cleaned on Drop.
 tempfile = "3"
