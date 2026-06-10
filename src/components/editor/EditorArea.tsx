@@ -1653,6 +1653,98 @@ function TabButton({
 // ---------------------------------------------------------------------------
 
 /**
+ * Shared flyout-menu plumbing used by every in-pane dropdown
+ * (SplitMenuButton, TabbarOptionsMenu, DocMoreMenu, GraphMoreMenu).
+ *
+ * The trigger button lives inside `.pane-tabbar` or `.pane-doc-header`,
+ * both of which use `overflow: hidden` as a defence-in-depth clip so
+ * tabs / titles never bleed past the column edge when the pane is
+ * squeezed thin. That clip also eats any `position:absolute` dropdown
+ * anchored to the wrapper, which made the Split + View-options +
+ * More menus appear to "go behind" the editor.
+ *
+ * The fix: portal the menu to `document.body` with `position:fixed`,
+ * right-anchored under the trigger button (matching the old CSS
+ * `top: 100%+4 / right: 0` placement). Outside-click / Esc / scroll
+ * close behaviour matches the existing TabContextMenu.
+ *
+ * Returns refs + state the caller wires into the trigger and the
+ * portaled menu wrapper.
+ */
+function useFlyoutMenu() {
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const openMenu = useCallback(() => {
+    const btn = buttonRef.current;
+    if (!btn) {
+      setOpen(true);
+      return;
+    }
+    const r = btn.getBoundingClientRect();
+    const margin = 6;
+    setMenuStyle({
+      position: "fixed",
+      top: r.bottom + 4,
+      // Right-anchor so the menu opens leftward from the trigger,
+      // matching the old `right: 0` CSS placement. Clamp so the
+      // menu never gets pushed off the left edge on tiny windows.
+      right: Math.max(margin, window.innerWidth - r.right),
+      zIndex: 2000,
+    });
+    setOpen(true);
+  }, []);
+
+  const closeMenu = useCallback(() => setOpen(false), []);
+  const toggleOpen = useCallback(() => {
+    if (open) closeMenu();
+    else openMenu();
+  }, [open, openMenu, closeMenu]);
+
+  // Outside-click / Esc / scroll / blur all dismiss. Scroll close
+  // mirrors TabContextMenu — the fixed-position menu would otherwise
+  // appear detached from its trigger when the user scrolls the
+  // underlying editor.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMenu();
+      }
+    };
+    const onDown = (e: PointerEvent) => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (menuRef.current?.contains(t)) return;
+      if (buttonRef.current?.contains(t)) return;
+      closeMenu();
+    };
+    const onScroll = () => closeMenu();
+    const onResize = () => closeMenu();
+    const onBlur = () => closeMenu();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [open, closeMenu]);
+
+  return { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu };
+}
+
+// ---------------------------------------------------------------------------
+
+/**
  * In-pane "Split" control — a single icon button with a small flyout
  * exposing the 4 split directions (right / down / left / up).
  *
@@ -1670,84 +1762,70 @@ function SplitMenuButton({
 }: {
   onSplit: (edge: Exclude<DropEdge, "center">) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      const el = wrapRef.current;
-      if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onDown, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onDown, true);
-    };
-  }, [open]);
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
+    useFlyoutMenu();
 
   const pick = (edge: Exclude<DropEdge, "center">) => {
-    setOpen(false);
+    closeMenu();
     onSplit(edge);
   };
 
   return (
-    <div className="split-menu-wrap" ref={wrapRef}>
+    <>
       <button
+        ref={buttonRef}
         className={`icon-btn tiny${open ? " active" : ""}`}
         title="Split pane"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
       >
         <IcSplit />
       </button>
-      {open && (
-        <div className="split-menu" role="menu">
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => pick("right")}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="split-menu tab-context-menu"
+            role="menu"
+            style={menuStyle}
           >
-            <IcArrowRight className="split-menu-icon" />
-            <span>Split right</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => pick("bottom")}
-          >
-            <IcArrowDown className="split-menu-icon" />
-            <span>Split down</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => pick("left")}
-          >
-            <IcArrowLeft className="split-menu-icon" />
-            <span>Split left</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => pick("top")}
-          >
-            <IcArrowUp className="split-menu-icon" />
-            <span>Split up</span>
-          </button>
-        </div>
-      )}
-    </div>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={() => pick("right")}
+            >
+              <IcArrowRight className="split-menu-icon" />
+              <span>Split right</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={() => pick("bottom")}
+            >
+              <IcArrowDown className="split-menu-icon" />
+              <span>Split down</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={() => pick("left")}
+            >
+              <IcArrowLeft className="split-menu-icon" />
+              <span>Split left</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={() => pick("top")}
+            >
+              <IcArrowUp className="split-menu-icon" />
+              <span>Split up</span>
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -1773,78 +1851,64 @@ function TabbarOptionsMenu({
   onCloseAll: () => void;
   onNewTab: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      const el = wrapRef.current;
-      if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onDown, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onDown, true);
-    };
-  }, [open]);
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
+    useFlyoutMenu();
 
   return (
-    <div className="split-menu-wrap" ref={wrapRef}>
+    <>
       <button
+        ref={buttonRef}
         className={`icon-btn tiny${open ? " active" : ""}`}
         title="View options"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
       >
         <IcChevronDown />
       </button>
-      {open && (
-        <div className="split-menu tabbar-menu" role="menu">
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => setOpen(false)}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="split-menu tabbar-menu tab-context-menu"
+            role="menu"
+            style={menuStyle}
           >
-            <IcStack className="split-menu-icon" />
-            <span>Stack tabs</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => {
-              setOpen(false);
-              onCloseAll();
-            }}
-          >
-            <IcCloseAll className="split-menu-icon" />
-            <span>Close all</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={() => {
-              setOpen(false);
-              onNewTab();
-            }}
-          >
-            <IcNewFile className="split-menu-icon" />
-            <span>New tab</span>
-            <IcCheck className="split-menu-trailing" />
-          </button>
-        </div>
-      )}
-    </div>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={closeMenu}
+            >
+              <IcStack className="split-menu-icon" />
+              <span>Stack tabs</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={() => {
+                closeMenu();
+                onCloseAll();
+              }}
+            >
+              <IcCloseAll className="split-menu-icon" />
+              <span>Close all</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={() => {
+                closeMenu();
+                onNewTab();
+              }}
+            >
+              <IcNewFile className="split-menu-icon" />
+              <span>New tab</span>
+              <IcCheck className="split-menu-trailing" />
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -1905,54 +1969,39 @@ function DocMoreMenu({
   onRename?: () => void;
   onDelete?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      const el = wrapRef.current;
-      if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onDown, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onDown, true);
-    };
-  }, [open]);
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
+    useFlyoutMenu();
 
   // Helper for wireable items: closes the menu then runs the action.
   const run = (fn: () => void) => () => {
-    setOpen(false);
+    closeMenu();
     fn();
   };
 
   // Helper for stub items: just closes the menu.
-  const stub = () => setOpen(false);
+  const stub = () => closeMenu();
 
   return (
-    <div className="split-menu-wrap" ref={wrapRef}>
+    <>
       <button
+        ref={buttonRef}
         className={`icon-btn tiny${open ? " active" : ""}`}
         title="More options"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
       >
         <IcMore />
       </button>
-      {open && (
-        <div className="split-menu doc-more-menu" role="menu">
-          {hasFile && (
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="split-menu doc-more-menu tab-context-menu"
+            role="menu"
+            style={menuStyle}
+          >
+            {hasFile && (
             <>
               <button role="menuitem" className="split-menu-item" onClick={stub}>
                 <IcLink className="split-menu-icon" />
@@ -2134,9 +2183,10 @@ function DocMoreMenu({
               )}
             </>
           )}
-        </div>
-      )}
-    </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -2458,81 +2508,67 @@ function GraphMoreMenu({
 }: {
   onClose?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      const el = wrapRef.current;
-      if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onDown, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onDown, true);
-    };
-  }, [open]);
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
+    useFlyoutMenu();
 
   const run = (fn?: () => void) => () => {
-    setOpen(false);
+    closeMenu();
     fn?.();
   };
-  const stub = () => setOpen(false);
+  const stub = () => closeMenu();
 
   return (
-    <div className="split-menu-wrap" ref={wrapRef}>
+    <>
       <button
+        ref={buttonRef}
         className={`icon-btn tiny${open ? " active" : ""}`}
         title="More options"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
       >
         <IcMore />
       </button>
-      {open && (
-        <div className="split-menu doc-more-menu" role="menu">
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={stub}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="split-menu doc-more-menu tab-context-menu"
+            role="menu"
+            style={menuStyle}
           >
-            <IcCamera className="split-menu-icon" />
-            <span>Copy screenshot</span>
-          </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={stub}
-          >
-            <IcBookmark className="split-menu-icon" />
-            <span>Bookmark…</span>
-          </button>
-          {onClose && (
-            <>
-              <div className="split-menu-divider" role="separator" />
-              <button
-                role="menuitem"
-                className="split-menu-item"
-                onClick={run(onClose)}
-              >
-                <IcClose className="split-menu-icon" />
-                <span>Close</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={stub}
+            >
+              <IcCamera className="split-menu-icon" />
+              <span>Copy screenshot</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={stub}
+            >
+              <IcBookmark className="split-menu-icon" />
+              <span>Bookmark…</span>
+            </button>
+            {onClose && (
+              <>
+                <div className="split-menu-divider" role="separator" />
+                <button
+                  role="menuitem"
+                  className="split-menu-item"
+                  onClick={run(onClose)}
+                >
+                  <IcClose className="split-menu-icon" />
+                  <span>Close</span>
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
