@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { getVaultGraph, VaultGraphData } from "../../lib/tauriApi";
 import { useVaultStore } from "../../state/vaultStore";
 import { useEditorStore } from "../../state/editorStore";
-import type { FileNode } from "../../state/types";
 import {
   IcChevronRight,
   IcClose,
@@ -51,85 +50,24 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
 
     let isCancelled = false;
 
-    // Build graph data from the in-memory mock vault. Used when the
-    // app boots with no real folder open (vaultPath === "__mock__").
-    // Parses [[wikilinks]] from markdown content to derive edges.
-    const buildMockGraph = (): { nodes: any[]; links: any[] } => {
-      const files: FileNode[] = [];
-      flatVault.forEach((n) => {
-        // Skip folders and the synthetic Graph entry itself.
-        if (n.kind === "folder" || n.kind === "graph") return;
-        files.push(n);
-      });
-      // Index by lowercase basename (without .md/.canvas) for
-      // wikilink resolution.
-      const byName = new Map<string, FileNode>();
-      files.forEach((f) => {
-        const stem = f.name
-          .replace(/\.md$/i, "")
-          .replace(/\.canvas$/i, "")
-          .toLowerCase();
-        byName.set(stem, f);
-      });
-      const wikilinkRe = /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g;
-      const edgeSet = new Set<string>();
-      const edges: { source: string; target: string }[] = [];
-      files.forEach((f) => {
-        const body = fileContents[f.id] ?? f.content ?? "";
-        if (!body || typeof body !== "string") return;
-        let m: RegExpExecArray | null;
-        while ((m = wikilinkRe.exec(body))) {
-          const target = byName.get(m[1].trim().toLowerCase());
-          if (!target || target.id === f.id) continue;
-          const key = `${f.id}\u0000${target.id}`;
-          if (edgeSet.has(key)) continue;
-          edgeSet.add(key);
-          edges.push({ source: f.id, target: target.id });
-        }
-      });
-      const nodes = files.map((f) => {
-        const degree = edges.filter(
-          (e) => e.source === f.id || e.target === f.id,
-        ).length;
-        return {
-          id: f.id,
-          name: f.name.replace(/\.md$/i, "").replace(/\.canvas$/i, ""),
-          path: f.id,
-          val: 1 + degree,
-        };
-      });
-      return { nodes, links: edges };
-    };
-
     const fetchGraph = async () => {
       try {
-        let nodes: any[];
-        let links: any[];
+        const data: VaultGraphData = await getVaultGraph(vaultPath);
+        if (isCancelled) return;
 
-        if (vaultPath === "__mock__") {
-          // No real folder is open. Derive the graph from the
-          // hard-coded mock vault held in memory \u2014 no IPC call.
-          const built = buildMockGraph();
-          nodes = built.nodes;
-          links = built.links;
-        } else {
-          const data: VaultGraphData = await getVaultGraph(vaultPath);
-          if (isCancelled) return;
+        const nodes = data.nodes.map((n) => ({
+          id: n.id,
+          name: n.label,
+          path: n.path,
+          val: 1 + data.edges.filter(
+            (e) => e.target === n.id || e.source === n.id,
+          ).length,
+        }));
 
-          nodes = data.nodes.map((n) => ({
-            id: n.id,
-            name: n.label,
-            path: n.path,
-            val: 1 + data.edges.filter(
-              (e) => e.target === n.id || e.source === n.id,
-            ).length,
-          }));
-
-          const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-          links = data.edges
-            .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
-            .map((e) => ({ source: e.source, target: e.target }));
-        }
+        const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+        const links = data.edges
+          .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
+          .map((e) => ({ source: e.source, target: e.target }));
 
         if (isCancelled) return;
         setGraphData({ nodes, links });

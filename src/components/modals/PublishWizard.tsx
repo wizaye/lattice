@@ -27,7 +27,7 @@ type Props = {
   onClose: () => void;
 };
 
-const MOCK_VAULT = "__mock__";
+
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5;
 const STEPS: { label: string }[] = [
@@ -84,7 +84,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   const previewStopAction = usePublishStore((s) => s.previewStop);
   const setThemeAction = usePublishStore((s) => s.setTheme);
 
-  const isMockVault = vaultPath === MOCK_VAULT || !vaultPath;
+
 
   const [step, setStep] = useState<Step>(0);
   const [probing, setProbing] = useState(false);
@@ -136,12 +136,12 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     refreshProbe()
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setProbing(false));
-    if (!isMockVault && vaultPath) {
+    if (vaultPath) {
       refreshStatus(vaultPath).catch(() => {
         /* per-vault row error caught into row.lastError by the store */
       });
     }
-  }, [open, vaultPath, isMockVault, refreshRegistries, refreshProbe, refreshStatus]);
+  }, [open, vaultPath, refreshRegistries, refreshProbe, refreshStatus]);
 
   // ── Default-select first ready/template once they arrive ─────────────
   useEffect(() => {
@@ -179,7 +179,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   }, [refreshProbe]);
 
   const canAdvance = useMemo(() => {
-    if (isMockVault) return false;
+    if (!vaultPath) return false;
     if (step === 0) return probe?.ok === true;
     if (step === 1) return hostId !== null;
     if (step === 2) return templateId !== null;
@@ -190,7 +190,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     // pressing it and the saved-on-disk theme stays untouched).
     if (step === 4) return row?.exists === true;
     return false;
-  }, [step, probe, hostId, templateId, isMockVault, row]);
+  }, [step, probe, hostId, templateId, vaultPath, row]);
 
   const onNext = useCallback(() => {
     if (!canAdvance) return;
@@ -204,7 +204,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
   }, []);
 
   const onConnect = useCallback(async () => {
-    if (isMockVault || !vaultPath || !hostId || !templateId) return;
+    if (!vaultPath || !hostId || !templateId) return;
     setConnecting(true);
     setError(null);
     try {
@@ -220,10 +220,10 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     } finally {
       setConnecting(false);
     }
-  }, [isMockVault, vaultPath, hostId, templateId, refreshStatus]);
+  }, [vaultPath, hostId, templateId, refreshStatus]);
 
   const onApplyTheme = useCallback(async () => {
-    if (!vaultPath || isMockVault) return;
+    if (!vaultPath) return;
     setApplyingTheme(true);
     setError(null);
     try {
@@ -234,7 +234,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
     } finally {
       setApplyingTheme(false);
     }
-  }, [vaultPath, isMockVault, setThemeAction, theme]);
+  }, [vaultPath, setThemeAction, theme]);
 
   const onBuild = useCallback(async () => {
     if (!vaultPath) return;
@@ -294,9 +294,9 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
         <div className="pw-header">
           <div className="pw-title">Set up publishing</div>
           <div className="pw-subtitle">
-            {isMockVault
-              ? "Open a real vault folder to configure publishing."
-              : `Publish “${vaultName}” to a static host using a bundled Quartz template.`}
+            {!vaultPath
+              ? "Open a vault folder to configure publishing."
+              : `Publish "${vaultName}" to a static host using a bundled Quartz template.`}
           </div>
         </div>
 
@@ -322,10 +322,10 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
         </div>
 
         <div className="pw-body">
-          {isMockVault && (
+          {!vaultPath && (
             <div className="pw-banner">
               <span>
-                <strong>Mock vault.</strong> Open a real folder via the vault
+                <strong>No vault open.</strong> Open a folder via the vault
                 picker in the bottom-left to set up publishing.
               </span>
             </div>
@@ -500,7 +500,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                     onChange={(e) =>
                       setLocalTheme((t) => ({ ...t, pageTitle: e.target.value }))
                     }
-                    disabled={applyingTheme || isMockVault}
+                    disabled={applyingTheme || !vaultPath}
                   />
                 </label>
 
@@ -514,7 +514,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                     onChange={(e) =>
                       setLocalTheme((t) => ({ ...t, pageTitleSuffix: e.target.value }))
                     }
-                    disabled={applyingTheme || isMockVault}
+                    disabled={applyingTheme || !vaultPath}
                   />
                 </label>
 
@@ -532,7 +532,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                             setLocalTheme((t) => ({ ...t, palette: p.id }))
                           }
                           aria-pressed={active}
-                          disabled={applyingTheme || isMockVault}
+                          disabled={applyingTheme || !vaultPath}
                           title={`${p.label} (${p.secondary} / ${p.tertiary})`}
                         >
                           <span className="pw-swatch-dots">
@@ -560,7 +560,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                     onChange={(e) =>
                       setLocalTheme((t) => ({ ...t, typography: e.target.value }))
                     }
-                    disabled={applyingTheme || isMockVault}
+                    disabled={applyingTheme || !vaultPath}
                   >
                     {TYPOGRAPHY_PRESETS.map((t) => (
                       <option key={t.id} value={t.id}>
@@ -577,7 +577,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                     onChange={(e) =>
                       setLocalTheme((t) => ({ ...t, popovers: e.target.checked }))
                     }
-                    disabled={applyingTheme || isMockVault}
+                    disabled={applyingTheme || !vaultPath}
                   />
                   <span>
                     <strong>Hover-card popovers</strong>
@@ -595,7 +595,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                     onChange={(e) =>
                       setLocalTheme((t) => ({ ...t, spa: e.target.checked }))
                     }
-                    disabled={applyingTheme || isMockVault}
+                    disabled={applyingTheme || !vaultPath}
                   />
                   <span>
                     <strong>Single-page navigation</strong>
@@ -613,7 +613,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                     type="button"
                     className="pw-btn primary"
                     onClick={onApplyTheme}
-                    disabled={applyingTheme || isMockVault}
+                    disabled={applyingTheme || !vaultPath}
                   >
                     {applyingTheme ? "Saving…" : "Apply customisations"}
                   </button>
@@ -649,7 +649,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                       type="button"
                       className="pw-btn primary"
                       onClick={onBuild}
-                      disabled={!!row?.busy || isMockVault}
+                      disabled={!!row?.busy || !vaultPath}
                     >
                       {row?.busy ? "Working…" : "Build"}
                     </button>
@@ -675,7 +675,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                         type="button"
                         className="pw-btn primary"
                         onClick={onPreview}
-                        disabled={!!row?.busy || isMockVault}
+                        disabled={!!row?.busy || !vaultPath}
                       >
                         {row?.busy ? "Working…" : "Start preview"}
                       </button>
@@ -740,7 +740,7 @@ export function PublishWizard({ open, vaultPath, vaultName, onClose }: Props) {
                   type="button"
                   className="pw-btn primary"
                   onClick={onConnect}
-                  disabled={connecting || isMockVault || !hostId || !templateId}
+                  disabled={connecting || !vaultPath || !hostId || !templateId}
                 >
                   {connecting ? "Connecting…" : row?.exists ? "Reconnect" : "Connect"}
                 </button>

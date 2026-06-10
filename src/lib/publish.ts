@@ -120,12 +120,8 @@ export interface PublishStatus {
   theme: QuartzTheme | null;
 }
 
-// ─── Mock-vault gate ─────────────────────────────────────────────────────
-
-const MOCK_VAULT = "__mock__";
-
 const isRealVault = (v: string | null | undefined): v is string =>
-  typeof v === "string" && v.length > 0 && v !== MOCK_VAULT;
+  typeof v === "string" && v.length > 0;
 
 // ─── Real commands (phase D1) ────────────────────────────────────────────
 
@@ -197,13 +193,13 @@ export async function publishInit(
   hostId: HostId,
   templateId: string,
 ): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot initialise publishing on the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_init", { vault, hostId, templateId });
 }
 
 /** **Phase D2 — currently errors out.** */
 export async function publishAuthStart(vault: string, hostId: HostId): Promise<string> {
-  if (!isRealVault(vault)) throw new Error("Cannot connect a publishing host on the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string>("publish_auth_start", { vault, hostId });
 }
 
@@ -213,7 +209,7 @@ export async function publishAuthComplete(
   hostId: HostId,
   codeOrToken: string,
 ): Promise<string[]> {
-  if (!isRealVault(vault)) throw new Error("Cannot complete host auth on the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string[]>("publish_auth_complete", { vault, hostId, codeOrToken });
 }
 
@@ -223,7 +219,7 @@ export async function publishAuthPick(
   hostId: HostId,
   projectIdOrNewName: string,
 ): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot pick a host project for the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_auth_pick", { vault, hostId, projectIdOrNewName });
 }
 
@@ -234,48 +230,48 @@ export async function publishAuthPick(
  * no network, no npm).  Rejected on the mock vault.
  */
 export async function publishSetTheme(vault: string, theme: QuartzTheme): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot customise the mock vault site.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_set_theme", { vault, theme });
 }
 
 /** **Phase D3 — currently errors out.**  Returns the path to the build output. */
 export async function publishBuild(vault: string): Promise<string> {
-  if (!isRealVault(vault)) throw new Error("Cannot build the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string>("publish_build", { vault });
 }
 
 /** **Phase D4 — currently errors out.**  Returns the preview URL. */
 export async function publishPreview(vault: string): Promise<string> {
-  if (!isRealVault(vault)) throw new Error("Cannot preview the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string>("publish_preview", { vault });
 }
 
 /** **Phase D4 — currently errors out.**  Idempotent once real. */
 export async function publishPreviewStop(vault: string): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot stop preview for the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_preview_stop", { vault });
 }
 
 /** **Phase D5 — currently errors out.** */
 export async function publishDeploy(vault: string): Promise<string> {
-  if (!isRealVault(vault)) throw new Error("Cannot deploy the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   return invoke<string>("publish_deploy", { vault });
 }
 
 /** **Phase D2 — currently errors out.**  Wipes host tokens from the keychain. */
 export async function publishDisconnect(vault: string, hostId: HostId): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot disconnect a host on the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_disconnect", { vault, hostId });
 }
 
 /** **Phase D2 — currently errors out.** */
 export async function publishOpenDashboard(vault: string): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot open dashboard for the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_open_dashboard", { vault });
 }
 
 /** **Phase D5 — currently errors out.** */
 export async function publishOpenLive(vault: string): Promise<void> {
-  if (!isRealVault(vault)) throw new Error("Cannot open live site for the mock vault.");
+  if (!isRealVault(vault)) throw new Error("Vault path is empty.");
   await invoke("publish_open_live", { vault });
 }

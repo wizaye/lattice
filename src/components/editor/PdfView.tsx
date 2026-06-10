@@ -11,7 +11,6 @@ import * as pdfjs from "pdfjs-dist";
 // via the bundler's ambient declarations.
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { readFileBytes } from "../../lib/tauriApi";
-import { useVaultStore } from "../../state/vaultStore";
 
 // Register the worker URL ONCE per module load.  pdfjs internally
 // short-circuits if `workerSrc` is already set, so re-importing this
@@ -20,13 +19,12 @@ import { useVaultStore } from "../../state/vaultStore";
   .GlobalWorkerOptions.workerSrc = pdfWorkerUrl as string;
 
 type Props = {
-  /** Absolute filesystem path OR mock-vault id. */
+  /** Absolute filesystem path to the PDF. */
   filePath: string;
   /**
-   * Base64-encoded PDF body for mock-vault entries.  When provided,
-   * we skip the Tauri IPC and decode the base64 directly.  Real
-   * vaults set this to `undefined` and we fetch via
-   * `readFileBytes(filePath)`.
+   * Optional base64-encoded PDF body. When provided, we skip the
+   * Tauri IPC and decode the base64 directly. Real vaults set this
+   * to `undefined` and we fetch via `readFileBytes(filePath)`.
    */
   base64?: string;
   /** Human-readable name shown in the toolbar. */
@@ -97,9 +95,6 @@ export function PdfView({ filePath, base64, fileName }: Props) {
 
   const zoom = ZOOM_LEVELS[zoomIdx];
 
-  const vaultPath = useVaultStore((s) => s.vaultPath);
-  const isMock = vaultPath === "__mock__";
-
   // ── Load the document once per filePath ─────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -111,21 +106,13 @@ export function PdfView({ filePath, base64, fileName }: Props) {
 
     const load = async () => {
       try {
-        // Mock vault: decode the embedded base64.  Real vault: round-
-        // trip via the new `read_file_bytes` IPC.  Either way we end
-        // up with a `Uint8Array` that pdfjs ingests directly.
         const data = base64
           ? base64ToBytes(base64)
-          : isMock
-            ? new Uint8Array() // mock with no base64 → empty
-            : await readFileBytes(filePath);
+          : await readFileBytes(filePath);
 
         if (cancelled) return;
         if (data.length === 0) {
-          setError(
-            "This PDF has no embedded preview in the mock vault. " +
-              "Open a real folder to view PDFs from disk.",
-          );
+          setError("This PDF file appears to be empty.");
           setLoading(false);
           return;
         }
@@ -169,7 +156,7 @@ export function PdfView({ filePath, base64, fileName }: Props) {
       }
       renderTasksRef.current = [];
     };
-  }, [filePath, base64, isMock]);
+  }, [filePath, base64]);
 
   // ── Render every page whenever the doc or zoom changes ──────────────
   useEffect(() => {

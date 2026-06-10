@@ -18,8 +18,6 @@
  *     unmounts via `clearDeviceCode()` on connect resolution.
  *   - Errors are scoped per (vault, provider) — a Drive auth failure
  *     mustn't blank a GitHub success chip.
- *   - The mock vault sentinel (`"__mock__"`) is rejected before any
- *     IPC; same pattern as `vcsStore`.  See its block comment for why.
  */
 import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -74,87 +72,8 @@ const EMPTY_ROW: ProviderRowState = {
 const rowKey = (vault: string, provider: ProviderId): string =>
   `${vault}::${provider}`;
 
-// The mock vault uses the sentinel path "__mock__" which has no
-// on-disk presence — real BYOC IPC would fail with "vault path is
-// not a directory".  We still want the demo vault's Sync section to
-// be a fully interactive UI walkthrough though, so we route mock
-// vault calls through a simulated in-process flow (see the MOCK_*
-// constants and the per-action branches below).  `isRealVault`
-// gates the actual Tauri IPC path.
-const MOCK_VAULT = "__mock__";
 const isRealVault = (v: string | null | undefined): v is string =>
-  typeof v === "string" && v.length > 0 && v !== MOCK_VAULT;
-const isMockVault = (v: string | null | undefined): v is string =>
-  v === MOCK_VAULT;
-
-// ── Mock BYOC fixtures ───────────────────────────────────────────────
-//
-// Pure UI-only fixtures used when `vault === MOCK_VAULT`.  No network,
-// no disk, no Tauri IPC.  Mirrors what the real Rust side returns for
-// github + gdrive so the demo state and the real state are visually
-// indistinguishable.  Updating these does NOT require a Rust rebuild.
-const MOCK_PROVIDERS: ProviderInfo[] = [
-  {
-    id: "github",
-    label: "GitHub",
-    configured: true,
-    supportsPull: true,
-    hasBrowsableRemote: true,
-    note: null,
-  },
-  {
-    id: "gdrive",
-    label: "Google Drive",
-    configured: true,
-    supportsPull: false,
-    hasBrowsableRemote: false,
-    note: "Push-only in this build — pull lands next slice.",
-  },
-];
-
-const MOCK_ACCOUNTS: Record<ProviderId, AccountInfo> = {
-  github: {
-    displayName: "demo-user",
-    accountEmail: "demo@lattice.app",
-    remoteLabel: "github.com/demo-user/lattice-demo",
-  },
-  gdrive: {
-    displayName: "Demo User",
-    accountEmail: "demo@lattice.app",
-    remoteLabel: "appDataFolder (sandboxed)",
-  },
-};
-
-const MOCK_REMOTE_URLS: Record<ProviderId, string | null> = {
-  github: "https://github.com/demo-user/lattice-demo",
-  // Drive's appDataFolder is sandboxed — no public URL even in real mode.
-  gdrive: null,
-};
-
-// Backend matches the Windows DPAPI shape so the menu copy in
-// ChangesPanel renders identically.  `path` is null because there's
-// no real encrypted blob on disk for the demo state.
-const MOCK_STORAGE: Record<ProviderId, StorageDescriptor> = {
-  github: {
-    backend: "dpapi-file",
-    path: null,
-    directory: null,
-    label: "lattice/byoc/github (demo)",
-  },
-  gdrive: {
-    backend: "dpapi-file",
-    path: null,
-    directory: null,
-    label: "lattice/byoc/gdrive (demo)",
-  },
-};
-
-// Short enough to feel snappy, long enough to make the busy spinner
-// visible so users see "something happened".
-const MOCK_LATENCY_MS = 600;
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+  typeof v === "string" && v.length > 0;
 
 interface BYOCState {
   /** Static provider catalogue, loaded once at boot. */
@@ -295,28 +214,15 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
         const providers = await byocListProviders();
         set({ providers, providersLoading: false });
       } catch (err) {
-        // Non-fatal.  Two scenarios land here:
-        //   1. Pure-browser dev mode (no Tauri bridge) — `invoke` is
-        //      undefined.  Seed `MOCK_PROVIDERS` so the demo vault's
-        //      Sync section still renders correctly with per-provider
-        //      capability flags.  Real vaults aren't usable here
-        //      anyway (no Rust IPC for git ops either).
-        //   2. Tauri context but the IPC errored.  Same fallback —
-        //      the panel still renders with the hard-coded labels
-        //      and the user can retry.
         console.warn(
-          "byoc_list_providers failed — falling back to mock provider metadata:",
+          "byoc_list_providers failed:",
           err,
         );
-        set({ providers: MOCK_PROVIDERS, providersLoading: false });
+        set({ providers: [], providersLoading: false });
       }
     },
 
     refresh: async (vault, provider) => {
-      // Mock vault: state already lives in the rows map (mutated by
-      // mock connect / sync calls).  Nothing to fetch from a remote
-      // source.
-      if (isMockVault(vault)) return;
       if (!isRealVault(vault)) return;
       const targets: ProviderId[] = provider
         ? [provider]
@@ -333,10 +239,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
               lastError: s.lastError,
             });
           } catch (err) {
-            // Status probes are cheap — a transient failure shouldn't
-            // populate `lastError` (we'd stomp a real auth error from
-            // the previous push/pull the user is still reading).  Log
-            // and move on.
             console.warn(`byoc_status(${p}) failed:`, err);
           }
         }),
@@ -344,22 +246,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     connect: async (vault, provider) => {
-      if (isMockVault(vault)) {
-        // Simulated OAuth dance — no device-code modal so the demo
-        // stays one-click.  Busy spinner visible for MOCK_LATENCY_MS
-        // so the UX matches the real flow's "connecting…" beat.
-        patchRow(vault, provider, { busy: true, lastError: null });
-        await sleep(MOCK_LATENCY_MS);
-        const acct = MOCK_ACCOUNTS[provider];
-        patchRow(vault, provider, {
-          busy: false,
-          connected: true,
-          accountLabel: acct.displayName,
-          remoteLabel: acct.remoteLabel,
-          lastError: null,
-        });
-        return acct;
-      }
       if (!isRealVault(vault)) return null;
       patchRow(vault, provider, { busy: true, lastError: null });
       try {
@@ -371,7 +257,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
           remoteLabel: acct.remoteLabel,
           lastError: null,
         });
-        // Connect resolved → device-code modal is no longer useful.
         set({ pendingDeviceCode: null });
         return acct;
       } catch (err) {
@@ -386,19 +271,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     disconnect: async (vault, provider) => {
-      if (isMockVault(vault)) {
-        patchRow(vault, provider, { busy: true });
-        await sleep(200);
-        patchRow(vault, provider, {
-          busy: false,
-          connected: false,
-          accountLabel: null,
-          remoteLabel: null,
-          lastSyncAt: null,
-          lastError: null,
-        });
-        return;
-      }
       if (!isRealVault(vault)) return;
       patchRow(vault, provider, { busy: true });
       try {
@@ -418,32 +290,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     push: async (vault, provider) => {
-      if (isMockVault(vault)) {
-        const row = get().rows[rowKey(vault, provider)];
-        if (!row?.connected) {
-          // Mirror the real Rust side's "no sync manifest — connect first".
-          patchRow(vault, provider, {
-            lastError: "Connect first to enable push.",
-          });
-          return null;
-        }
-        patchRow(vault, provider, { busy: true, lastError: null });
-        await sleep(MOCK_LATENCY_MS);
-        patchRow(vault, provider, {
-          busy: false,
-          lastSyncAt: Math.floor(Date.now() / 1000),
-          lastError: null,
-        });
-        // Numbers are illustrative — the demo vault has ~7 markdown
-        // files plus the sample canvas; round up to mimic a real
-        // git push of small objects.
-        return {
-          uploadedObjects: 12,
-          head: "abc1234",
-          branch: "main",
-          message: "Pushed 12 objects (demo)",
-        };
-      }
       if (!isRealVault(vault)) return null;
       patchRow(vault, provider, { busy: true, lastError: null });
       try {
@@ -462,37 +308,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     pull: async (vault, provider) => {
-      if (isMockVault(vault)) {
-        if (provider === "gdrive") {
-          // Match the real Drive adapter — push-only in slice B.
-          patchRow(vault, provider, {
-            lastError:
-              "Pull not supported by this provider yet — push-only sync",
-          });
-          return null;
-        }
-        const row = get().rows[rowKey(vault, provider)];
-        if (!row?.connected) {
-          patchRow(vault, provider, {
-            lastError: "Connect first to enable pull.",
-          });
-          return null;
-        }
-        patchRow(vault, provider, { busy: true, lastError: null });
-        await sleep(MOCK_LATENCY_MS);
-        patchRow(vault, provider, {
-          busy: false,
-          lastSyncAt: Math.floor(Date.now() / 1000),
-          lastError: null,
-        });
-        return {
-          downloadedObjects: 0,
-          head: "abc1234",
-          branch: "main",
-          conflicts: [],
-          message: "Already up to date (demo)",
-        };
-      }
       if (!isRealVault(vault)) return null;
       patchRow(vault, provider, { busy: true, lastError: null });
       try {
@@ -515,23 +330,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     syncNow: async (vault, provider) => {
-      if (isMockVault(vault)) {
-        const row = get().rows[rowKey(vault, provider)];
-        if (!row?.connected) {
-          patchRow(vault, provider, {
-            lastError: "Connect first to enable sync.",
-          });
-          return;
-        }
-        patchRow(vault, provider, { busy: true, lastError: null });
-        await sleep(MOCK_LATENCY_MS);
-        patchRow(vault, provider, {
-          busy: false,
-          lastSyncAt: Math.floor(Date.now() / 1000),
-          lastError: null,
-        });
-        return;
-      }
       if (!isRealVault(vault)) return;
       patchRow(vault, provider, { busy: true, lastError: null });
       try {
@@ -550,7 +348,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     clearDeviceCode: () => set({ pendingDeviceCode: null }),
 
     storageInfo: async (vault, provider) => {
-      if (isMockVault(vault)) return MOCK_STORAGE[provider];
       if (!isRealVault(vault)) return null;
       try {
         return await byocStorageInfo(vault, provider);
@@ -561,11 +358,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     remoteUrl: async (vault, provider) => {
-      if (isMockVault(vault)) {
-        const row = get().rows[rowKey(vault, provider)];
-        if (!row?.connected) return null;
-        return MOCK_REMOTE_URLS[provider];
-      }
       if (!isRealVault(vault)) return null;
       try {
         return await byocRemoteUrl(vault, provider);
@@ -576,9 +368,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     manifestPath: async (vault, provider) => {
-      // No on-disk manifest for the demo vault — UI hides the
-      // "Reveal local manifest" item when this returns null.
-      if (isMockVault(vault)) return null;
       if (!isRealVault(vault)) return null;
       try {
         return await byocManifestPath(vault, provider);
@@ -589,10 +378,6 @@ export const useBYOCStore = create<BYOCState>((set, get) => {
     },
 
     rowFor: (vault, provider) => {
-      // Mock vault uses the same rows map keyed by `__mock__::<provider>`.
-      if (isMockVault(vault)) {
-        return get().rows[rowKey(vault, provider)] ?? EMPTY_ROW;
-      }
       if (!isRealVault(vault)) return EMPTY_ROW;
       return get().rows[rowKey(vault, provider)] ?? EMPTY_ROW;
     },

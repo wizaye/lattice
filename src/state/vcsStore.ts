@@ -185,11 +185,8 @@ const REFRESH_DEBOUNCE_MS = 250;
 let debounceHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingVault: string | null = null;
 
-// The mock vault uses the sentinel path "__mock__" which has no
-// on-disk presence — VCS IPC would (and did) fail with ERROR_DIRECTORY.
-// Treat it as "no vault" everywhere so the sentinel never reaches Rust.
 const isRealVault = (v: string | null | undefined): v is string =>
-  typeof v === "string" && v.length > 0 && v !== "__mock__";
+  typeof v === "string" && v.length > 0;
 
 export const useVcsStore = create<VcsState>((set, get) => {
   /**

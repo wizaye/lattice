@@ -75,7 +75,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       // top level). The debounce in vcsStore swallows the double
       // refresh that happens right after vault-open (App.tsx also
       // kicks one off when vaultPath changes).
-      if (vaultPath !== "__mock__") {
+      if (vaultPath) {
         const { useVcsStore } = await import("./vcsStore");
         void useVcsStore.getState().refresh(vaultPath);
       }

@@ -35,7 +35,7 @@ import "./NewPaperModal.css";
  */
 type Props = {
   open: boolean;
-  /** Absolute vault path or `null` / `"__mock__"` (disabled state). */
+  /** Absolute vault path or `null` (disabled state). */
   vaultPath: string | null;
   vaultName: string;
   onClose: () => void;
@@ -56,7 +56,7 @@ type Props = {
   activeMarkdown?: { name: string; body: string } | null;
 };
 
-const MOCK_VAULT = "__mock__";
+
 
 const blankAuthor = (): NewPaperAuthor => ({ name: "" });
 
@@ -112,7 +112,7 @@ export function NewPaperModal({
   const compile = usePaperStore((s) => s.compile);
   const emitBundle = usePaperStore((s) => s.emitBundle);
 
-  const isMockVault = vaultPath === MOCK_VAULT || !vaultPath;
+  const isMockVault = !vaultPath;
 
   // ── Form state ────────────────────────────────────────────────────────
   const [title, setTitle] = useState("");
@@ -578,9 +578,9 @@ export function NewPaperModal({
         <div className="np-header">
           <div className="np-title">New paper</div>
           <div className="np-subtitle">
-            {isMockVault
-              ? "Open a real vault folder to scaffold a paper."
-              : `Scaffold a paper folder in “${vaultName}” using a built-in template.`}
+            {!vaultPath
+              ? "Open a vault folder to scaffold a paper."
+              : `Scaffold a paper folder in "${vaultName}" using a built-in template.`}
           </div>
         </div>
 
@@ -732,7 +732,7 @@ export function NewPaperModal({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="On the Asymptotic Behaviour of Lattice Vaults"
-                  disabled={isMockVault || submitting}
+                  disabled={submitting}
                   autoFocus
                 />
               </div>
@@ -745,7 +745,7 @@ export function NewPaperModal({
                   value={parentRel}
                   onChange={(e) => setParentRel(e.target.value)}
                   placeholder="research/papers"
-                  disabled={isMockVault || submitting}
+                  disabled={submitting}
                 />
                 <div className="np-hint">
                   Leave empty to scaffold at the vault root. A subfolder is created
@@ -763,14 +763,14 @@ export function NewPaperModal({
                         value={a.name}
                         onChange={(e) => updateAuthor(i, { name: e.target.value })}
                         placeholder="Name"
-                        disabled={isMockVault || submitting}
+                        disabled={submitting}
                       />
                       <input
                         type="text"
                         value={a.email ?? ""}
                         onChange={(e) => updateAuthor(i, { email: e.target.value })}
                         placeholder="email@example.com"
-                        disabled={isMockVault || submitting}
+                        disabled={submitting}
                       />
                       <button
                         type="button"
@@ -778,7 +778,7 @@ export function NewPaperModal({
                         title="Remove author"
                         aria-label="Remove author"
                         onClick={() => removeAuthor(i)}
-                        disabled={isMockVault || submitting || authors.length === 1}
+                        disabled={submitting || authors.length === 1}
                       >
                         <IcMinus />
                       </button>
@@ -789,7 +789,7 @@ export function NewPaperModal({
                   type="button"
                   className="np-author-add"
                   onClick={addAuthor}
-                  disabled={isMockVault || submitting}
+                  disabled={submitting}
                 >
                   <IcPlus /> Add author
                 </button>
@@ -829,7 +829,7 @@ export function NewPaperModal({
                         opt.value === outputMode ? " active" : ""
                       }`}
                       onClick={() => setOutputMode(opt.value)}
-                      disabled={isMockVault || submitting}
+                      disabled={submitting}
                       data-testid={`np-output-${opt.value}`}
                       title={opt.hint}
                     >

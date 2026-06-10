@@ -146,7 +146,7 @@ export function ChangesPanel() {
   // the per-vault gate so the auto-fetch useEffect would also
   // re-fire on the next render \u2014 belt + braces.
   const onHistoryRetry = () => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     historyFetchedFor.current = null;
     void refreshHistory(vaultPath, 100);
     void refreshGraph(vaultPath, 200);
@@ -200,7 +200,7 @@ export function ChangesPanel() {
 
   useEffect(() => {
     if (!initialised) return;
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     void byocRefresh(vaultPath);
   }, [vaultPath, initialised, byocRefresh]);
 
@@ -226,7 +226,7 @@ export function ChangesPanel() {
   // re-hit the IPC on every render — exactly the same once-per-vault
   // semantics the toggle handler enforces.
   useEffect(() => {
-    if (!vaultPath || vaultPath === "__mock__") {
+    if (!vaultPath) {
       // Vault closed / mock vault — clear the per-vault gates so
       // re-opening the SAME vault path later re-fetches (otherwise
       // the ref would still point at that path and the next mount
@@ -249,7 +249,7 @@ export function ChangesPanel() {
   // single `git for-each-ref` call — cheap enough to fire eagerly
   // alongside the history warm-up.
   useEffect(() => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     if (!initialised) return;
     if (branchesFetchedFor.current === vaultPath) return;
     branchesFetchedFor.current = vaultPath;
@@ -260,7 +260,7 @@ export function ChangesPanel() {
   // ONCE per vault so the Enable CTA can show "Enable & commit N files"
   // without us walking the worktree on every status refresh.
   useEffect(() => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     if (initialised) return;
     if (untrackedPreviewCount !== null) return;
     void refreshUntrackedPreview(vaultPath);
@@ -285,12 +285,12 @@ export function ChangesPanel() {
   // ── Handlers ────────────────────────────────────────────────────────
 
   const onInit = async () => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     await initRepo(vaultPath);
   };
 
   const onCommit = async () => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     if (!initialised) return;
     if (staged.length === 0) return;
     if (!message.trim()) return;
@@ -304,7 +304,7 @@ export function ChangesPanel() {
    * snapshot what's there.  Mirrors `git commit -a` + add untracked.
    */
   const onCommitAll = async () => {
-    if (!vaultPath || vaultPath === "__mock__") return;
+    if (!vaultPath) return;
     if (!initialised) return;
     if (totalCount === 0) return;
     if (!message.trim()) return;
@@ -445,10 +445,6 @@ export function ChangesPanel() {
     void refreshBranches(vaultPath);
   };
 
-  // The mock vault uses the sentinel path "__mock__" which has no
-  // real disk location — VCS commands would fail.  Render a friendly
-  // notice instead of empty checkboxes.
-  const isMockVault = vaultPath === "__mock__";
   const anyPending = committing || staging || initializing;
 
   return (
@@ -467,10 +463,10 @@ export function ChangesPanel() {
         </summary>
 
         <div className="cp-section-body">
-          {isMockVault ? (
+          {!vaultPath ? (
             <div className="cp-empty">
               <IcGitCommit />
-              <span>Open a real vault folder to enable version control.</span>
+              <span>Open a vault folder to enable version control.</span>
             </div>
           ) : !initialised ? (
             // ── NOT-TRACKED state ────────────────────────────────────
@@ -575,7 +571,7 @@ export function ChangesPanel() {
             </div>
           )}
 
-          {initialised && !isMockVault && totalCount > 0 && (
+          {initialised && totalCount > 0 && (
             <div className="cp-commit-form">
               <textarea
                 className="cp-commit-msg"
@@ -701,10 +697,10 @@ export function ChangesPanel() {
         </summary>
 
         <div className="cp-section-body">
-          {isMockVault ? (
+          {!vaultPath ? (
             <div className="cp-empty">
               <IcGitCommit />
-              <span>Open a real vault folder to see commit history.</span>
+              <span>Open a vault folder to see commit history.</span>
             </div>
           ) : !initialised ? (
             // Not-tracked: the CTA lives in Working Changes (open by
@@ -806,10 +802,10 @@ export function ChangesPanel() {
           </span>
         </summary>
         <div className="cp-section-body">
-          {isMockVault ? (
+          {!vaultPath ? (
             <div className="cp-empty">
               <IcGitBranch />
-              <span>Open a real vault folder to manage branches.</span>
+              <span>Open a vault folder to manage branches.</span>
             </div>
           ) : !initialised ? (
             <div className="cp-empty">
@@ -844,37 +840,18 @@ export function ChangesPanel() {
             </span>
             <span
               className={`cp-badge ${
-                isMockVault
-                  ? syncBadge(vaultPath, byocRowFor) === "Off"
-                    ? "muted"
-                    : "muted"
-                  : initialised
-                    ? "muted"
-                    : "danger"
+                initialised ? "muted" : "danger"
               }`}
             >
-              {isMockVault
-                ? syncBadge(vaultPath, byocRowFor) === "Off"
-                  ? "Demo vault"
-                  : `Demo · ${syncBadge(vaultPath, byocRowFor)}`
-                : initialised
-                  ? syncBadge(vaultPath, byocRowFor)
-                  : "VCS required"}
+              {initialised
+                ? syncBadge(vaultPath, byocRowFor)
+                : "VCS required"}
             </span>
           </span>
         </summary>
 
         <div className="cp-section-body">
-          {!isMockVault && !initialised ? (
-            // Sync gates on VCS — there's nothing meaningful to push
-            // until we have commits.  Surface this clearly so the
-            // user knows the path: enable VCS → connect a provider →
-            // push.  Saves them clicking Connect and getting an
-            // opaque error.
-            //
-            // The demo vault skips this gate because its BYOC actions
-            // are fully simulated in `byocStore` (no real git commits
-            // required) — the goal there is to show the full UX.
+          {!initialised ? (
             <>
               <div className="cp-empty">
                 <IcCloud />
@@ -891,21 +868,11 @@ export function ChangesPanel() {
             </>
           ) : (
             <>
-              {isMockVault ? (
-                <p className="cp-hint cp-hint-demo">
-                  <strong>Demo mode.</strong> This is a UI walkthrough
-                  running against the in-memory mock vault. Connect /
-                  Sync simulate the real flow — nothing leaves your
-                  machine. Open a real folder via the vault picker to
-                  push your own files.
-                </p>
-              ) : (
-                <p className="cp-hint">
-                  Bring your own cloud. Tokens live in your OS
-                  keychain; no Lattice server sits between this app
-                  and your provider.
-                </p>
-              )}
+              <p className="cp-hint">
+                Bring your own cloud. Tokens live in your OS
+                keychain; no Lattice server sits between this app
+                and your provider.
+              </p>
 
               <ul className="cp-provider-list">
                 {BYOC_PROVIDERS.map((p) => {
@@ -998,7 +965,7 @@ export function ChangesPanel() {
 
       {/* Refresh hint pinned at the bottom — lets the user know the
           panel auto-refreshes but also exposes the manual trigger. */}
-      {!isMockVault && (
+      {!!vaultPath && (
         <p className="cp-footnote">
           {refreshing
             ? "Refreshing…"

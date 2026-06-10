@@ -73,9 +73,8 @@ const EMPTY_ROW: PaperRowState = {
   busy: false,
 };
 
-const MOCK_VAULT = "__mock__";
 const isRealVault = (v: string | null | undefined): v is string =>
-  typeof v === "string" && v.length > 0 && v !== MOCK_VAULT;
+  typeof v === "string" && v.length > 0;
 
 interface PaperStore {
   /** Cached built-in + BYOF templates.  Populated lazily by `refreshTemplates`. */

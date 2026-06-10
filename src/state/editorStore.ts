@@ -64,7 +64,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // git status walk.  Skip when no vault is open or when we're on
       // the mock-vault sentinel (no real filesystem to scan).
       const vaultPath = useVaultStore.getState().vaultPath;
-      if (vaultPath && vaultPath !== "__mock__") {
+      if (vaultPath) {
         void useVcsStore.getState().refresh(vaultPath);
       }
     } catch (err) {

@@ -39,6 +39,7 @@ import {
 } from "@codemirror/autocomplete";
 import { useVaultStore } from "../../state/vaultStore";
 import { useEditorStore } from "../../state/editorStore";
+import { useSettingsStore } from "../../state/settingsStore";
 import type { FileNode } from "../../state/types";
 import type { JumpToLineDetail } from "../../lib/backlinks";
 
@@ -545,6 +546,9 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     return () => obs.disconnect();
   }, []);
 
+  const showLineNumbers = useSettingsStore((s) => s.lineNumbers);
+  const wordWrap = useSettingsStore((s) => s.wordWrap);
+
   useEffect(() => {
     if (!editorRef.current || !filePath) return;
     // Already showing this file with a live view? Keep it \u2014 the content
@@ -565,7 +569,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     const state = EditorState.create({
       doc: content ?? "",
       extensions: [
-        lineNumbers(),
+        ...(showLineNumbers ? [lineNumbers()] : []),
         highlightActiveLineGutter(),
         highlightSpecialChars(),
         history(),
@@ -575,7 +579,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         crosshairCursor(),
         bracketMatching(),
         closeBrackets(),
-        EditorView.lineWrapping,
+        ...(wordWrap ? [EditorView.lineWrapping] : []),
         keymap.of([
           ...closeBracketsKeymap,
           // List-aware Tab handlers go BEFORE indentWithTab so they take
@@ -655,7 +659,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     // effect below \u2014 NOT by destroying & rebuilding the editor, which
     // would steal focus and wipe undo history.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, isDark]);
+  }, [filePath, isDark, showLineNumbers, wordWrap]);
 
   // Sync external content into the editor doc.
   //
