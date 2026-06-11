@@ -88,6 +88,16 @@ pub struct JournalSettings {
     /// don't want to lose data the user already created) — only the
     /// auto-create-on-launch behaviour (future work) honours this flag.
     pub enabled: bool,
+
+    /// When true, create/open a weekly rollup file (`YYYY-Www.md`) in
+    /// the journals folder whenever a day entry is opened.
+    #[serde(default)]
+    pub weekly_rollup: bool,
+
+    /// When true, create/open a monthly rollup file (`YYYY-MM.md`) in
+    /// the journals folder whenever a day entry is opened.
+    #[serde(default)]
+    pub monthly_rollup: bool,
 }
 
 impl Default for JournalSettings {
@@ -97,6 +107,8 @@ impl Default for JournalSettings {
             filename_format: DEFAULT_FILENAME_FORMAT.to_string(),
             template_path: None,
             enabled: true,
+            weekly_rollup: false,
+            monthly_rollup: false,
         }
     }
 }
@@ -235,6 +247,49 @@ fn load_template(vault: &Path, settings: &JournalSettings) -> String {
     DEFAULT_TEMPLATE.to_string()
 }
 
+fn ensure_rollup_files(
+    vault: &Path,
+    settings: &JournalSettings,
+    date: NaiveDate,
+) -> Result<(), String> {
+    let dir = journals_dir(vault, settings);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("create {}: {e}", dir.display()))?;
+
+    if settings.weekly_rollup {
+        let iso = date.iso_week();
+        let weekly_path = dir.join(format!("{:04}-W{:02}.md", iso.year(), iso.week()));
+        if !weekly_path.exists() {
+            let body = format!(
+                "---\ntype: weekly\nyear: {}\nweek: {}\n---\n\n# {:04}-W{:02}\n\n- \n",
+                iso.year(),
+                iso.week(),
+                iso.year(),
+                iso.week()
+            );
+            std::fs::write(&weekly_path, body)
+                .map_err(|e| format!("write {}: {e}", weekly_path.display()))?;
+        }
+    }
+
+    if settings.monthly_rollup {
+        let monthly_path = dir.join(format!("{:04}-{:02}.md", date.year(), date.month()));
+        if !monthly_path.exists() {
+            let body = format!(
+                "---\ntype: monthly\nyear: {}\nmonth: {}\n---\n\n# {:04}-{:02}\n\n- \n",
+                date.year(),
+                date.month(),
+                date.year(),
+                date.month()
+            );
+            std::fs::write(&monthly_path, body)
+                .map_err(|e| format!("write {}: {e}", monthly_path.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
 // ── Core open-or-create ─────────────────────────────────────────────────
 
 fn ensure_entry(
@@ -255,6 +310,7 @@ fn ensure_entry(
         std::fs::write(&path, body)
             .map_err(|e| format!("write {}: {e}", path.display()))?;
     }
+    ensure_rollup_files(vault, &settings, date)?;
 
     Ok(JournalOpenResult {
         date: date.format("%Y-%m-%d").to_string(),

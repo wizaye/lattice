@@ -14,8 +14,6 @@
  *
  * - The §2.2 outliner mode for journal files — ships in a follow-up
  *   slice that touches the editor, not the calendar.
- * - Right-click "create journal entry on day N" — needs a context-menu
- *   primitive we haven't built yet.  The Today CTA covers the 95% case.
  * - Provider connect UI lives in Settings → Calendar (separate sheet),
  *   not in this panel.
  *
@@ -166,6 +164,7 @@ export function CalendarPanel({ onOpenFileByPath }: Props) {
   const journalStreak = useJournalStore((s) => s.streak);
   const refreshJournal = useJournalStore((s) => s.refresh);
   const openTodayJournal = useJournalStore((s) => s.openToday);
+  const openDateJournal = useJournalStore((s) => s.openDate);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalEvent | null>(null);
@@ -267,6 +266,16 @@ export function CalendarPanel({ onOpenFileByPath }: Props) {
               setSelectedDate(iso);
               setViewMode("day");
             }}
+            onCreateJournal={async (iso) => {
+              if (!vaultPath) return;
+              try {
+                const result = await openDateJournal(vaultPath, iso);
+                await useVaultStore.getState().refreshTree();
+                onOpenFileByPath(result.path);
+              } catch (err) {
+                console.error("[calendar] openDateJournal failed:", err);
+              }
+            }}
           />
         )}
         {!noVault && viewMode === "month" && (
@@ -277,6 +286,16 @@ export function CalendarPanel({ onOpenFileByPath }: Props) {
             onSelectDay={(iso) => {
               setSelectedDate(iso);
               setViewMode("day");
+            }}
+            onCreateJournal={async (iso) => {
+              if (!vaultPath) return;
+              try {
+                const result = await openDateJournal(vaultPath, iso);
+                await useVaultStore.getState().refreshTree();
+                onOpenFileByPath(result.path);
+              } catch (err) {
+                console.error("[calendar] openDateJournal failed:", err);
+              }
             }}
           />
         )}
@@ -435,10 +454,12 @@ function WeekView({
   anchorIso,
   eventsByDay,
   onSelectDay,
+  onCreateJournal,
 }: {
   anchorIso: string;
   eventsByDay: Map<string, CalEvent[]>;
   onSelectDay: (iso: string) => void;
+  onCreateJournal: (iso: string) => void | Promise<void>;
 }) {
   const days = useMemo(() => {
     const start = startOfWeek(fromLocalIso(anchorIso));
@@ -460,6 +481,11 @@ function WeekView({
             key={iso}
             className={`cal-week-row${isAnchor ? " active" : ""}`}
             onClick={() => onSelectDay(iso)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onCreateJournal(iso);
+            }}
+            title="Click to open day • Right-click to open/create journal"
           >
             <div className="cal-week-date">
               <div className="cal-week-dow">
@@ -497,11 +523,13 @@ function MonthView({
   todayIso,
   eventsByDay,
   onSelectDay,
+  onCreateJournal,
 }: {
   anchorIso: string;
   todayIso: string;
   eventsByDay: Map<string, CalEvent[]>;
   onSelectDay: (iso: string) => void;
+  onCreateJournal: (iso: string) => void | Promise<void>;
 }) {
   const anchor = fromLocalIso(anchorIso);
   // 6×7 grid starting on the Sunday on/before the 1st.
@@ -541,10 +569,14 @@ function MonthView({
                 isCurrentMonth ? "" : " muted"
               }${isAnchor ? " active" : ""}${isToday ? " today" : ""}`}
               onClick={() => onSelectDay(iso)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onCreateJournal(iso);
+              }}
               title={
                 dayEvents.length === 0
-                  ? "No events"
-                  : `${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}`
+                  ? "No events • Right-click to open/create journal"
+                  : `${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"} • Right-click to open/create journal`
               }
             >
               <span className="cal-month-num">{d.getDate()}</span>

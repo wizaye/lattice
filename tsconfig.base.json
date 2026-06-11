@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@lattice/bridge-contract": ["./packages/lattice-bridge-contract/src"],
+      "@lattice/bridge-contract/*": ["./packages/lattice-bridge-contract/src/*"],
+      "@lattice/bridge-tauri": ["./packages/lattice-bridge-tauri/src"],
+      "@lattice/bridge-web": ["./packages/lattice-bridge-web/src"],
+      "@lattice/core": ["./packages/lattice-core/src"],
+      "@lattice/core/*": ["./packages/lattice-core/src/*"]
+    }
+  }
+}

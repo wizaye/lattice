@@ -430,6 +430,7 @@ impl OneDriveProvider {
     }
 
     /// `DELETE /drive/special/approot:/{path}:`
+    #[allow(dead_code)]
     async fn delete_remote(&self, vault: &Path, remote_path: &str) -> Result<(), SyncError> {
         let encoded = url_path_segment(remote_path);
         let url = format!("{GRAPH_APPROOT}:/{encoded}:");

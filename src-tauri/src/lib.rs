@@ -1,12 +1,31 @@
+#[allow(dead_code)]
+mod byom;
+#[allow(dead_code)]
 mod calendar;
+#[allow(dead_code)]
+mod canvas;
 mod commands;
 mod git;
 mod journal;
 mod paper;
 mod publish;
+#[allow(dead_code)]
+mod publish_ui;
 mod sync;
+mod vcs_commit_ai;
+#[allow(dead_code)]
+mod vcs_auto_commit;
+mod importers;
+#[allow(dead_code)]
+mod e2ee;
+mod vault_commands;
+mod updater;
+#[allow(dead_code)]
+mod github_byoc;
+mod ota_updater;
 
 use tauri::Manager;
+use vault_commands::VaultState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,10 +38,32 @@ pub fn run() {
     paper::engine_install::prepend_bin_dir_to_path();
 
     tauri::Builder::default()
+        .manage(VaultState(std::sync::Arc::new(tokio::sync::RwLock::new(None))))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            // Vault operations (new)
+            vault_commands::open_vault,
+            vault_commands::close_vault,
+            vault_commands::list_notes,
+            vault_commands::read_note,
+            vault_commands::write_note,
+            vault_commands::create_note,
+            vault_commands::rename_note,
+            vault_commands::move_to_trash,
+            vault_commands::restore_from_trash,
+            vault_commands::archive_note,
+            vault_commands::unarchive_note,
+            vault_commands::delete_note,
+            vault_commands::scan_tasks,
+            vault_commands::scan_tasks_for_note,
+            vault_commands::toggle_task,
+            vault_commands::get_vault_settings,
+            vault_commands::set_vault_settings,
+            vault_commands::get_backlinks,
+            // Original commands
             commands::read_file,
             commands::read_file_bytes,
             commands::write_file,
@@ -34,7 +75,7 @@ pub fn run() {
             commands::delete_folder,
             commands::open_new_window,
             commands::get_vault_graph,
-            commands::get_backlinks,
+            commands::get_backlinks_legacy,
             // VCS — system `git` via subprocess.  Opt-in per vault:
             // `git_check_installed` drives the onboarding install
             // prompt; everything else assumes git is on PATH and the
@@ -144,6 +185,76 @@ pub fn run() {
             calendar::cal_delete_event,
             calendar::cal_list_providers,
             calendar::cal_today_local,
+            calendar::cal_get_sync_state,
+            calendar::cal_update_sync_state,
+            // v2 §4 — VCS intelligent commit messages (BYOM-powered).
+            vcs_commit_ai::vcs_generate_commit_message,
+            vcs_commit_ai::byom_check_ollama,
+            // v2 §4.1 — VCS auto-commit cadence
+            vcs_auto_commit::vcs_auto_commit_enable,
+            vcs_auto_commit::vcs_auto_commit_disable,
+            vcs_auto_commit::vcs_auto_commit_activity,
+            vcs_auto_commit::vcs_auto_commit_status,
+            // v2 §5 — BYOM (Ollama / OpenAI / Anthropic).
+            byom::byom_check_ollama_available,
+            byom::byom_list_ollama_models,
+            byom::byom_chat,
+            // v2 §11 — Importers (Obsidian, Logseq, Notion)
+            importers::import_obsidian_vault,
+            importers::import_logseq_graph,
+            importers::import_notion_export,
+            // v2 §9 — E2EE (age/rage encryption)
+            e2ee::e2ee_initialize,
+            e2ee::e2ee_is_enabled,
+            e2ee::e2ee_unlock,
+            e2ee::e2ee_lock,
+            e2ee::e2ee_is_unlocked,
+            e2ee::e2ee_status,
+            // Auto-updater
+            updater::check_for_updates,
+            updater::get_app_version,
+            // GitHub BYOC
+            github_byoc::github_byoc_init,
+            github_byoc::github_byoc_push,
+            github_byoc::github_byoc_pull,
+            github_byoc::github_byoc_status,
+            github_byoc::github_byoc_sync,
+            github_byoc::github_byoc_clone,
+            // OTA Updater
+            ota_updater::ota_check_for_updates,
+            ota_updater::ota_download_and_install,
+            ota_updater::ota_get_settings,
+            ota_updater::ota_set_settings,
+            ota_updater::ota_startup_check,
+            ota_updater::ota_get_release_notes,
+            // v2 §3 — Canvas enhancements (export, snap, guides, stickies, images, embeds, arrows, layers, frames, minimap)
+            canvas::canvas_export_svg,
+            canvas::canvas_export_tikz,
+            canvas::canvas_export_png,
+            canvas::canvas_get_smart_guides,
+            canvas::canvas_snap_to_grid,
+            canvas::canvas_add_sticky,
+            canvas::canvas_update_sticky,
+            canvas::canvas_delete_sticky,
+            canvas::canvas_add_image,
+            canvas::canvas_add_embed,
+            canvas::canvas_update_arrow_style,
+            canvas::canvas_create_layer,
+            canvas::canvas_toggle_layer_visibility,
+            canvas::canvas_create_frame,
+            canvas::canvas_export_frame,
+            canvas::canvas_toggle_minimap,
+            canvas::canvas_update_minimap_config,
+            // v2 Publishing UI
+            publish_ui::publish_list_layouts,
+            publish_ui::publish_list_available_hosts,
+            publish_ui::publish_get_config,
+            publish_ui::publish_save_config,
+            publish_ui::publish_apply_theme,
+            publish_ui::publish_deploy_github_pages,
+            publish_ui::publish_deploy_cloudflare,
+            publish_ui::publish_deploy_vercel,
+            publish_ui::publish_build_quartz,
         ])
         .setup(|app| {
             // Set a larger default window size for the PKM workspace
@@ -151,6 +262,13 @@ pub fn run() {
                 let _ = window.set_title("Lattice");
                 let _ = window.set_size(tauri::LogicalSize::new(1400.0, 900.0));
             }
+            
+            // Start OTA update checker using Tauri's async runtime
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                ota_updater::start_update_checker(app_handle).await;
+            });
+            
             Ok(())
         })
         .run(tauri::generate_context!())

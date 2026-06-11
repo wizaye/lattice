@@ -66,6 +66,19 @@ export interface CalProvider {
   status: string;
 }
 
+/** Sync state for a calendar provider, used for incremental sync. */
+export interface ProviderSyncState {
+  source: CalSource;
+  /** Last sync timestamp (ISO-8601 UTC), or `null`. */
+  last_sync: string | null;
+  /** Delta token for Microsoft Graph deltaLink, or `null`. */
+  delta_token: string | null;
+  /** Next link for paginated results, or `null`. */
+  next_link: string | null;
+  /** ETag for the entire calendar collection, or `null`. */
+  collection_etag: string | null;
+}
+
 // ── Commands ──
 
 /**
@@ -129,3 +142,40 @@ export async function calListProviders(
 export async function calTodayLocal(): Promise<string> {
   return invoke<string>("cal_today_local");
 }
+
+/**
+ * Get the sync state for a calendar provider.
+ * Returns `null` if the provider has never synced.
+ * Used by provider adapters to enable incremental sync via delta tokens.
+ */
+export async function calGetSyncState(
+  vaultPath: string,
+  source: CalSource,
+): Promise<ProviderSyncState | null> {
+  return invoke<ProviderSyncState | null>("cal_get_sync_state", {
+    vaultPath,
+    source,
+  });
+}
+
+/**
+ * Update the sync state for a calendar provider after a successful sync.
+ * Stores the delta token, next link, and current timestamp for
+ * incremental refresh on the next sync.
+ */
+export async function calUpdateSyncState(
+  vaultPath: string,
+  source: CalSource,
+  delta_token: string | null,
+  next_link: string | null,
+  collection_etag: string | null,
+): Promise<void> {
+  return invoke<void>("cal_update_sync_state", {
+    vaultPath,
+    source,
+    delta_token,
+    next_link,
+    collection_etag,
+  });
+}
+

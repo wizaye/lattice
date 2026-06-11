@@ -33,6 +33,10 @@ export interface JournalSettings {
    * future auto-create-on-launch behaviour will skip.
    */
   enabled: boolean;
+  /** Auto-create weekly rollup files like `2026-W23.md`. */
+  weekly_rollup: boolean;
+  /** Auto-create monthly rollup files like `2026-06.md`. */
+  monthly_rollup: boolean;
 }
 
 export interface JournalOpenResult {

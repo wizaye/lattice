@@ -77,10 +77,10 @@ export function LeftActivityStrip({
       title: "Changes (version control & sync)",
       target: "changes",
     },
-    { kind: "disabled", Icon: IcGrid, title: "Canvas (Coming soon)" },
-    { kind: "disabled", Icon: IcFiles, title: "All files (Coming soon)" },
+    { kind: "view", Icon: IcGrid, title: "Canvas", target: "canvas" },
+    { kind: "view", Icon: IcFiles, title: "All files", target: "files" },
     { kind: "disabled", Icon: IcTerminal, title: "Terminal (Coming soon)" },
-    { kind: "disabled", Icon: IcKanban, title: "Kanban (Coming soon)" },
+    { kind: "view", Icon: IcKanban, title: "Kanban", target: "kanban" },
   ];
 
   return (

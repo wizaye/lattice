@@ -303,7 +303,7 @@ pub struct BacklinksResult {
 }
 
 #[tauri::command]
-pub fn get_backlinks(vault_path: String, active_file_path: String) -> Result<BacklinksResult, String> {
+pub fn get_backlinks_legacy(vault_path: String, active_file_path: String) -> Result<BacklinksResult, String> {
     let root = Path::new(&vault_path);
     if !root.is_dir() {
         return Err(format!("'{}' is not a directory", vault_path));

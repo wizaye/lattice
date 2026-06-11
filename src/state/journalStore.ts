@@ -20,6 +20,7 @@ import { create } from "zustand";
 
 import {
   journalGetSettings,
+  journalOpenDate,
   journalOpenToday,
   journalStreak,
   type JournalOpenResult,
@@ -49,6 +50,8 @@ interface JournalState {
    * `onOpenFileByPath` for tab opening.
    */
   openToday: (vaultPath: string) => Promise<JournalOpenResult>;
+  /** Open (or create) a journal entry for a specific `YYYY-MM-DD` date. */
+  openDate: (vaultPath: string, date: string) => Promise<JournalOpenResult>;
   /** Clear all state — call on vault switch. */
   reset: () => void;
 }
@@ -82,6 +85,12 @@ export const useJournalStore = create<JournalState>((set, get) => ({
     // Refresh the streak so the "🔥 N days" badge ticks up immediately
     // after creating today's entry.  Fire-and-forget — the open-result
     // we return is what the caller is actually waiting on.
+    void get().refresh(vaultPath);
+    return result;
+  },
+
+  openDate: async (vaultPath: string, date: string) => {
+    const result = await journalOpenDate(vaultPath, date);
     void get().refresh(vaultPath);
     return result;
   },

@@ -42,6 +42,7 @@ import { useEditorStore } from "../../state/editorStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import type { FileNode } from "../../state/types";
 import type { JumpToLineDetail } from "../../lib/backlinks";
+import { outlinerExtension, shouldEnableOutliner } from "./cm-outliner";
 
 // ── Theme ──
 // Uses the app's own CSS tokens (set in App.css for both `:root` and
@@ -566,6 +567,10 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
 
     let debounceTimer: ReturnType<typeof setTimeout>;
 
+    // Check if outliner mode should be enabled
+    const tempState = EditorState.create({ doc: content ?? "" });
+    const enableOutliner = shouldEnableOutliner(tempState, filePath);
+
     const state = EditorState.create({
       doc: content ?? "",
       extensions: [
@@ -605,6 +610,8 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         flashLineField,
         flashLineTheme,
         listHangingIndent,
+        // Enable outliner extensions when appropriate
+        ...(enableOutliner ? [outlinerExtension()] : []),
         autocompletion({
           override: [wikilinkCompletions],
           activateOnTyping: true,

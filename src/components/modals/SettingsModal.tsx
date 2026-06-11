@@ -23,6 +23,12 @@ import {
   IcTerminal,
 } from "../common/Icons";
 import { useSettingsStore } from "../../state/settingsStore";
+import { useVaultStore } from "../../state/vaultStore";
+import {
+  journalGetSettings,
+  journalSetSettings,
+  type JournalSettings,
+} from "../../lib/journalApi";
 import "./SettingsModal.css";
 
 type Props = {
@@ -42,6 +48,7 @@ const OPTION_SECTIONS: Section[] = [
   { id: "general", label: "General", Icon: IcGear },
   { id: "editor", label: "Editor", Icon: IcEdit },
   { id: "files", label: "Files and links", Icon: IcFileLink },
+  { id: "ai-privacy", label: "AI & Privacy", Icon: IcKey },
   { id: "appearance", label: "Appearance", Icon: IcPaint },
   { id: "hotkeys", label: "Hotkeys", Icon: IcKeyboard },
   { id: "keychain", label: "Keychain", Icon: IcKey },
@@ -192,6 +199,53 @@ function SectionBody({
   onToggleTheme: () => void;
 }) {
   const store = useSettingsStore();
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const [journalSettings, setJournalSettings] = useState<JournalSettings | null>(null);
+  const [journalBusy, setJournalBusy] = useState(false);
+  const [journalError, setJournalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (section.id !== "daily-notes") return;
+    if (!vaultPath || vaultPath === "__mock__") {
+      setJournalSettings(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      setJournalBusy(true);
+      setJournalError(null);
+      try {
+        const settings = await journalGetSettings(vaultPath);
+        if (!cancelled) setJournalSettings(settings);
+      } catch (err) {
+        if (!cancelled) {
+          setJournalError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) setJournalBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [section.id, vaultPath]);
+
+  const patchJournalSettings = async (
+    patch: Partial<JournalSettings>,
+  ): Promise<void> => {
+    if (!vaultPath || vaultPath === "__mock__" || !journalSettings) return;
+    const next: JournalSettings = { ...journalSettings, ...patch };
+    setJournalSettings(next);
+    setJournalBusy(true);
+    setJournalError(null);
+    try {
+      await journalSetSettings(vaultPath, next);
+    } catch (err) {
+      setJournalError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setJournalBusy(false);
+    }
+  };
 
   if (section.id === "general") {
     return (
@@ -373,6 +427,184 @@ function SectionBody({
     );
   }
 
+  if (section.id === "ai-privacy") {
+    const [modelConfigs, setModelConfigs] = useState<Array<{
+      id: string;
+      provider: string;
+      enabled: boolean;
+      apiKey: string;
+    }>>([
+      { id: "ollama", provider: "Ollama (Local)", enabled: true, apiKey: "" },
+      { id: "openai", provider: "OpenAI", enabled: false, apiKey: "" },
+      { id: "anthropic", provider: "Anthropic", enabled: false, apiKey: "" },
+      { id: "gemini", provider: "Google Gemini", enabled: false, apiKey: "" },
+      { id: "azure", provider: "Azure OpenAI", enabled: false, apiKey: "" },
+    ]);
+
+    const [featureScopes, setFeatureScopes] = useState<Record<string, boolean>>({
+      "vcs-commits": true,
+      "smart-links": true,
+      "meeting-summaries": true,
+      "canvas-completion": true,
+      "chat": true,
+    });
+
+    return (
+      <div className="settings-body">
+        <h2 className="settings-body-title">AI & Privacy</h2>
+        
+        <p style={{ marginBottom: '20px', opacity: 0.8, fontSize: '14px' }}>
+          Configure which AI providers are available and where they can be used.
+          Local providers (Ollama) never send data to the cloud.
+        </p>
+
+        <h3 style={{ fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>AI Providers</h3>
+
+        {modelConfigs.map((config) => (
+          <div key={config.id} className="settings-row" style={{ borderLeft: config.enabled ? '3px solid var(--accent, #7c5bf0)' : 'none', paddingLeft: config.enabled ? '12px' : '0' }}>
+            <div className="settings-row-text">
+              <div className="settings-row-title">{config.provider}</div>
+              <div className="settings-row-desc">
+                {config.id === "ollama" ? "Local AI running on your machine (port 11434)" :
+                 config.id === "openai" ? "OpenAI GPT-4, GPT-4o, GPT-3.5-turbo" :
+                 config.id === "anthropic" ? "Claude 3.5 Sonnet, Claude 3 Opus/Haiku" :
+                 config.id === "gemini" ? "Gemini 1.5 Pro, Gemini 1.5 Flash" :
+                 "Azure-hosted OpenAI models"}
+              </div>
+              {config.enabled && config.id !== "ollama" && (
+                <input
+                  type="password"
+                  className="settings-input"
+                  placeholder="API Key"
+                  value={config.apiKey}
+                  onChange={(e) => {
+                    const next = modelConfigs.map((c) =>
+                      c.id === config.id ? { ...c, apiKey: e.target.value } : c
+                    );
+                    setModelConfigs(next);
+                  }}
+                  style={{ marginTop: '8px', maxWidth: '300px' }}
+                />
+              )}
+            </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={config.enabled}
+                onChange={(e) => {
+                  const next = modelConfigs.map((c) =>
+                    c.id === config.id ? { ...c, enabled: e.target.checked } : c
+                  );
+                  setModelConfigs(next);
+                }}
+              />
+              <span className="settings-slider"></span>
+            </label>
+          </div>
+        ))}
+
+        <h3 style={{ fontSize: '18px', marginTop: '32px', marginBottom: '12px' }}>AI Feature Scopes</h3>
+        <p style={{ marginBottom: '16px', opacity: 0.8, fontSize: '14px' }}>
+          Control where AI can be invoked. Disabling a scope prevents AI from being used in that feature,
+          regardless of which providers are enabled above.
+        </p>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">VCS commit messages</div>
+            <div className="settings-row-desc">
+              Generate commit messages from staged changes
+            </div>
+          </div>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              checked={featureScopes["vcs-commits"]}
+              onChange={(e) => setFeatureScopes({ ...featureScopes, "vcs-commits": e.target.checked })}
+            />
+            <span className="settings-slider"></span>
+          </label>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">Smart link suggestions</div>
+            <div className="settings-row-desc">
+              Suggest wikilinks while writing based on vault content
+            </div>
+          </div>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              checked={featureScopes["smart-links"]}
+              onChange={(e) => setFeatureScopes({ ...featureScopes, "smart-links": e.target.checked })}
+            />
+            <span className="settings-slider"></span>
+          </label>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">Meeting summaries</div>
+            <div className="settings-row-desc">
+              Generate summaries and action items from meeting transcripts
+            </div>
+          </div>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              checked={featureScopes["meeting-summaries"]}
+              onChange={(e) => setFeatureScopes({ ...featureScopes, "meeting-summaries": e.target.checked })}
+            />
+            <span className="settings-slider"></span>
+          </label>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">Canvas text completion</div>
+            <div className="settings-row-desc">
+              Auto-complete text nodes in canvas view
+            </div>
+          </div>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              checked={featureScopes["canvas-completion"]}
+              onChange={(e) => setFeatureScopes({ ...featureScopes, "canvas-completion": e.target.checked })}
+            />
+            <span className="settings-slider"></span>
+          </label>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">Chat / Ask AI</div>
+            <div className="settings-row-desc">
+              Direct chat with AI about your notes
+            </div>
+          </div>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              checked={featureScopes["chat"]}
+              onChange={(e) => setFeatureScopes({ ...featureScopes, "chat": e.target.checked })}
+            />
+            <span className="settings-slider"></span>
+          </label>
+        </div>
+
+        <div style={{ marginTop: '32px', padding: '12px', background: 'var(--background-modifier-form-field)', borderRadius: '4px' }}>
+          <p style={{ fontSize: '13px', opacity: 0.9, margin: 0 }}>
+            <strong>Privacy note:</strong> Ollama runs locally and never sends data to the cloud.
+            Other providers (OpenAI, Anthropic, Gemini, Azure) send your text to their APIs.
+            API keys are stored securely in your OS keychain.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (section.id === "appearance") {
     return (
       <div className="settings-body">
@@ -448,6 +680,100 @@ function SectionBody({
             <option value="cozy">Cozy</option>
           </select>
         </div>
+      </div>
+    );
+  }
+
+  if (section.id === "daily-notes") {
+    const noVault = !vaultPath || vaultPath === "__mock__";
+    return (
+      <div className="settings-body">
+        <h2 className="settings-body-title">Daily notes</h2>
+
+        {noVault ? (
+          <p className="settings-body-empty">Open a vault to configure daily-note settings.</p>
+        ) : (
+          <>
+            {journalError && (
+              <p className="settings-body-empty" style={{ color: "var(--danger, #ef4444)" }}>
+                {journalError}
+              </p>
+            )}
+            <div className="settings-row">
+              <div className="settings-row-text">
+                <div className="settings-row-title">Enable daily notes</div>
+                <div className="settings-row-desc">
+                  Controls auto daily-note behavior. Manual open/create still works.
+                </div>
+              </div>
+              <label className="settings-switch">
+                <input
+                  type="checkbox"
+                  checked={journalSettings?.enabled ?? true}
+                  disabled={!journalSettings || journalBusy}
+                  onChange={(e) => void patchJournalSettings({ enabled: e.target.checked })}
+                />
+                <span className="settings-slider"></span>
+              </label>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-text">
+                <div className="settings-row-title">Weekly rollup</div>
+                <div className="settings-row-desc">
+                  Create `YYYY-Www.md` when opening a daily note.
+                </div>
+              </div>
+              <label className="settings-switch">
+                <input
+                  type="checkbox"
+                  checked={journalSettings?.weekly_rollup ?? false}
+                  disabled={!journalSettings || journalBusy}
+                  onChange={(e) =>
+                    void patchJournalSettings({ weekly_rollup: e.target.checked })
+                  }
+                />
+                <span className="settings-slider"></span>
+              </label>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-text">
+                <div className="settings-row-title">Monthly rollup</div>
+                <div className="settings-row-desc">
+                  Create `YYYY-MM.md` when opening a daily note.
+                </div>
+              </div>
+              <label className="settings-switch">
+                <input
+                  type="checkbox"
+                  checked={journalSettings?.monthly_rollup ?? false}
+                  disabled={!journalSettings || journalBusy}
+                  onChange={(e) =>
+                    void patchJournalSettings({ monthly_rollup: e.target.checked })
+                  }
+                />
+                <span className="settings-slider"></span>
+              </label>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-text">
+                <div className="settings-row-title">Journal folder</div>
+                <div className="settings-row-desc">
+                  Vault-relative folder where daily notes are created.
+                </div>
+              </div>
+              <input
+                type="text"
+                className="settings-input"
+                value={journalSettings?.folder ?? "journals"}
+                disabled={!journalSettings || journalBusy}
+                onChange={(e) => void patchJournalSettings({ folder: e.target.value })}
+              />
+            </div>
+          </>
+        )}
       </div>
     );
   }
