@@ -369,7 +369,7 @@ function HoverPreviewPopover({
         ) : content === "" ? (
           <div className="hover-preview-empty">Empty file</div>
         ) : (
-          <MarkdownPreview source={content} />
+          <MarkdownPreview source={content} fileId={fileId} />
         )}
       </div>
     </div>,

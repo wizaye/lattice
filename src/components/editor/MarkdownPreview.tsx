@@ -66,14 +66,50 @@ const md = new MarkdownIt({
 // escaped `<`, `>`, `&`, so the brackets we match are guaranteed to be
 // real ASCII brackets from the user's source.
 const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+const TASK_RE_DETAILED = /^([\s>]*-\s+\[)(.)(\]\s+)(.*?)(?:\s+<!--\s*id:\s*([\w-]+)\s*-->)?$/;
 
-function renderHtml(source: string): string {
+function renderHtml(source: string, fileId?: string): string {
   const html = md.render(source);
-  return html.replace(WIKILINK_RE, (_full, target: string, alias?: string) => {
+  const wikilinksProcessed = html.replace(WIKILINK_RE, (_full, target: string, alias?: string) => {
     const label = (alias ?? target).trim();
     const t = target.trim().replace(/"/g, "&quot;");
     return `<a href="#" class="md-wikilink" data-target="${t}">${escapeText(label)}</a>`;
   });
+
+  const lines = source.split("\n");
+  const taskLineIndices: number[] = [];
+  lines.forEach((line, idx) => {
+    if (TASK_RE_DETAILED.test(line)) {
+      taskLineIndices.push(idx);
+    }
+  });
+
+  let taskCounter = 0;
+  const processedHtml = wikilinksProcessed.replace(/<li>\[([ xX\/\-])\]\s*(.*?)(?:\s+<!--\s*id:\s*([\w-]+)\s*-->)?<\/li>/g, (_, marker, text, stableId) => {
+    const lineIdx = taskLineIndices[taskCounter];
+    taskCounter++;
+    
+    const isChecked = marker === "x" || marker === "X";
+    const isInProgress = marker === "/" || marker === "-";
+    
+    // Create checkbox input
+    let checkboxHtml = `<input type="checkbox" class="md-task-checkbox" disabled ${isChecked ? "checked" : ""}/>`;
+    if (isInProgress) {
+      checkboxHtml = `<input type="checkbox" class="md-task-checkbox md-task-inprogress" disabled />`;
+    }
+    
+    // Clean stable ID comment out of task text
+    const cleanText = text.replace(/<!--\s*id:\s*[\w-]+\s*-->/g, "").trim();
+    const resolvedTaskId = stableId || (fileId && lineIdx !== undefined ? `${fileId}:${lineIdx}` : "");
+
+    const editBtnHtml = fileId && lineIdx !== undefined
+      ? ` <button class="md-task-meta-trigger" data-file-id="${fileId}" data-line-idx="${lineIdx}" data-task-id="${resolvedTaskId}" title="Edit task details">✏️</button>`
+      : "";
+
+    return `<li class="task-list-item">${checkboxHtml} <span class="task-list-item-text">${cleanText}</span>${editBtnHtml}</li>`;
+  });
+
+  return processedHtml;
 }
 
 function escapeText(s: string): string {
@@ -85,10 +121,11 @@ function escapeText(s: string): string {
 
 type Props = {
   source: string;
+  fileId?: string;
 };
 
-export function MarkdownPreview({ source }: Props) {
-  const html = useMemo(() => renderHtml(source ?? ""), [source]);
+export function MarkdownPreview({ source, fileId }: Props) {
+  const html = useMemo(() => renderHtml(source ?? "", fileId), [source, fileId]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Delegated click handler: any anchor with `.md-wikilink` dispatches
@@ -99,6 +136,28 @@ export function MarkdownPreview({ source }: Props) {
     if (!el) return;
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
+
+      // Handle Task Metadata edit trigger click
+      const trigger = target.closest(".md-task-meta-trigger") as HTMLButtonElement | null;
+      if (trigger) {
+        e.preventDefault();
+        const fId = trigger.dataset.fileId;
+        const lineIdxStr = trigger.dataset.lineIdx;
+        const taskId = trigger.dataset.taskId;
+        if (fId && lineIdxStr && taskId) {
+          window.dispatchEvent(
+            new CustomEvent("lattice-open-task-modal", {
+              detail: {
+                fileId: fId,
+                line: parseInt(lineIdxStr, 10) + 1, // 1-based line number
+                taskId: taskId,
+              },
+            })
+          );
+        }
+        return;
+      }
+
       const link = target.closest(".md-wikilink") as HTMLAnchorElement | null;
       if (!link) return;
       e.preventDefault();

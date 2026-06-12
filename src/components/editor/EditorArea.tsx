@@ -1401,7 +1401,7 @@ function Pane(props: PaneProps) {
               const editorBody =
                 activeTab.viewMode === "preview" ? (
                   <div className="markdown-preview-host">
-                    <MarkdownPreview source={file.content ?? ""} />
+                    <MarkdownPreview source={file.content ?? ""} fileId={file.id} />
                   </div>
                 ) : (
                   <CodeMirrorEditor

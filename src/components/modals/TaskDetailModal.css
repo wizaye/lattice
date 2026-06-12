@@ -1,0 +1,220 @@
+.tdm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  animation: tdm-fade-in 150ms ease-out;
+}
+
+@keyframes tdm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.tdm-container {
+  width: 600px;
+  max-width: 90vw;
+  max-height: 85vh;
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: tdm-slide-up 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tdm-slide-up {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.tdm-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tdm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.tdm-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tdm-close-btn:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+
+.tdm-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+}
+
+.tdm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tdm-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tdm-input {
+  background: var(--bg-textarea, var(--bg-app));
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text-normal);
+  font-size: 13px;
+  outline: none;
+}
+.tdm-input:focus {
+  border-color: var(--accent);
+}
+
+.tdm-textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.tdm-select {
+  background: var(--bg-textarea, var(--bg-app));
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text-normal);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+}
+
+.tdm-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.tdm-tags-input-container {
+  display: flex;
+  gap: 8px;
+}
+
+.tdm-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.tdm-tag-chip {
+  background: var(--hover);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tdm-tag-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+.tdm-tag-delete:hover {
+  color: #ff5555;
+}
+
+.tdm-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tdm-footer-left {
+  display: flex;
+  gap: 8px;
+}
+
+.tdm-footer-right {
+  display: flex;
+  gap: 12px;
+}
+
+.tdm-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tdm-btn-cancel {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--text-normal);
+}
+.tdm-btn-cancel:hover {
+  background: var(--hover);
+}
+
+.tdm-btn-save {
+  background: var(--accent, #7c5bf0);
+  border: 1px solid var(--accent, #7c5bf0);
+  color: #ffffff;
+}
+.tdm-btn-save:hover {
+  opacity: 0.9;
+}
+
+.tdm-btn-note {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+}
+.tdm-btn-note:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}

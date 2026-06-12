@@ -25,6 +25,8 @@ export interface GraphNodeData {
   id: string;
   label: string;
   path: string;
+  nodeType: string;
+  taskStatus?: string;
 }
 
 export interface GraphEdgeData {

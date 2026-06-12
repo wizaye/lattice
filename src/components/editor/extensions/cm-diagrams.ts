@@ -1,5 +1,5 @@
 import { ViewPlugin, Decoration, DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import { RangeSetBuilder } from "@codemirror/state";
+import { RangeSetBuilder, StateField, EditorState } from "@codemirror/state";
 
 /**
  * Mermaid diagram widget
@@ -128,101 +128,89 @@ class LatexWidget extends WidgetType {
   }
 }
 
+function buildMermaidDecorations(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const doc = state.doc;
+  const mermaidRegex = /^```mermaid\n([\s\S]*?)\n```$/gm;
+
+  const text = doc.toString();
+  let match;
+
+  while ((match = mermaidRegex.exec(text)) !== null) {
+    const code = match[1];
+    const start = match.index;
+    const end = start + match[0].length;
+    const id = `mermaid-${start}`;
+
+    const widget = Decoration.widget({
+      widget: new MermaidWidget(code, id),
+      side: 1,
+      block: true,
+    });
+
+    builder.add(end, end, widget);
+  }
+
+  return builder.finish();
+}
+
 /**
  * Render Mermaid diagrams in ```mermaid blocks
  */
-export const mermaidExtension = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = this.buildDecorations(view);
-    }
-
-    update(update: any) {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = this.buildDecorations(update.view);
-      }
-    }
-
-    buildDecorations(view: EditorView): DecorationSet {
-      const builder = new RangeSetBuilder<Decoration>();
-      const doc = view.state.doc;
-      const mermaidRegex = /^```mermaid\n([\s\S]*?)\n```$/gm;
-
-      const text = doc.toString();
-      let match;
-
-      while ((match = mermaidRegex.exec(text)) !== null) {
-        const code = match[1];
-        const start = match.index;
-        const end = start + match[0].length;
-        const id = `mermaid-${start}`;
-
-        const widget = Decoration.widget({
-          widget: new MermaidWidget(code, id),
-          side: 1,
-          block: true,
-        });
-
-        builder.add(end, end, widget);
-      }
-
-      return builder.finish();
-    }
+export const mermaidExtension = StateField.define<DecorationSet>({
+  create(state) {
+    return buildMermaidDecorations(state);
   },
-  {
-    decorations: (v) => v.decorations,
+  update(decorations, tr) {
+    if (tr.docChanged) {
+      return buildMermaidDecorations(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+function buildPlantUMLDecorations(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const doc = state.doc;
+  const plantumlRegex = /^```plantuml\n([\s\S]*?)\n```$/gm;
+
+  const text = doc.toString();
+  let match;
+
+  while ((match = plantumlRegex.exec(text)) !== null) {
+    const code = match[1];
+    const start = match.index;
+    const end = start + match[0].length;
+    const id = `plantuml-${start}`;
+
+    const widget = Decoration.widget({
+      widget: new PlantUMLWidget(code, id),
+      side: 1,
+      block: true,
+    });
+
+    builder.add(end, end, widget);
   }
-);
+
+  return builder.finish();
+}
 
 /**
  * Render PlantUML diagrams in ```plantuml blocks
  */
-export const plantumlExtension = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = this.buildDecorations(view);
-    }
-
-    update(update: any) {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = this.buildDecorations(update.view);
-      }
-    }
-
-    buildDecorations(view: EditorView): DecorationSet {
-      const builder = new RangeSetBuilder<Decoration>();
-      const doc = view.state.doc;
-      const plantumlRegex = /^```plantuml\n([\s\S]*?)\n```$/gm;
-
-      const text = doc.toString();
-      let match;
-
-      while ((match = plantumlRegex.exec(text)) !== null) {
-        const code = match[1];
-        const start = match.index;
-        const end = start + match[0].length;
-        const id = `plantuml-${start}`;
-
-        const widget = Decoration.widget({
-          widget: new PlantUMLWidget(code, id),
-          side: 1,
-          block: true,
-        });
-
-        builder.add(end, end, widget);
-      }
-
-      return builder.finish();
-    }
+export const plantumlExtension = StateField.define<DecorationSet>({
+  create(state) {
+    return buildPlantUMLDecorations(state);
   },
-  {
-    decorations: (v) => v.decorations,
-  }
-);
+  update(decorations, tr) {
+    if (tr.docChanged) {
+      return buildPlantUMLDecorations(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 /**
  * Render LaTeX math with KaTeX
@@ -289,6 +277,6 @@ export const latexExtension = ViewPlugin.fromClass(
     }
   },
   {
-    decorations: (v) => v.decorations,
+    decorations: (v: any) => v.decorations,
   }
 );

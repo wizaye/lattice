@@ -5,6 +5,7 @@ import {
   useRef,
 } from "react";
 import ForceGraph from "force-graph";
+import { KanbanColumn } from "../../lib/taskMetadata";
 
 /**
  * GraphCanvas
@@ -53,6 +54,8 @@ type Node = {
   id: string;
   name?: string;
   path?: string;
+  nodeType?: string;
+  taskStatus?: string;
   val?: number;
   x?: number;
   y?: number;
@@ -67,6 +70,7 @@ type Link = { source: string | Node; target: string | Node };
 type GraphCanvasProps = {
   nodes: Node[];
   links: Link[];
+  columns?: KanbanColumn[];
   onNodeClick?: (node: Node) => void;
 };
 
@@ -141,7 +145,7 @@ function readThemeColors() {
 }
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
-  function GraphCanvas({ nodes, links, onNodeClick }, ref) {
+  function GraphCanvas({ nodes, links, columns, onNodeClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const instanceRef = useRef<any>(null);
     // Track the last data payload we pushed so we don't restart the
@@ -356,21 +360,42 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             let fillColor: string;
             let labelColor: string;
             let forceLabel = false;
-            if (!selectedId) {
-              fillColor = c.node;
-              labelColor = c.nodeMuted;
-            } else if (node.id === selectedId) {
-              fillColor = c.nodeHighlight;
-              labelColor = c.nodeHighlight;
-              forceLabel = true;
-            } else if (!dimmed) {
-              // 1-hop neighbor of the selected node.
-              fillColor = c.node;
-              labelColor = c.nodeMuted;
-              forceLabel = true;
+            
+            if (node.nodeType === "task") {
+              const col = columns?.find(c => c.markers.includes(node.taskStatus)) || columns?.[0];
+              const baseColor = col ? col.accent : c.node;
+              
+              if (!selectedId) {
+                fillColor = baseColor;
+                labelColor = c.nodeMuted;
+              } else if (node.id === selectedId) {
+                fillColor = c.nodeHighlight;
+                labelColor = c.nodeHighlight;
+                forceLabel = true;
+              } else if (!dimmed) {
+                fillColor = baseColor;
+                labelColor = c.nodeMuted;
+                forceLabel = true;
+              } else {
+                fillColor = baseColor;
+                labelColor = c.nodeMuted;
+              }
             } else {
-              fillColor = c.node;
-              labelColor = c.nodeMuted;
+              if (!selectedId) {
+                fillColor = c.node;
+                labelColor = c.nodeMuted;
+              } else if (node.id === selectedId) {
+                fillColor = c.nodeHighlight;
+                labelColor = c.nodeHighlight;
+                forceLabel = true;
+              } else if (!dimmed) {
+                fillColor = c.node;
+                labelColor = c.nodeMuted;
+                forceLabel = true;
+              } else {
+                fillColor = c.node;
+                labelColor = c.nodeMuted;
+              }
             }
 
             const prevAlpha = ctx.globalAlpha;
@@ -378,7 +403,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
 
             const radius = Math.sqrt(node.val ?? 1) * NODE_SIZE;
             ctx.beginPath();
-            ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
+            
+            if (node.nodeType === "task") {
+              // Draw a square for tasks
+              const side = radius * 1.6;
+              ctx.rect(node.x - side / 2, node.y - side / 2, side, side);
+            } else {
+              // Draw a circle for notes
+              ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
+            }
+            
             ctx.fillStyle = fillColor;
             ctx.fill();
 
@@ -386,7 +420,14 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             if (node.id === selectedId) {
               ctx.lineWidth = 2 / scale;
               ctx.strokeStyle = c.nodeHighlight;
-              ctx.stroke();
+              if (node.nodeType === "task") {
+                const side = radius * 1.6;
+                ctx.strokeRect(node.x - side / 2, node.y - side / 2, side, side);
+              } else {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
+                ctx.stroke();
+              }
             }
 
             if (!dimmed && (scale > 1.2 || forceLabel)) {

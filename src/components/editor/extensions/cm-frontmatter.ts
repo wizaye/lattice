@@ -1,5 +1,5 @@
-import { ViewPlugin, Decoration, DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import { RangeSetBuilder } from "@codemirror/state";
+import { Decoration, DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { RangeSetBuilder, StateField, EditorState } from "@codemirror/state";
 
 /**
  * Widget for collapsed frontmatter
@@ -57,80 +57,74 @@ class FrontmatterWidget extends WidgetType {
   }
 }
 
+function buildFrontmatterDecorations(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const doc = state.doc;
+
+  // Check if document starts with ---
+  if (doc.lines < 3) return builder.finish();
+  
+  const firstLine = doc.line(1);
+  if (firstLine.text.trim() !== '---') return builder.finish();
+
+  // Find closing ---
+  let endLineNum = 0;
+  for (let i = 2; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    if (line.text.trim() === '---') {
+      endLineNum = i;
+      break;
+    }
+  }
+
+  if (endLineNum === 0) return builder.finish();
+
+  // Extract YAML content
+  const yamlLines: string[] = [];
+  for (let i = 2; i < endLineNum; i++) {
+    yamlLines.push(doc.line(i).text);
+  }
+
+  // Parse YAML (simple key: value parser)
+  const properties: Record<string, any> = {};
+  yamlLines.forEach(line => {
+    const match = line.match(/^(\w+):\s*(.+)$/);
+    if (match) {
+      const [, key, value] = match;
+      // Try to parse as JSON, fallback to string
+      try {
+        properties[key] = JSON.parse(value);
+      } catch {
+        properties[key] = value.replace(/^["']|["']$/g, '');
+      }
+    }
+  });
+
+  // Add widget after the closing ---
+  const endLine = doc.line(endLineNum);
+  const widget = Decoration.widget({
+    widget: new FrontmatterWidget(properties),
+    side: 1,
+    block: true,
+  });
+
+  builder.add(endLine.to, endLine.to, widget);
+
+  return builder.finish();
+}
+
 /**
  * Parse YAML frontmatter and provide folding widget
  */
-export const frontmatterExtension = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = this.buildDecorations(view);
-    }
-
-    update(update: any) {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = this.buildDecorations(update.view);
-      }
-    }
-
-    buildDecorations(view: EditorView): DecorationSet {
-      const builder = new RangeSetBuilder<Decoration>();
-      const doc = view.state.doc;
-
-      // Check if document starts with ---
-      if (doc.lines < 3) return builder.finish();
-      
-      const firstLine = doc.line(1);
-      if (firstLine.text.trim() !== '---') return builder.finish();
-
-      // Find closing ---
-      let endLineNum = 0;
-      for (let i = 2; i <= doc.lines; i++) {
-        const line = doc.line(i);
-        if (line.text.trim() === '---') {
-          endLineNum = i;
-          break;
-        }
-      }
-
-      if (endLineNum === 0) return builder.finish();
-
-      // Extract YAML content
-      const yamlLines: string[] = [];
-      for (let i = 2; i < endLineNum; i++) {
-        yamlLines.push(doc.line(i).text);
-      }
-
-      // Parse YAML (simple key: value parser)
-      const properties: Record<string, any> = {};
-      yamlLines.forEach(line => {
-        const match = line.match(/^(\w+):\s*(.+)$/);
-        if (match) {
-          const [, key, value] = match;
-          // Try to parse as JSON, fallback to string
-          try {
-            properties[key] = JSON.parse(value);
-          } catch {
-            properties[key] = value.replace(/^["']|["']$/g, '');
-          }
-        }
-      });
-
-      // Add widget after the closing ---
-      const endLine = doc.line(endLineNum);
-      const widget = Decoration.widget({
-        widget: new FrontmatterWidget(properties),
-        side: 1,
-        block: true,
-      });
-
-      builder.add(endLine.to, endLine.to, widget);
-
-      return builder.finish();
-    }
+export const frontmatterExtension = StateField.define<DecorationSet>({
+  create(state) {
+    return buildFrontmatterDecorations(state);
   },
-  {
-    decorations: (v) => v.decorations,
-  }
-);
+  update(decorations, tr) {
+    if (tr.docChanged) {
+      return buildFrontmatterDecorations(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});

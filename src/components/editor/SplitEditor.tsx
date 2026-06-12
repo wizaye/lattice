@@ -77,7 +77,7 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({ value, onChange, fileP
               className="preview-pane"
               style={{ width: `${100 - splitRatio}%` }}
             >
-              <MarkdownPreview source={value} />
+              <MarkdownPreview source={value} fileId={filePath} />
             </div>
           </div>
         )}

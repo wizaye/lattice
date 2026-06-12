@@ -43,6 +43,8 @@ import {
   type Vault,
 } from "./components/modals/ManageVaultsModal";
 import { NewPaperModal } from "./components/modals/NewPaperModal";
+import { TaskDetailModal } from "./components/modals/TaskDetailModal";
+import { KanbanConfigModal } from "./components/modals/KanbanConfigModal";
 import { PublishWizard } from "./components/modals/PublishWizard";
 import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
@@ -91,6 +93,26 @@ function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
 //      target. Keep all collectors in the shared module.
 
 export default function App() {
+  const [taskModalData, setTaskModalData] = useState<{ fileId: string; line: number; taskId: string } | null>(null);
+  const [kanbanConfigOpen, setKanbanConfigOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOpenTaskModal = (e: CustomEvent) => {
+      setTaskModalData(e.detail);
+    };
+    const handleOpenKanbanConfig = () => {
+      setKanbanConfigOpen(true);
+    };
+
+    window.addEventListener("lattice-open-task-modal" as any, handleOpenTaskModal);
+    window.addEventListener("lattice-open-kanban-config" as any, handleOpenKanbanConfig);
+
+    return () => {
+      window.removeEventListener("lattice-open-task-modal" as any, handleOpenTaskModal);
+      window.removeEventListener("lattice-open-kanban-config" as any, handleOpenKanbanConfig);
+    };
+  }, []);
+
   // ---- Vault & active file -------------------------------------------------
   // Vault state is managed by zustand. The store reads from the real
   // filesystem via Tauri commands. Components receive the same props
@@ -771,9 +793,9 @@ export default function App() {
   );
 
   const onOpenFileByPath = useCallback((path: string) => {
-    const file = vault.get(path);
+    const file = useVaultStore.getState().flatVault.get(path);
     if (file) openFile(file);
-  }, [vault, openFile]);
+  }, [openFile]);
 
   const onOpenKanban = useCallback(() => {
     const newTab: Tab = {
@@ -1259,6 +1281,21 @@ export default function App() {
         vaultName={vaultName}
         onClose={closePublishWizard}
       />
+
+      {/* ===== Task Detail Modal ===== */}
+      {taskModalData && (
+        <TaskDetailModal
+          fileId={taskModalData.fileId}
+          line={taskModalData.line}
+          taskId={taskModalData.taskId}
+          onClose={() => setTaskModalData(null)}
+        />
+      )}
+
+      {/* ===== Kanban Config Modal ===== */}
+      {kanbanConfigOpen && (
+        <KanbanConfigModal onClose={() => setKanbanConfigOpen(false)} />
+      )}
     </div>
   );
 }

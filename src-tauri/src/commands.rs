@@ -202,6 +202,8 @@ pub struct GraphNode {
     pub id: String,
     pub label: String,
     pub path: String,
+    pub node_type: String,
+    pub task_status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -262,6 +264,8 @@ pub fn get_vault_graph(path: String) -> Result<GraphData, String> {
                         id: abs_path.clone(),
                         label: name,
                         path: abs_path,
+                        node_type: "note".to_string(),
+                        task_status: None,
                     });
                 }
             }
@@ -271,8 +275,17 @@ pub fn get_vault_graph(path: String) -> Result<GraphData, String> {
 
     walk_dir(root, root, &mut name_to_path, &mut nodes).map_err(|e| e.to_string())?;
 
+    // Regex for task parsing
+    let task_re = Regex::new(r"(?m)^[\s>]*-\s+\[(.)\]\s+(.+)$").unwrap();
+    let id_re = Regex::new(r"<!--\s*id:\s*([\w-]+)\s*-->").unwrap();
+    let tag_re = Regex::new(r"#([\w/-]+)").unwrap();
+
+    let mut task_nodes = Vec::new();
+    let mut task_edges = Vec::new();
+
     for node in &nodes {
         if let Ok(content) = fs::read_to_string(&node.path) {
+            // 1. Note-level wikilinks
             for cap in WIKILINK_RE.captures_iter(&content) {
                 let target_name = cap[1].to_string();
                 if let Some(target_path) = name_to_path.get(&target_name) {
@@ -282,8 +295,59 @@ pub fn get_vault_graph(path: String) -> Result<GraphData, String> {
                     });
                 }
             }
+
+            // 2. Task nodes extraction
+            for (line_idx, line) in content.lines().enumerate() {
+                if let Some(task_cap) = task_re.captures(line) {
+                    let marker = task_cap[1].to_string();
+                    let raw_text = task_cap[2].to_string();
+
+                    // Stable ID comment check
+                    let (task_id, clean_text) = if let Some(id_cap) = id_re.captures(&raw_text) {
+                        let id_val = id_cap[1].to_string();
+                        let clean = id_re.replace(&raw_text, "").trim().to_string();
+                        (format!("task:{}", id_val), clean)
+                    } else {
+                        (format!("task:{}:{}", node.id, line_idx), raw_text.clone())
+                    };
+
+                    // Clean tags from the graph node label
+                    let clean_label_no_tags = tag_re.replace_all(&clean_text, "").trim().to_string();
+
+                    // Add task edges to wikilinks
+                    for wikilink_cap in WIKILINK_RE.captures_iter(&clean_text) {
+                        let target_name = wikilink_cap[1].to_string();
+                        if let Some(target_path) = name_to_path.get(&target_name) {
+                            task_edges.push(GraphEdge {
+                                source: task_id.clone(),
+                                target: target_path.clone(),
+                            });
+                        }
+                    }
+
+                    // Render cleaner node label without wikilink brackets
+                    let clean_label = WIKILINK_RE.replace_all(&clean_label_no_tags, "$1").to_string();
+
+                    task_nodes.push(GraphNode {
+                        id: task_id.clone(),
+                        label: clean_label,
+                        path: node.path.clone(),
+                        node_type: "task".to_string(),
+                        task_status: Some(marker),
+                    });
+
+                    // Connect parent note to task node
+                    task_edges.push(GraphEdge {
+                        source: node.id.clone(),
+                        target: task_id,
+                    });
+                }
+            }
         }
     }
+
+    nodes.extend(task_nodes);
+    edges.extend(task_edges);
 
     Ok(GraphData { nodes, edges })
 }

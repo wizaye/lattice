@@ -1,5 +1,5 @@
-import { ViewPlugin, Decoration, DecorationSet, EditorView, WidgetType, GutterMarker } from "@codemirror/view";
-import { RangeSetBuilder, StateField, StateEffect } from "@codemirror/state";
+import { Decoration, DecorationSet, EditorView, WidgetType, GutterMarker } from "@codemirror/view";
+import { RangeSetBuilder, StateField, StateEffect, EditorState } from "@codemirror/state";
 import { gutter } from "@codemirror/view";
 
 /**
@@ -58,92 +58,90 @@ class FoldMarker extends GutterMarker {
   }
 }
 
+function buildHeadingFoldDecorations(state: EditorState): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const doc = state.doc;
+  const foldedRanges = state.field(foldedRangesField);
+
+  // Find headings and their content ranges
+  const headingRegex = /^(#{1,6})\s+(.+)$/;
+
+  for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+    const line = doc.line(lineNum);
+    const match = headingRegex.exec(line.text);
+
+    if (match) {
+      const level = match[1].length;
+      
+      // Find end of section (next heading of same or higher level)
+      let endLineNum = lineNum + 1;
+      while (endLineNum <= doc.lines) {
+        const nextLine = doc.line(endLineNum);
+        const nextMatch = headingRegex.exec(nextLine.text);
+        if (nextMatch && nextMatch[1].length <= level) {
+          break;
+        }
+        endLineNum++;
+      }
+
+      // If there's content to fold
+      if (endLineNum > lineNum + 1) {
+        const contentStart = doc.line(lineNum + 1).from;
+        const contentEnd = doc.line(Math.min(endLineNum - 1, doc.lines)).to;
+        
+        const key = `${contentStart}-${contentEnd}`;
+        const isFolded = foldedRanges.has(key);
+
+        // Hide folded content
+        if (isFolded) {
+          const hideDeco = Decoration.replace({
+            block: true,
+          });
+          builder.add(contentStart, contentEnd, hideDeco);
+          
+          // Add ellipsis widget
+          const ellipsis = Decoration.widget({
+            widget: new class extends WidgetType {
+              toDOM() {
+                const span = document.createElement("span");
+                span.textContent = "...";
+                span.style.cssText = "color: var(--text-faint, #999); margin-left: 8px;";
+                return span;
+              }
+            }(),
+            side: 1,
+          });
+          builder.add(line.to, line.to, ellipsis);
+        }
+      }
+    }
+  }
+
+  return builder.finish();
+}
+
+/**
+ * State field for managing heading fold decorations
+ */
+const headingFoldDecorationsField = StateField.define<DecorationSet>({
+  create(state) {
+    return buildHeadingFoldDecorations(state);
+  },
+  update(decorations, tr) {
+    if (tr.docChanged || tr.effects.some(e => e.is(toggleFoldEffect))) {
+      return buildHeadingFoldDecorations(tr.state);
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 /**
  * Heading fold extension with gutter markers
  */
 export const headingFoldExtension = [
   foldedRangesField,
-  
-  ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet;
-
-      constructor(view: EditorView) {
-        this.decorations = this.buildDecorations(view);
-      }
-
-      update(update: any) {
-        if (update.docChanged || update.viewportChanged || update.transactions.some((tr: any) => tr.effects.some((e: any) => e.is(toggleFoldEffect)))) {
-          this.decorations = this.buildDecorations(update.view);
-        }
-      }
-
-      buildDecorations(view: EditorView): DecorationSet {
-        const builder = new RangeSetBuilder<Decoration>();
-        const doc = view.state.doc;
-        const foldedRanges = view.state.field(foldedRangesField);
-
-        // Find headings and their content ranges
-        const headingRegex = /^(#{1,6})\s+(.+)$/;
-
-        for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
-          const line = doc.line(lineNum);
-          const match = headingRegex.exec(line.text);
-
-          if (match) {
-            const level = match[1].length;
-            
-            // Find end of section (next heading of same or higher level)
-            let endLineNum = lineNum + 1;
-            while (endLineNum <= doc.lines) {
-              const nextLine = doc.line(endLineNum);
-              const nextMatch = headingRegex.exec(nextLine.text);
-              if (nextMatch && nextMatch[1].length <= level) {
-                break;
-              }
-              endLineNum++;
-            }
-
-            // If there's content to fold
-            if (endLineNum > lineNum + 1) {
-              const contentStart = doc.line(lineNum + 1).from;
-              const contentEnd = doc.line(Math.min(endLineNum - 1, doc.lines)).to;
-              
-              const key = `${contentStart}-${contentEnd}`;
-              const isFolded = foldedRanges.has(key);
-
-              // Hide folded content
-              if (isFolded) {
-                const hideDeco = Decoration.replace({
-                  block: true,
-                });
-                builder.add(contentStart, contentEnd, hideDeco);
-                
-                // Add ellipsis widget
-                const ellipsis = Decoration.widget({
-                  widget: new class extends WidgetType {
-                    toDOM() {
-                      const span = document.createElement("span");
-                      span.textContent = "...";
-                      span.style.cssText = "color: var(--text-faint, #999); margin-left: 8px;";
-                      return span;
-                    }
-                  }(),
-                  side: 1,
-                });
-                builder.add(line.to, line.to, ellipsis);
-              }
-            }
-          }
-        }
-
-        return builder.finish();
-      }
-    },
-    {
-      decorations: (v) => v.decorations,
-    }
-  ),
+  headingFoldDecorationsField,
 
   // Gutter for fold markers
   gutter({

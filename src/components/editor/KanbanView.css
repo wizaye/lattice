@@ -53,6 +53,29 @@
 }
 .kb-filter::placeholder { color: var(--text-faint); }
 
+.kb-config-btn {
+  background: transparent;
+  border: 1px solid var(--border-weak, var(--border));
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 120ms ease;
+}
+.kb-config-btn:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.kb-config-btn:active {
+  transform: scale(0.97);
+}
+
 /* ── Empty state ──────────────────────────────────────────────────── */
 
 .kb-empty {

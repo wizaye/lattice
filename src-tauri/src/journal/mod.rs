@@ -412,6 +412,7 @@ pub async fn journal_streak(vault_path: String) -> Result<JournalStreak, String>
 
     let mut longest: u32 = 0;
     let mut run: u32 = 0;
+    let mut current: u32 = 0;
     // Walk OLDEST → newest so the final value of `run` equals the
     // run that includes (or ends at) today.  Stop the run as soon
     // as a day has no entry; reset to 0.
@@ -423,12 +424,21 @@ pub async fn journal_streak(vault_path: String) -> Result<JournalStreak, String>
         if has_entry(date) {
             run += 1;
             longest = longest.max(run);
+            if offset == 0 {
+                current = run;
+            } else if offset == 1 {
+                current = run; // Temporarily assume current is yesterday's run in case today has no entry
+            }
         } else {
-            run = 0;
+            if offset == 0 {
+                // today is missing, so current remains yesterday's run (or 0 if yesterday was also missing)
+            } else {
+                run = 0;
+            }
         }
     }
     Ok(JournalStreak {
-        current: run,
+        current,
         longest,
     })
 }

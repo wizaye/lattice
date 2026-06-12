@@ -859,6 +859,71 @@
   color: var(--text-faint);
 }
 
+/* ---- Task List items in preview ---- */
+.md-preview .task-list-item {
+  list-style-type: none !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  margin: 0.3em 0;
+}
+
+.md-preview .md-task-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.md-preview .md-task-checkbox.md-task-inprogress {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: transparent;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 3px;
+  position: relative;
+}
+
+.md-preview .md-task-checkbox.md-task-inprogress::before {
+  content: "/";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.md-preview .task-list-item-text {
+  flex: 1;
+}
+
+.md-preview .md-task-meta-trigger {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.md-preview .task-list-item:hover .md-task-meta-trigger {
+  opacity: 0.6;
+}
+
+.md-preview .md-task-meta-trigger:hover {
+  background: var(--hover);
+  opacity: 1 !important;
+}
+
 .md-preview blockquote {
   margin: 0.8em 0;
   padding: 0.2em 1em;

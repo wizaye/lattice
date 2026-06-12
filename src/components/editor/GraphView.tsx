@@ -3,6 +3,11 @@ import { getVaultGraph, VaultGraphData } from "../../lib/tauriApi";
 import { useVaultStore } from "../../state/vaultStore";
 import { useEditorStore } from "../../state/editorStore";
 import {
+  loadKanbanConfig,
+  KanbanColumn,
+  DEFAULT_COLUMNS,
+} from "../../lib/taskMetadata";
+import {
   IcChevronRight,
   IcClose,
   IcGear,
@@ -43,6 +48,23 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
   // UI overlay state owned at the GraphView level so the floating
   // settings panel can be toggled without re-rendering the canvas.
   const [showSettings, setShowSettings] = useState(false);
+  const [columns, setColumns] = useState<KanbanColumn[]>(DEFAULT_COLUMNS);
+
+  useEffect(() => {
+    if (!vaultPath) return;
+    const fetchCols = () => {
+      loadKanbanConfig(vaultPath).then((config) => {
+        setColumns(config.columns);
+      });
+    };
+    fetchCols();
+    window.addEventListener("lattice-kanban-config-changed", fetchCols);
+    window.addEventListener("lattice-tasks-changed", fetchCols);
+    return () => {
+      window.removeEventListener("lattice-kanban-config-changed", fetchCols);
+      window.removeEventListener("lattice-tasks-changed", fetchCols);
+    };
+  }, [vaultPath]);
 
   // 1. Debounced Data Fetcher
   useEffect(() => {
@@ -59,9 +81,11 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
           id: n.id,
           name: n.label,
           path: n.path,
-          val: 1 + data.edges.filter(
+          nodeType: n.nodeType,
+          taskStatus: n.taskStatus,
+          val: n.nodeType === "task" ? 1.2 : (1 + data.edges.filter(
             (e) => e.target === n.id || e.source === n.id,
-          ).length,
+          ).length),
         }));
 
         const nodeMap = new Map(nodes.map((n) => [n.id, n]));
@@ -149,8 +173,18 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
           ref={canvasRef}
           nodes={graphData.nodes}
           links={graphData.links}
+          columns={columns}
           onNodeClick={(node) => {
-            if (node?.path) onOpenFile(node.path);
+            if (node?.nodeType === "task") {
+              const rawTaskId = node.id.replace(/^task:/, "");
+              window.dispatchEvent(
+                new CustomEvent("lattice-open-task-modal", {
+                  detail: { fileId: node.path, line: 1, taskId: rawTaskId },
+                })
+              );
+            } else if (node?.path) {
+              onOpenFile(node.path);
+            }
           }}
         />
       )}
