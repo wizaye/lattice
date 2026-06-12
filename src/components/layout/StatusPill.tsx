@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { IcEdit, IcSync, IcSyncIgnored } from "../common/Icons";
+import { useSettingsStore } from "../../state/settingsStore";
 import "./StatusPill.css";
 
 type Props = {
@@ -48,9 +50,38 @@ export function StatusPill({
   dirtyCount = 0,
   onClickSync,
 }: Props) {
+  const vimEnabled = useSettingsStore((s) => s.vimMode);
+  const [vimMode, setVimMode] = useState<string>("normal");
+
+  useEffect(() => {
+    if (!vimEnabled) return;
+    const handler = (e: Event) => {
+      const mode = (e as CustomEvent).detail?.mode ?? "normal";
+      setVimMode(mode);
+    };
+    window.addEventListener("lattice-vim-mode", handler);
+    // Reset mode when vim is toggled off
+    return () => {
+      window.removeEventListener("lattice-vim-mode", handler);
+      setVimMode("normal");
+    };
+  }, [vimEnabled]);
+
+  const vimLabel = vimMode.toUpperCase();
+  const vimColor =
+    vimMode === "insert" ? "#22c55e"
+    : vimMode === "visual" ? "#f59e0b"
+    : vimMode === "replace" ? "#ef4444"
+    : "var(--text-muted)";
+
   if (!hasOpenFile) {
     return (
       <div className="status-pill empty">
+        {vimEnabled && (
+          <span className="sp-vim" style={{ color: vimColor }} title={`Vim: ${vimLabel}`}>
+            {vimLabel}
+          </span>
+        )}
         <SyncIndicator
           synced={synced}
           dirtyCount={dirtyCount}
@@ -62,6 +93,11 @@ export function StatusPill({
 
   return (
     <div className="status-pill">
+      {vimEnabled && (
+        <span className="sp-vim" style={{ color: vimColor }} title={`Vim mode: ${vimLabel}\nPress i → INSERT, v → VISUAL, Esc → NORMAL`}>
+          {vimLabel}
+        </span>
+      )}
       <button className="sp-stat" title="Backlinks">
         <span className="sp-num">{backlinks}</span>
         <span className="sp-lbl">backlinks</span>

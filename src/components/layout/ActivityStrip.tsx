@@ -42,6 +42,8 @@ type Props = {
   /** Open the standalone graph window (already wired before this
    *  refactor — not routed through the sidebar). */
   onOpenGraph?: () => void;
+  /** Open the full Kanban board in the editor pane (virtual tab). */
+  onOpenKanban?: () => void;
 };
 
 type StripEntry =
@@ -55,6 +57,7 @@ export function LeftActivityStrip({
   leftCollapsed,
   onToggleSidebar,
   onOpenGraph,
+  onOpenKanban,
 }: Props) {
   // Route a view click: switch view + ensure the sidebar is open,
   // unless we're re-clicking the active view while the sidebar is
@@ -69,18 +72,14 @@ export function LeftActivityStrip({
   };
 
   const entries: StripEntry[] = [
-    { kind: "action", Icon: IcGraph, title: "Graph view", onClick: onOpenGraph },
-    { kind: "view", Icon: IcCalendar, title: "Calendar & daily notes", target: "calendar" },
-    {
-      kind: "view",
-      Icon: IcSourceControl,
-      title: "Changes (version control & sync)",
-      target: "changes",
-    },
-    { kind: "view", Icon: IcGrid, title: "Canvas", target: "canvas" },
-    { kind: "view", Icon: IcFiles, title: "All files", target: "files" },
-    { kind: "disabled", Icon: IcTerminal, title: "Terminal (Coming soon)" },
-    { kind: "view", Icon: IcKanban, title: "Kanban", target: "kanban" },
+    { kind: "action",   Icon: IcGraph,         title: "Graph view",                      onClick: onOpenGraph },
+    { kind: "view",     Icon: IcCalendar,       title: "Calendar & daily notes",          target: "calendar" },
+    { kind: "view",     Icon: IcSourceControl,  title: "Changes (version control & sync)", target: "changes" },
+    { kind: "view",     Icon: IcGrid,           title: "Canvas files",                    target: "canvas" },
+    { kind: "view",     Icon: IcFiles,          title: "All files",                       target: "files" },
+    { kind: "disabled", Icon: IcTerminal,       title: "Terminal (Coming soon)" },
+    // Kanban opens as a full editor tab — not a sidebar panel.
+    { kind: "action",   Icon: IcKanban,         title: "Kanban board",                    onClick: onOpenKanban },
   ];
 
   return (

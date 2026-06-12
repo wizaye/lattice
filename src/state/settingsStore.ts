@@ -23,6 +23,7 @@ export interface SettingsState {
   wordWrap: boolean;
   spellCheck: boolean;
   autoSaveDelay: number; // ms, 0 = manual
+  vimMode: boolean;
 
   // ── Files and links ──
   showFileExtensions: boolean;
@@ -52,6 +53,7 @@ function defaults(): SettingsState {
     wordWrap: true,
     spellCheck: false,
     autoSaveDelay: 1000,
+    vimMode: false,
 
     showFileExtensions: true,
     deleteBehavior: "trash",

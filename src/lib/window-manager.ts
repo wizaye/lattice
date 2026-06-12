@@ -4,7 +4,7 @@
  */
 
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { LogicalSize, LogicalPosition } from '@tauri-apps/api/window';
 
 export type PaneLayout = 'single' | 'horizontal' | 'vertical' | 'grid';
 
@@ -231,7 +231,7 @@ export async function tileWindows(): Promise<void> {
 
   for (let i = 0; i < windows.length; i++) {
     const w = windows[i];
-    await w.setSize({ width: windowWidth, height: screenHeight });
-    await w.setPosition({ x: i * windowWidth, y: 0 });
+    await w.setSize(new LogicalSize(windowWidth, screenHeight));
+    await w.setPosition(new LogicalPosition(i * windowWidth, 0));
   }
 }

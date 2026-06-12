@@ -1,0 +1,92 @@
+/* Keycap — keyboard chip component */
+
+.keycap-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.keycap-token {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong, rgba(255,255,255,0.18));
+  background: var(--bg-2, rgba(255,255,255,0.06));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text-normal);
+  white-space: nowrap;
+  /* Subtle 3D press illusion — matching physical keyboard keys */
+  box-shadow:
+    0 1px 0 0 var(--border-strong, rgba(255,255,255,0.12)),
+    0 2px 0 0 rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+  user-select: none;
+}
+
+.keycap-subtle .keycap-token {
+  color: var(--text-faint);
+  background: transparent;
+  box-shadow: none;
+  border-color: var(--border-weak, rgba(255,255,255,0.1));
+}
+
+/* ShortcutRow */
+
+.shortcut-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg-2, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-weak, rgba(255,255,255,0.06));
+}
+
+.shortcut-row:hover {
+  background: var(--hover);
+}
+
+.shortcut-row-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-width: 110px;
+}
+
+.shortcut-row-alt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-row-sep {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.shortcut-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.shortcut-row-action {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-normal);
+  line-height: 1.45;
+}
+
+.shortcut-row-detail {
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.45;
+}

@@ -155,3 +155,96 @@
   flex-shrink: 0;
   margin-left: auto;
 }
+
+/* ── Canvas list panel ─────────────────────────────────────── */
+.canvas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+.canvas-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--text-normal);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.canvas-list-item:hover { background: var(--hover); }
+.canvas-list-item svg {
+  width: 14px; height: 14px;
+  stroke: var(--text-muted); fill: none; stroke-width: 1.6;
+  flex-shrink: 0;
+}
+.canvas-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Kanban panel ─────────────────────────────────────────── */
+.kanban-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+  overflow-y: auto;
+  height: 100%;
+}
+.kanban-column {
+  border-radius: 6px;
+  overflow: hidden;
+}
+.kanban-col-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  width: 100%;
+  text-align: left;
+  background: var(--bg-2, var(--bg-header));
+  cursor: pointer;
+}
+.kanban-col-header:hover { background: var(--hover); color: var(--text-normal); }
+.kanban-col-label { flex: 1; }
+.kanban-col-count {
+  background: var(--bg-header);
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+.kanban-col-chevron { font-size: 9px; opacity: 0.6; }
+.kanban-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 6px 6px;
+}
+.kanban-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: var(--bg-card, var(--bg-2, var(--bg-header)));
+  border: 1px solid var(--border-weak, var(--border));
+  font-size: 12px;
+  color: var(--text-normal);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.kanban-card:hover { border-color: var(--accent); background: var(--hover); }
+.kanban-card-text { font-weight: 500; line-height: 1.4; }
+.kanban-card-source { font-size: 10px; color: var(--text-faint); }
+.kanban-empty { font-size: 11px; color: var(--text-faint); padding: 6px 10px; font-style: italic; }

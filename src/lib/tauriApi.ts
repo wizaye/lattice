@@ -2,6 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { FileNode } from "../state/types";
 
+/**
+ * Returns true when running inside a Tauri window (desktop app).
+ * Returns false when served as a plain web page (browser mode / Vite dev).
+ * Gate every `invoke` call with this to prevent "IPC not found" crashes.
+ */
+export function isTauri(): boolean {
+  return typeof window !== "undefined" &&
+    !!(window as any).__TAURI_INTERNALS__;
+}
+
 // ── Backend types (matching Rust structs) ──
 
 export interface BackendFileNode {
@@ -42,6 +52,7 @@ export interface BacklinksResult {
 // ── Tauri command wrappers ──
 
 export async function pickVaultFolder(): Promise<string | null> {
+  if (!isTauri()) return null;
   const selected = await open({
     directory: true,
     multiple: false,
@@ -51,6 +62,7 @@ export async function pickVaultFolder(): Promise<string | null> {
 }
 
 export async function readFile(path: string): Promise<string> {
+  if (!isTauri()) return "";
   return invoke<string>("read_file", { path });
 }
 
@@ -67,6 +79,7 @@ export async function readFile(path: string): Promise<string> {
  * `result ?? base64Source` without try/catch noise.
  */
 export async function readFileBytes(path: string): Promise<Uint8Array> {
+  if (!isTauri()) return new Uint8Array();
   const raw = await invoke<number[] | ArrayBuffer | Uint8Array>(
     "read_file_bytes",
     { path },
@@ -77,42 +90,52 @@ export async function readFileBytes(path: string): Promise<Uint8Array> {
 }
 
 export async function writeFile(path: string, content: string): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("write_file", { path, content });
 }
 
 export async function listDirectory(path: string): Promise<BackendFileNode[]> {
+  if (!isTauri()) return [];
   return invoke<BackendFileNode[]>("list_directory", { path });
 }
 
 export async function createFile(path: string): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("create_file", { path });
 }
 
 export async function createFolder(path: string): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("create_folder", { path });
 }
 
 export async function renameEntry(oldPath: string, newPath: string): Promise<void> {
+  if (!isTauri()) return;
   await invoke("rename_entry", { oldPath, newPath });
 }
 
 export async function deleteFile(path: string): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("delete_file", { path });
 }
 
 export async function deleteFolder(path: string): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("delete_folder", { path });
 }
 
 export async function openNewWindow(): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("open_new_window");
 }
 
 export async function getVaultGraph(path: string): Promise<VaultGraphData> {
+  if (!isTauri()) return { nodes: [], edges: [] };
   return invoke<VaultGraphData>("get_vault_graph", { path });
 }
 
 export async function getBacklinks(vaultPath: string, activeFilePath: string): Promise<BacklinksResult> {
+  if (!isTauri()) return { linked: [], unlinked: [] };
   return invoke<BacklinksResult>("get_backlinks", { vaultPath, activeFilePath });
 }
 

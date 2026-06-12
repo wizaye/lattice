@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { IcSearch, IcFiles, IcEdit, IcGitBranch, IcSettings, IcCode } from '../common/Icons';
+import { IcSearch, IcFiles, IcEdit, IcGitBranch, IcGear, IcCode } from '../common/Icons';
 import './CommandPalette.css';
 
 interface Command {
@@ -21,7 +21,7 @@ const CATEGORIES = {
   edit: { label: 'Edit', icon: <IcEdit /> },
   view: { label: 'View', icon: <IcCode /> },
   git: { label: 'Git', icon: <IcGitBranch /> },
-  tools: { label: 'Tools', icon: <IcSettings /> },
+  tools: { label: 'Tools', icon: <IcGear /> },
 };
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ onClose }) => {

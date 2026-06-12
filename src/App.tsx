@@ -5,7 +5,7 @@ import { useVaultStore } from "./state/vaultStore";
 import { useEditorStore } from "./state/editorStore";
 import { useSettingsStore } from "./state/settingsStore";
 import { pickVaultFolder, createFolder as createFolderOnDisk } from "./lib/tauriApi";
-import { GRAPH_TAB_FILE_ID } from "./state/mockVault";
+import { GRAPH_TAB_FILE_ID, KANBAN_TAB_FILE_ID } from "./state/mockVault";
 import {
   findLeaf,
   leaves,
@@ -35,6 +35,9 @@ import {
   countWords,
 } from "./lib/backlinks";
 import { SettingsModal } from "./components/modals/SettingsModal";
+import { WhichKeyOverlay, type WhichKeyItem } from "./components/common/WhichKeyOverlay";
+import { KeyboardShortcutsOverlay } from "./components/common/KeyboardShortcutsOverlay";
+import { HintOverlay } from "./components/common/HintOverlay";
 import {
   ManageVaultsModal,
   type Vault,
@@ -218,11 +221,42 @@ export default function App() {
   }, []);
 
   // ---- Sidebar state ------------------------------------------------------
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(LEFT_DEFAULT);
-  const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT);
-  const [leftView, setLeftView] = useState<LeftView>("files");
+  // Sidebar state is persisted to localStorage so it survives page reloads.
+  const [leftCollapsed, setLeftCollapsed] = useState(() => {
+    try { return window.localStorage.getItem("lattice.layout.leftCollapsed") === "true"; } catch { return false; }
+  });
+  const [rightCollapsed, setRightCollapsed] = useState(() => {
+    try { return window.localStorage.getItem("lattice.layout.rightCollapsed") === "true"; } catch { return false; }
+  });
+  const [leftWidth, setLeftWidth] = useState(() => {
+    try {
+      const v = window.localStorage.getItem("lattice.layout.leftWidth");
+      return v ? Number(v) : LEFT_DEFAULT;
+    } catch { return LEFT_DEFAULT; }
+  });
+  const [rightWidth, setRightWidth] = useState(() => {
+    try {
+      const v = window.localStorage.getItem("lattice.layout.rightWidth");
+      return v ? Number(v) : RIGHT_DEFAULT;
+    } catch { return RIGHT_DEFAULT; }
+  });
+  const [leftView, setLeftView] = useState<LeftView>(() => {
+    try {
+      const v = window.localStorage.getItem("lattice.layout.leftView");
+      return (v as LeftView) ?? "files";
+    } catch { return "files"; }
+  });
+
+  // Persist sidebar state whenever it changes
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("lattice.layout.leftCollapsed", String(leftCollapsed));
+      window.localStorage.setItem("lattice.layout.rightCollapsed", String(rightCollapsed));
+      window.localStorage.setItem("lattice.layout.leftWidth", String(leftWidth));
+      window.localStorage.setItem("lattice.layout.rightWidth", String(rightWidth));
+      window.localStorage.setItem("lattice.layout.leftView", leftView);
+    } catch { /* ignore */ }
+  }, [leftCollapsed, rightCollapsed, leftWidth, rightWidth, leftView]);
 
   // Transient “this sidebar is currently sliding open/closed” flag. It
   // gates the CSS `transition: width` so dragging the resize handle stays
@@ -244,6 +278,98 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
+  // ---- Which-key overlay --------------------------------------------------
+  // Shown when Space is pressed in vim normal mode (or Ctrl+Shift+K globally).
+  const vimEnabled = useSettingsStore((s) => s.vimMode);
+  const [whichKeyVisible, setWhichKeyVisible] = useState(false);
+  const [shortcutsOverlayOpen, setShortcutsOverlayOpen] = useState(false);
+  const [hintModeActive, setHintModeActive] = useState(false);
+
+  const WHICH_KEY_ITEMS: WhichKeyItem[] = useMemo(() => [
+    { keyLabel: "f", label: "Files", detail: "Switch sidebar to Files view" },
+    { keyLabel: "s", label: "Search", detail: "Switch sidebar to Search view" },
+    { keyLabel: "g", label: "Graph view", detail: "Open the force-graph in a tab" },
+    { keyLabel: "k", label: "Kanban board", detail: "Open Kanban as a full editor tab" },
+    { keyLabel: "c", label: "Canvas files", detail: "Show canvas files panel" },
+    { keyLabel: "n", label: "New tab", detail: "Open a blank tab" },
+    { keyLabel: "w", label: "Close tab", detail: "Close the active tab" },
+    { keyLabel: "d", label: "Daily note", detail: "Open today's daily note (Ctrl+Shift+D)" },
+    { keyLabel: ",", label: "Settings", detail: "Open Settings modal" },
+    { keyLabel: "?", label: "Keybindings", detail: "Open Settings → Hotkeys" },
+  ], []);
+
+  useEffect(() => {
+    if (!whichKeyVisible) return;
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setWhichKeyVisible(false);
+      // Dispatch app-level events so we avoid forward-reference issues
+      // (onOpenGraph / onOpenKanban are declared further down).
+      switch (e.key) {
+        case "f": setLeftView("files"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "s": setLeftView("search"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "g": window.dispatchEvent(new CustomEvent("lattice-open-graph")); break;
+        case "k": window.dispatchEvent(new CustomEvent("lattice-open-kanban")); break;
+        case "c": setLeftView("canvas"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "n": window.dispatchEvent(new CustomEvent("lattice-new-tab")); break;
+        case "w": window.dispatchEvent(new CustomEvent("lattice-close-tab")); break;
+        case "d": window.dispatchEvent(new CustomEvent("lattice-daily-note")); break;
+        case ",": openSettings(); break;
+        case "?": setShortcutsOverlayOpen(true); break;
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whichKeyVisible, leftCollapsed, openSettings]);
+
+  // Listen for Space in vim normal mode to show which-key
+  // Also listen for Ctrl+/ globally to show shortcut overlay
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl+/ (or Cmd+/) → always opens the shortcut overlay
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOverlayOpen((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        setWhichKeyVisible(false);
+        setShortcutsOverlayOpen(false);
+        setHintModeActive(false);
+        return;
+      }
+      if (!vimEnabled) return;
+      // f in normal mode → Vimium hint mode
+      // Ctrl+Shift+H (any mode) → hint mode  (H = Hints, no browser conflict)
+      if (e.key === "H" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        setHintModeActive(true);
+        return;
+      }
+      // ? in normal mode → shortcut overlay
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const active = document.activeElement;
+        if (active?.classList.contains("cm-content")) {
+          e.preventDefault();
+          setShortcutsOverlayOpen(true);
+          return;
+        }
+      }
+      if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Only fire in normal mode — check the last-known vim mode via event
+        const active = document.activeElement;
+        if (active?.classList.contains("cm-content")) {
+          e.preventDefault();
+          setWhichKeyVisible(true);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [vimEnabled]);
 
   // ---- Manage Vaults modal -----------------------------------------------
   // The list of known vaults is local-only for now (no filesystem yet).
@@ -649,6 +775,28 @@ export default function App() {
     if (file) openFile(file);
   }, [vault, openFile]);
 
+  const onOpenKanban = useCallback(() => {
+    const newTab: Tab = {
+      id: uid("tab"),
+      fileId: KANBAN_TAB_FILE_ID,
+      title: "Kanban",
+    };
+    setTree((prev) => {
+      const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
+      if (!leaf) return prev;
+      const existing = leaf.tabs.find((t) => t.fileId === KANBAN_TAB_FILE_ID);
+      if (existing) {
+        if (leaf.activeTabId === existing.id) return prev;
+        return mapLeaves(prev, (l) =>
+          l.id === leaf.id ? { ...l, activeTabId: existing.id } : l,
+        ) || prev;
+      }
+      return mapLeaves(prev, (l) =>
+        l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+      ) || prev;
+    });
+  }, [activeLeafId]);
+
   const onOpenGraph = useCallback(() => {
     const newTab: Tab = {
       id: uid("tab"),
@@ -681,6 +829,54 @@ export default function App() {
       );
     });
   }, [activeLeafId]);
+
+  // ---- Which-key event bridges --------------------------------------------
+  // The which-key overlay uses window events to avoid forward-reference issues.
+  useEffect(() => {
+    const onGraph    = () => onOpenGraph();
+    const onKanban   = () => onOpenKanban();
+    const onHintMode = () => setHintModeActive(true);
+    const onNewTab   = () => {
+      const tab = { id: uid("tab"), fileId: null, title: "New tab" };
+      const next = mapLeaves(tree, (l) => l.id === activeLeafId ? openTabInLeaf(l, tab) : l);
+      if (next) setTree(next);
+    };
+    const onCloseTab = () => {
+      const leaf = findLeaf(tree, activeLeafId);
+      if (!leaf) return;
+      const remaining = leaf.tabs.filter((t) => t.id !== leaf.activeTabId);
+      if (remaining.length === 0) return;
+      const next = mapLeaves(tree, (l) =>
+        l.id === leaf.id ? { ...l, tabs: remaining, activeTabId: remaining[remaining.length - 1].id } : l,
+      );
+      if (next) setTree(next);
+    };
+    const onDailyNote = () => {
+      const vPath = useVaultStore.getState().vaultPath;
+      if (!vPath) return;
+      void (async () => {
+        const result = await useJournalStore.getState().openToday(vPath).catch(() => null);
+        if (result) {
+          await useVaultStore.getState().refreshTree();
+          onOpenFileByPath(result.path);
+        }
+      })();
+    };
+    window.addEventListener("lattice-open-graph",   onGraph);
+    window.addEventListener("lattice-open-kanban",  onKanban);
+    window.addEventListener("lattice-hint-mode",    onHintMode);
+    window.addEventListener("lattice-new-tab",      onNewTab);
+    window.addEventListener("lattice-close-tab",    onCloseTab);
+    window.addEventListener("lattice-daily-note",   onDailyNote);
+    return () => {
+      window.removeEventListener("lattice-open-graph",  onGraph);
+      window.removeEventListener("lattice-open-kanban", onKanban);
+      window.removeEventListener("lattice-hint-mode",   onHintMode);
+      window.removeEventListener("lattice-new-tab",     onNewTab);
+      window.removeEventListener("lattice-close-tab",   onCloseTab);
+      window.removeEventListener("lattice-daily-note",  onDailyNote);
+    };
+  }, [onOpenGraph, onOpenKanban, onOpenFileByPath, tree, activeLeafId]);
 
   // ---- Wikilink navigation ------------------------------------------------
   // The CodeMirror editor dispatches a custom event when a [[wikilink]] is
@@ -856,6 +1052,7 @@ export default function App() {
             leftCollapsed={leftCollapsed}
             onToggleSidebar={toggleLeftSidebar}
             onOpenGraph={onOpenGraph}
+            onOpenKanban={onOpenKanban}
           />
         </div>
       </div>
@@ -1004,6 +1201,29 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
       />
+
+      {/* ===== Vimium hint mode (f key) ===== */}
+      {hintModeActive && (
+        <HintOverlay
+          onActivate={() => setHintModeActive(false)}
+          onCancel={() => setHintModeActive(false)}
+        />
+      )}
+
+      {/* ===== Keyboard shortcuts overlay (? or Ctrl+/) ===== */}
+      {shortcutsOverlayOpen && (
+        <KeyboardShortcutsOverlay onClose={() => setShortcutsOverlayOpen(false)} />
+      )}
+
+      {/* ===== Which-key overlay (vim Space leader) ===== */}
+      {whichKeyVisible && (
+        <WhichKeyOverlay
+          prefix="Space"
+          title="Leader key"
+          detail="Press a key to act, or Esc to cancel."
+          items={WHICH_KEY_ITEMS}
+        />
+      )}
 
       {/* ===== Manage Vaults overlay (z-index above settings) ===== */}
       <ManageVaultsModal

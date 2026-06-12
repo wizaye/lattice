@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useEffect, useState } from 'react';
+import { isTauri } from './tauriApi';
 
 export interface UpdateInfo {
   current_version: string;
@@ -22,7 +23,8 @@ export interface UpdateSettings {
 /**
  * Check for updates
  */
-export async function checkForUpdates(): Promise<UpdateInfo> {
+export async function checkForUpdates(): Promise<UpdateInfo | null> {
+  if (!isTauri()) return null;
   return await invoke('ota_check_for_updates');
 }
 
@@ -30,13 +32,15 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
  * Download and install update
  */
 export async function downloadAndInstall(): Promise<string> {
+  if (!isTauri()) return 'Not available in browser mode';
   return await invoke('ota_download_and_install');
 }
 
 /**
  * Get update settings
  */
-export async function getUpdateSettings(): Promise<UpdateSettings> {
+export async function getUpdateSettings(): Promise<UpdateSettings | null> {
+  if (!isTauri()) return null;
   return await invoke('ota_get_settings');
 }
 
@@ -44,6 +48,7 @@ export async function getUpdateSettings(): Promise<UpdateSettings> {
  * Save update settings
  */
 export async function setUpdateSettings(settings: UpdateSettings): Promise<void> {
+  if (!isTauri()) return;
   return await invoke('ota_set_settings', { settings });
 }
 
@@ -51,13 +56,15 @@ export async function setUpdateSettings(settings: UpdateSettings): Promise<void>
  * Get release notes for a version
  */
 export async function getReleaseNotes(version: string): Promise<string> {
+  if (!isTauri()) return '';
   return await invoke('ota_get_release_notes', { version });
 }
 
 /**
  * Check for updates on startup
  */
-export async function startupCheck(): Promise<UpdateInfo> {
+export async function startupCheck(): Promise<UpdateInfo | null> {
+  if (!isTauri()) return null;
   return await invoke('ota_startup_check');
 }
 
@@ -70,6 +77,8 @@ export function useUpdateNotifications() {
   const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
+    if (!isTauri()) return; // skip all update machinery in browser mode
+
     // Listen for update available
     const unlistenUpdate = listen<UpdateInfo>('update-available', (event) => {
       setUpdateInfo(event.payload);

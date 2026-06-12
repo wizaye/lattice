@@ -65,9 +65,7 @@ export const calloutsExtension = ViewPlugin.fromClass(
 
         if (match) {
           const calloutType = match[1].toLowerCase();
-          const foldable = match[2]; // + or -
-          const title = match[3] || calloutType.charAt(0).toUpperCase() + calloutType.slice(1);
-          
+          // match[2] = foldable (+/-), match[3] = optional title — reserved for future use
           const config = CALLOUT_TYPES[calloutType] || CALLOUT_TYPES.note;
 
           // Find end of callout block (consecutive lines starting with >)

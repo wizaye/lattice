@@ -1,0 +1,128 @@
+/* HelpShortcutsPanel */
+
+.hsp-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hsp-header { margin-bottom: 4px; }
+.hsp-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-normal);
+  margin: 0 0 4px;
+}
+.hsp-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Search */
+.hsp-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.hsp-search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 16px;
+  color: var(--text-faint);
+  pointer-events: none;
+  line-height: 1;
+}
+.hsp-search {
+  width: 100%;
+  height: 36px;
+  padding: 0 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border-weak, var(--border));
+  background: var(--bg-2, var(--bg-editor));
+  color: var(--text-normal);
+  font-size: 13px;
+  outline: none;
+}
+.hsp-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.hsp-search::placeholder { color: var(--text-faint); }
+.hsp-search-clear {
+  position: absolute;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 3px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.hsp-search-clear:hover { background: var(--hover); color: var(--text-normal); }
+
+.hsp-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.hsp-empty {
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 13px;
+  padding: 24px;
+}
+
+/* Sections */
+.hsp-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.hsp-section {
+  border-radius: 12px;
+  border: 1px solid var(--border-weak, rgba(255,255,255,0.07));
+  overflow: hidden;
+}
+
+.hsp-section-header {
+  padding: 12px 16px 10px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-header));
+  border-bottom: 1px solid var(--border-weak, rgba(255,255,255,0.06));
+}
+
+.hsp-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+}
+
+.hsp-section-desc {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+.hsp-section-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 6px;
+}
+
+/* ShortcutRow inside a section — slight override for tighter look */
+.hsp-section-rows .shortcut-row {
+  border-radius: 6px;
+  margin-bottom: 2px;
+  background: transparent;
+  border: none;
+}
+.hsp-section-rows .shortcut-row:hover {
+  background: var(--hover);
+}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import CodeMirrorEditor from './CodeMirrorEditor';
-import MarkdownPreview from './MarkdownPreview';
+import { CodeMirrorEditor } from './CodeMirrorEditor';
+import { MarkdownPreview } from './MarkdownPreview';
 import './SplitEditor.css';
 
 interface SplitEditorProps {
@@ -58,13 +58,7 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({ value, onChange, fileP
       <div className={`editor-content editor-mode-${mode}`}>
         {mode === 'edit' && (
           <div className="editor-pane">
-            <CodeMirrorEditor value={value} onChange={onChange} filePath={filePath} />
-          </div>
-        )}
-
-        {mode === 'preview' && (
-          <div className="preview-pane">
-            <MarkdownPreview content={value} />
+            <CodeMirrorEditor content={value} onChange={onChange} filePath={filePath ?? ''} onSave={() => {}} />
           </div>
         )}
 
@@ -74,7 +68,7 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({ value, onChange, fileP
               className="editor-pane"
               style={{ width: `${splitRatio}%` }}
             >
-              <CodeMirrorEditor value={value} onChange={onChange} filePath={filePath} />
+              <CodeMirrorEditor content={value} onChange={onChange} filePath={filePath ?? ''} onSave={() => {}} />
             </div>
 
             <div className="split-divider" />
@@ -83,7 +77,7 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({ value, onChange, fileP
               className="preview-pane"
               style={{ width: `${100 - splitRatio}%` }}
             >
-              <MarkdownPreview content={value} />
+              <MarkdownPreview source={value} />
             </div>
           </div>
         )}

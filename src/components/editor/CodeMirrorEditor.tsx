@@ -43,6 +43,17 @@ import { useSettingsStore } from "../../state/settingsStore";
 import type { FileNode } from "../../state/types";
 import type { JumpToLineDetail } from "../../lib/backlinks";
 import { outlinerExtension, shouldEnableOutliner } from "./cm-outliner";
+import { vimMode as makeVimExtension } from "./extensions/cm-vim";
+import {
+  embedsExtension,
+  calloutsExtension,
+  frontmatterExtension,
+  headingFoldExtension,
+  sectionLinksExtension,
+  slashCompletionSource,
+  slashThemeExtension,
+  livePreviewExtension,
+} from "./extensions";
 
 // ── Theme ──
 // Uses the app's own CSS tokens (set in App.css for both `:root` and
@@ -549,6 +560,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
 
   const showLineNumbers = useSettingsStore((s) => s.lineNumbers);
   const wordWrap = useSettingsStore((s) => s.wordWrap);
+  const vimEnabled = useSettingsStore((s) => s.vimMode);
 
   useEffect(() => {
     if (!editorRef.current || !filePath) return;
@@ -612,8 +624,21 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         listHangingIndent,
         // Enable outliner extensions when appropriate
         ...(enableOutliner ? [outlinerExtension()] : []),
+        // Vim mode (must come before other keymaps to take priority)
+        ...makeVimExtension(vimEnabled),
+        // Obsidian-compat extensions (single ViewPlugin — no spread)
+        embedsExtension,
+        calloutsExtension,
+        frontmatterExtension,
+        ...headingFoldExtension,
+        sectionLinksExtension,
+        // Slash command theme only (completion source merged below)
+        slashThemeExtension,
+        // Live preview: collapse markdown syntax on non-cursor lines
+        ...livePreviewExtension,
+        // Single autocompletion() merging wikilinks + slash commands
         autocompletion({
-          override: [wikilinkCompletions],
+          override: [wikilinkCompletions, slashCompletionSource],
           activateOnTyping: true,
         }),
         EditorView.updateListener.of((update) => {
@@ -629,6 +654,12 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
               const newContent = update.state.doc.toString();
               onChangeRef.current(newContent);
             }, 50);
+          }
+          // Broadcast vim mode changes so the status bar can reflect them
+          if (vimEnabled) {
+            const vimState = (update.state as any).vim;
+            const mode: string = vimState?.mode ?? "normal";
+            window.dispatchEvent(new CustomEvent("lattice-vim-mode", { detail: { mode } }));
           }
         }),
         EditorView.domEventHandlers({
@@ -661,12 +692,10 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
       viewRef.current = null;
       loadedFileRef.current = null;
     };
-    // Re-create only when the file path or theme changes. Content
-    // updates (initial load, external edits) are handled by the sync
-    // effect below \u2014 NOT by destroying & rebuilding the editor, which
-    // would steal focus and wipe undo history.
+    // Re-create only when the file path, theme, or vim mode changes.
+    // Content updates are handled by the sync effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, isDark, showLineNumbers, wordWrap]);
+  }, [filePath, isDark, showLineNumbers, wordWrap, vimEnabled]);
 
   // Sync external content into the editor doc.
   //

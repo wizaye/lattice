@@ -34,11 +34,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const cached = get().fileContents[path];
     if (cached !== undefined) return cached;
 
-    const content = await readFile(path);
+    // In browser mode (no Tauri), readFile returns "". Fall back to the
+    // vault store's in-memory content (set by mock vault injection or
+    // updateFileContent) before falling through to the empty string.
+    const diskContent = await readFile(path);
+    if (diskContent !== "") {
+      set((state) => ({
+        fileContents: { ...state.fileContents, [path]: diskContent },
+      }));
+      return diskContent;
+    }
+
+    // Vault store fallback (in-memory / mock content)
+    const { useVaultStore } = await import("./vaultStore");
+    const node = useVaultStore.getState().flatVault.get(path);
+    const vaultContent = (node?.kind === "file" || node?.kind === "canvas") ? (node.content ?? "") : "";
     set((state) => ({
-      fileContents: { ...state.fileContents, [path]: content },
+      fileContents: { ...state.fileContents, [path]: vaultContent },
     }));
-    return content;
+    return vaultContent;
   },
 
   setFileContent: (path, content) =>

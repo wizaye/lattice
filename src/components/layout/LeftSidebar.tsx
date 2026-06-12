@@ -25,6 +25,7 @@ import { useVcsStore } from "../../state/vcsStore";
 import { VaultPickerMenu } from "../modals/VaultPickerMenu";
 import { ChangesPanel } from "./ChangesPanel";
 import { CalendarPanel } from "../calendar/CalendarPanel";
+import { CanvasListPanel } from "./CanvasListPanel";
 import "./LeftSidebar.css";
 
 // `changes` is the VCS + BYOC home (see docs/impl-v2.md §4 + §5.2).
@@ -44,7 +45,8 @@ export type LeftView =
   | "search"
   | "bookmarks"
   | "changes"
-  | "calendar";
+  | "calendar"
+  | "canvas";
 
 type Props = {
   vaultName: string;
@@ -220,9 +222,12 @@ export function LeftSidebar({
             <>
               <span className="ls-toolbar-label">Calendar</span>
               <span className="ls-toolbar-spacer" />
-              {/* The panel itself owns the +Event button + view
-                  switcher — keeping the global sidebar toolbar
-                  uncluttered.  This row just labels the surface. */}
+            </>
+          )}
+          {view === "canvas" && (
+            <>
+              <span className="ls-toolbar-label">Canvas files</span>
+              <span className="ls-toolbar-spacer" />
             </>
           )}
         </div>
@@ -252,6 +257,9 @@ export function LeftSidebar({
             {view === "changes" && <ChangesPanel />}
             {view === "calendar" && (
               <CalendarPanel onOpenFileByPath={onOpenFileByPath} />
+            )}
+            {view === "canvas" && (
+              <CanvasListPanel onOpenFile={onOpenFile} />
             )}
           </div>
         </div>

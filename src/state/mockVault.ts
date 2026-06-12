@@ -7,6 +7,13 @@ import type { FileNode } from "./types";
  */
 export const GRAPH_TAB_FILE_ID = "__graph__";
 
+/**
+ * The sentinel "file id" for the KanbanView virtual tab. EditorArea
+ * checks `activeTab.fileId === KANBAN_TAB_FILE_ID` to render the
+ * full-pane Kanban board instead of a text editor.
+ */
+export const KANBAN_TAB_FILE_ID = "__kanban__";
+
 /** Flatten the vault for fast id-based lookup. */
 export function flattenVault(nodes: FileNode[]): Map<string, FileNode> {
   const out = new Map<string, FileNode>();

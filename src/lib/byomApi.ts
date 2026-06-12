@@ -5,6 +5,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from './tauriApi';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -93,6 +94,7 @@ export async function generateCommitMessage(
   vaultPath: string,
   useAi: boolean = true
 ): Promise<{ message: string; aiGenerated: boolean }> {
+  if (!isTauri()) return { message: '', aiGenerated: false };
   return await invoke('vcs_generate_commit_message', {
     vaultPath,
     useAi,

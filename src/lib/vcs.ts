@@ -10,6 +10,7 @@
  * runtime transformation layer needed.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "./tauriApi";
 
 /**
  * One row in the changes list — same shape regardless of which
@@ -131,11 +132,13 @@ export interface GraphCommit {
 
 /** Detect whether the system has a working `git` binary on PATH. */
 export async function gitCheckInstalled(): Promise<GitPresence> {
+  if (!isTauri()) return { installed: false, version: null };
   return invoke<GitPresence>("git_check_installed");
 }
 
 /** One-shot status snapshot (staged + unstaged + untracked + branch). */
 export async function vcsStatus(vaultPath: string): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_status", { vaultPath });
 }
 
@@ -147,6 +150,7 @@ export async function vcsStatus(vaultPath: string): Promise<VcsStatus> {
 export async function vcsPreviewUntrackedCount(
   vaultPath: string,
 ): Promise<number> {
+  if (!isTauri()) return 0;
   return invoke<number>("vcs_preview_untracked_count", { vaultPath });
 }
 
@@ -156,6 +160,7 @@ export async function vcsPreviewUntrackedCount(
  * commit.  Idempotent — safe to retry after a transient failure.
  */
 export async function vcsInit(vaultPath: string): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_init", { vaultPath });
 }
 
@@ -164,6 +169,7 @@ export async function vcsStage(
   vaultPath: string,
   paths: string[],
 ): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_stage", { vaultPath, paths });
 }
 
@@ -172,6 +178,7 @@ export async function vcsUnstage(
   vaultPath: string,
   paths: string[],
 ): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_unstage", { vaultPath, paths });
 }
 
@@ -184,6 +191,7 @@ export async function vcsDiscard(
   vaultPath: string,
   paths: string[],
 ): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_discard", { vaultPath, paths });
 }
 
@@ -196,6 +204,7 @@ export async function vcsCommit(
   vaultPath: string,
   message: string,
 ): Promise<string> {
+  if (!isTauri()) return '';
   return invoke<string>("vcs_commit", { vaultPath, message });
 }
 
@@ -208,6 +217,7 @@ export async function vcsCommitAll(
   vaultPath: string,
   message: string,
 ): Promise<string> {
+  if (!isTauri()) return '';
   return invoke<string>("vcs_commit_all", { vaultPath, message });
 }
 
@@ -216,6 +226,7 @@ export async function vcsLog(
   vaultPath: string,
   limit: number,
 ): Promise<CommitInfo[]> {
+  if (!isTauri()) return [];
   return invoke<CommitInfo[]>("vcs_log", { vaultPath, limit });
 }
 
@@ -228,6 +239,7 @@ export async function vcsDiffFile(
   relPath: string,
   staged?: boolean,
 ): Promise<string> {
+  if (!isTauri()) return '';
   return invoke<string>("vcs_diff_file", { vaultPath, relPath, staged });
 }
 
@@ -239,6 +251,7 @@ export async function vcsCheckoutFile(
   vaultPath: string,
   relPath: string,
 ): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("vcs_checkout_file", { vaultPath, relPath });
 }
 
@@ -250,6 +263,7 @@ export async function vcsCheckoutFile(
  * by recency.  One subprocess (`git for-each-ref`), cheap to refresh.
  */
 export async function vcsBranches(vaultPath: string): Promise<BranchInfo[]> {
+  if (!isTauri()) return [];
   return invoke<BranchInfo[]>("vcs_branches", { vaultPath });
 }
 
@@ -265,6 +279,7 @@ export async function vcsBranchCreate(
   startPoint?: string,
   checkout?: boolean,
 ): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_branch_create", {
     vaultPath,
     name,
@@ -282,6 +297,7 @@ export async function vcsBranchSwitch(
   vaultPath: string,
   name: string,
 ): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_branch_switch", { vaultPath, name });
 }
 
@@ -295,6 +311,7 @@ export async function vcsBranchDelete(
   name: string,
   force?: boolean,
 ): Promise<VcsStatus> {
+  if (!isTauri()) return { initialized: false, branch: null, headShort: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] };
   return invoke<VcsStatus>("vcs_branch_delete", { vaultPath, name, force });
 }
 
@@ -310,6 +327,7 @@ export async function vcsLogGraph(
   vaultPath: string,
   limit: number,
 ): Promise<GraphCommit[]> {
+  if (!isTauri()) return [];
   return invoke<GraphCommit[]>("vcs_log_graph", { vaultPath, limit });
 }
 

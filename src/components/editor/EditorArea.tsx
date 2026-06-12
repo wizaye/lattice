@@ -78,6 +78,7 @@ import {
 import { useEditorStore } from "../../state/editorStore";
 import { useVaultStore } from "../../state/vaultStore";
 import GraphView from "./GraphView";
+import { KanbanView } from "./KanbanView";
 import { PaperToolbar } from "../paper/PaperToolbar";
 import "./EditorArea.css";
 
@@ -1010,7 +1011,8 @@ function Pane(props: PaneProps) {
   // right / Split down / Copy screenshot / Bookmark) rather than the
   // markdown DocMoreMenu, which is full of file-only items like
   // Rename, Export to PDF, Find/Replace.
-  const isGraphTab = activeTab?.fileId === "__graph__";
+  const isGraphTab  = activeTab?.fileId === "__graph__";
+  const isKanbanTab = activeTab?.fileId === "__kanban__";
 
   const paneRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -1245,7 +1247,7 @@ function Pane(props: PaneProps) {
           <SplitMenuButton
             onSplit={(edge) => onSplit(leaf.id, edge)}
           />
-          {activeTab?.fileId && !isCanvasTab && !isPdfTab && activeTab.fileId !== "__graph__" && (
+          {activeTab?.fileId && !isCanvasTab && !isPdfTab && !isGraphTab && !isKanbanTab && (
             <button
               className="icon-btn tiny"
               title={activeTab.viewMode === "preview" ? "Edit mode" : "Reading mode"}
@@ -1255,7 +1257,7 @@ function Pane(props: PaneProps) {
               {activeTab.viewMode === "preview" ? <IcEdit /> : <IcBook />}
             </button>
           )}
-          {isGraphTab ? (
+          {(isGraphTab || isKanbanTab) ? (
             <GraphMoreMenu
               onClose={
                 activeTab
@@ -1327,6 +1329,9 @@ function Pane(props: PaneProps) {
             (() => {
               if (activeTab.fileId === "__graph__") {
                 return <GraphView onOpenFile={onOpenFileByPath!} />;
+              }
+              if (activeTab.fileId === "__kanban__") {
+                return <KanbanView onOpenFileByPath={onOpenFileByPath} />;
               }
               const file = vault.get(activeTab.fileId);
               // Folder rows shouldn't be openable in tabs, and a stale

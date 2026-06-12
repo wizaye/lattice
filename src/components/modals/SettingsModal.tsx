@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { HelpShortcutsPanel } from "../common/HelpShortcutsPanel";
 import {
   IcArchive,
   IcBook,
@@ -204,6 +205,23 @@ function SectionBody({
   const [journalBusy, setJournalBusy] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
 
+  // Hoisted here (not inside the ai-privacy branch) to satisfy Rules of Hooks —
+  // hooks must not be called conditionally.
+  const [modelConfigs, setModelConfigs] = useState([
+    { id: "ollama",    provider: "Ollama (Local)",    enabled: true,  apiKey: "" },
+    { id: "openai",    provider: "OpenAI",            enabled: false, apiKey: "" },
+    { id: "anthropic", provider: "Anthropic",         enabled: false, apiKey: "" },
+    { id: "gemini",    provider: "Google Gemini",     enabled: false, apiKey: "" },
+    { id: "azure",     provider: "Azure OpenAI",      enabled: false, apiKey: "" },
+  ]);
+  const [featureScopes, setFeatureScopes] = useState<Record<string, boolean>>({
+    "vcs-commits":        true,
+    "smart-links":        true,
+    "meeting-summaries":  true,
+    "canvas-completion":  true,
+    "chat":               true,
+  });
+
   useEffect(() => {
     if (section.id !== "daily-notes") return;
     if (!vaultPath || vaultPath === "__mock__") {
@@ -366,6 +384,61 @@ function SectionBody({
             <span className="settings-slider"></span>
           </label>
         </div>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">Vim mode</div>
+            <div className="settings-row-desc">
+              Enable Vim keybindings in the editor. Once active, the status bar shows
+              the current mode (<strong>NORMAL</strong> / <strong>INSERT</strong> / <strong>VISUAL</strong>).
+              Press <code>i</code> to enter insert, <code>Esc</code> to return to normal.
+            </div>
+          </div>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              checked={store.vimMode}
+              onChange={(e) => store.set("vimMode", e.target.checked)}
+            />
+            <span className="settings-slider"></span>
+          </label>
+        </div>
+
+        {store.vimMode && (
+          <div style={{
+            marginTop: 12,
+            padding: "12px 16px",
+            background: "var(--bg-header)",
+            borderRadius: 8,
+            border: "1px solid var(--border-weak, var(--border))",
+            fontSize: 13,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: "var(--accent)" }}>
+              ⌨ Vim mode is ON — quick reference
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              <span><code>i</code> — insert before cursor</span>
+              <span><code>a</code> — append after cursor</span>
+              <span><code>o</code> — new line below</span>
+              <span><code>O</code> — new line above</span>
+              <span><code>Esc</code> — normal mode</span>
+              <span><code>v / V</code> — visual / line select</span>
+              <span><code>h j k l</code> — move</span>
+              <span><code>w / b</code> — word forward / back</span>
+              <span><code>0 / $</code> — line start / end</span>
+              <span><code>gg / G</code> — file top / bottom</span>
+              <span><code>dd</code> — delete line</span>
+              <span><code>yy / p</code> — yank / paste line</span>
+              <span><code>u / Ctrl-r</code> — undo / redo</span>
+              <span><code>/pattern</code> — search forward</span>
+              <span><code>n / N</code> — next / prev match</span>
+              <span><code>ciw / diw</code> — change / delete word</span>
+            </div>
+            <div style={{ marginTop: 8, color: "var(--text-faint)", fontSize: 11 }}>
+              Full reference: open the Keybindings panel (Settings → Hotkeys) or press <code>?</code> in normal mode.
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -428,27 +501,6 @@ function SectionBody({
   }
 
   if (section.id === "ai-privacy") {
-    const [modelConfigs, setModelConfigs] = useState<Array<{
-      id: string;
-      provider: string;
-      enabled: boolean;
-      apiKey: string;
-    }>>([
-      { id: "ollama", provider: "Ollama (Local)", enabled: true, apiKey: "" },
-      { id: "openai", provider: "OpenAI", enabled: false, apiKey: "" },
-      { id: "anthropic", provider: "Anthropic", enabled: false, apiKey: "" },
-      { id: "gemini", provider: "Google Gemini", enabled: false, apiKey: "" },
-      { id: "azure", provider: "Azure OpenAI", enabled: false, apiKey: "" },
-    ]);
-
-    const [featureScopes, setFeatureScopes] = useState<Record<string, boolean>>({
-      "vcs-commits": true,
-      "smart-links": true,
-      "meeting-summaries": true,
-      "canvas-completion": true,
-      "chat": true,
-    });
-
     return (
       <div className="settings-body">
         <h2 className="settings-body-title">AI & Privacy</h2>
@@ -774,6 +826,15 @@ function SectionBody({
             </div>
           </>
         )}
+      </div>
+    );
+  }
+
+  // ── Hotkeys / keybindings reference ──────────────────────────────
+  if (section.id === "hotkeys") {
+    return (
+      <div className="settings-body">
+        <HelpShortcutsPanel inline />
       </div>
     );
   }

@@ -1,0 +1,57 @@
+/* HintOverlay — Vimium-style element labels */
+
+/* Full-screen container — pointer-events: none so the underlying UI
+   remains visible and the labels don't block mouse interaction */
+.hint-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9800;
+  pointer-events: none;
+}
+
+/* Slight backdrop so users know hint mode is active */
+.hint-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* ── Label badge — exact clone of ZenNotes .vim-hint ── */
+.hint-label {
+  position: absolute;
+  z-index: 10000;
+
+  background: var(--accent, #7c5bf0);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono, "SF Mono", ui-monospace, monospace);
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1.4;
+  pointer-events: none;
+  text-transform: lowercase;
+  white-space: nowrap;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.15) inset,
+    0 2px 6px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(0,0,0,0.25);
+
+  /* Slight bounce in */
+  animation: hint-pop 0.08s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes hint-pop {
+  from { transform: scale(0.75); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+/* Non-matching labels fade out */
+.hint-label--dim {
+  opacity: 0.18;
+}
+
+/* Already-typed prefix shown at lower opacity */
+.hint-label-matched {
+  opacity: 0.55;
+}

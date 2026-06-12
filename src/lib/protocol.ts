@@ -101,7 +101,7 @@ export async function handleProtocolUrl(url: string): Promise<void> {
 
 // Register protocol handler on app start
 export function registerProtocolHandler() {
-  if (window.__TAURI__) {
+  if ((window as any).__TAURI__) {
     // Listen for deep link events from Tauri
     const appWindow = getCurrentWebviewWindow();
     

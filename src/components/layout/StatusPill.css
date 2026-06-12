@@ -44,6 +44,20 @@ button.sp-stat:hover { background: var(--hover); color: var(--text-normal); }
 .sp-num { color: var(--text-normal); font-weight: 500; }
 .sp-lbl { color: var(--text-muted); }
 
+/* Vim mode indicator badge */
+.sp-vim {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  cursor: default;
+  user-select: none;
+  transition: color 0.1s, background 0.1s;
+}
+
 .sp-icon {
   display: inline-flex;
   align-items: center;
