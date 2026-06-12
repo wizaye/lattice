@@ -25,6 +25,11 @@ export interface SettingsState {
   autoSaveDelay: number; // ms, 0 = manual
   vimMode: boolean;
 
+  // ── Collaboration (Loro CRDT) ──
+  /** Enable the Loro CRDT layer. Phase 1: local-only history + undo.
+   *  Phase 2+: real-time multi-user sync via WebSocket. */
+  collabEnabled: boolean;
+
   // ── Files and links ──
   showFileExtensions: boolean;
   deleteBehavior: "trash" | "permanent";
@@ -54,6 +59,7 @@ function defaults(): SettingsState {
     spellCheck: false,
     autoSaveDelay: 1000,
     vimMode: false,
+    collabEnabled: false,
 
     showFileExtensions: true,
     deleteBehavior: "trash",

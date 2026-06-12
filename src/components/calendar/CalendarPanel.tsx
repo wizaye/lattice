@@ -44,6 +44,7 @@ import { IcCalendar, IcEdit, IcPlus, IcSparkle, IcTrash } from "../common/Icons"
 
 import { EventDialog } from "./EventDialog";
 import "./CalendarPanel.css";
+import { SkeuomorphicButton } from "../common/SkeuomorphicButton";
 
 type Props = {
   /**
