@@ -71,6 +71,13 @@ type GraphCanvasProps = {
   nodes: Node[];
   links: Link[];
   columns?: KanbanColumn[];
+  textFadeThreshold: number;
+  nodeSize: number;
+  linkThickness: number;
+  centerForce: number;
+  repelForce: number;
+  linkForce: number;
+  linkDistance: number;
   onNodeClick?: (node: Node) => void;
 };
 
@@ -83,10 +90,8 @@ type GraphCanvasProps = {
 // We use AREA-based (sqrt) scaling, not linear: with linear scaling and
 // val ∈ [1,10], hubs ended up ~10× the radius of leaves and visually
 // dominated the canvas (80 px diameter blobs that overlap their
-// neighbours). Area scaling keeps the visual weight proportional to
-// degree without ballooning hubs out of proportion. With NODE_SIZE=3,
-// val=1 → r≈3, val=10 → r≈9.5 — a 3× radius ratio, ~10× area.
-const NODE_SIZE = 3;
+// neighbours). // degree without ballooning hubs out of proportion. With dynamic nodeSize,
+// val=1 → r≈nodeSize, val=10 → r≈sqrt(10)*nodeSize.
 
 // Gaussian blur radius (in canvas pixels) applied to the COMPOSITED
 // dimmed-layer image when the focus effect is active. The whole layer
@@ -145,7 +150,22 @@ function readThemeColors() {
 }
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
-  function GraphCanvas({ nodes, links, columns, onNodeClick }, ref) {
+  function GraphCanvas(
+    {
+      nodes,
+      links,
+      columns,
+      textFadeThreshold,
+      nodeSize,
+      linkThickness,
+      centerForce,
+      repelForce,
+      linkForce,
+      linkDistance,
+      onNodeClick,
+    },
+    ref,
+  ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const instanceRef = useRef<any>(null);
     // Track the last data payload we pushed so we don't restart the
@@ -264,11 +284,11 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       inst
         .backgroundColor("transparent")
         .nodeLabel("name")
-        // Must match NODE_SIZE so force-graph's BUILT-IN pointer
+        // Must match nodeSize so force-graph's BUILT-IN pointer
         // hit-test (which uses sqrt(val) * nodeRelSize) lines up with
         // the visual radius we draw in `nodeCanvasObject`. If these
         // diverge, clicks miss or register on empty space.
-        .nodeRelSize(NODE_SIZE)
+        .nodeRelSize(nodeSize)
         .minZoom(0.2)
         .maxZoom(8)
         // Explicit re-enable on every property — some force-graph
@@ -308,14 +328,14 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
           const prevAlpha = ctx.globalAlpha;
           if (selectedId && !incident) {
             ctx.strokeStyle = c.link;
-            ctx.lineWidth = 0.8;
+            ctx.lineWidth = linkThickness;
             ctx.globalAlpha = prevAlpha * DIM_LINK_ALPHA;
           } else if (incident) {
             ctx.strokeStyle = c.linkHighlight;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = linkThickness * 2;
           } else {
             ctx.strokeStyle = c.link;
-            ctx.lineWidth = 0.8;
+            ctx.lineWidth = linkThickness;
           }
           ctx.beginPath();
           ctx.moveTo(s.x, s.y);
@@ -401,7 +421,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
             const prevAlpha = ctx.globalAlpha;
             if (dimmed) ctx.globalAlpha = prevAlpha * DIM_NODE_ALPHA;
 
-            const radius = Math.sqrt(node.val ?? 1) * NODE_SIZE;
+            const radius = Math.sqrt(node.val ?? 1) * nodeSize;
             ctx.beginPath();
             
             if (node.nodeType === "task") {
@@ -430,7 +450,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               }
             }
 
-            if (!dimmed && (scale > 1.2 || forceLabel)) {
+            if (!dimmed && (scale > textFadeThreshold || forceLabel)) {
               // Font scales inversely with zoom so labels stay a
               // consistent on-screen size. Dimmed nodes never get
               // labels — they're meant to recede into the backdrop.
@@ -540,12 +560,13 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
       inst.d3VelocityDecay(0.15); // lowered for elasticity
       inst.d3AlphaDecay(0.01);
       const charge = inst.d3Force?.("charge");
-      if (charge?.strength) charge.strength(-160);
+      if (charge?.strength) charge.strength(-repelForce * 16);
       if (charge?.distanceMax) charge.distanceMax(500);
       const link = inst.d3Force?.("link");
-      if (link?.distance) link.distance(70);
+      if (link?.distance) link.distance(linkDistance);
+      if (link?.strength) link.strength(linkForce);
       const center = inst.d3Force?.("center");
-      if (center?.strength) center.strength(0.3);
+      if (center?.strength) center.strength(centerForce);
 
       // ── Custom wheel routing ───────────────────────────────────
       // Three input devices generate `wheel` events and we route each
@@ -708,6 +729,57 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         }, 1000);
       }
     }, [nodes, links]);
+
+    // Update node size dynamically
+    useEffect(() => {
+      if (instanceRef.current) {
+        instanceRef.current.nodeRelSize(nodeSize);
+      }
+    }, [nodeSize]);
+
+    // Update center force dynamically
+    useEffect(() => {
+      const g = instanceRef.current;
+      if (!g) return;
+      const center = g.d3Force?.("center");
+      if (center?.strength) {
+        center.strength(centerForce);
+        g.d3ReheatSimulation();
+      }
+    }, [centerForce]);
+
+    // Update repel force dynamically
+    useEffect(() => {
+      const g = instanceRef.current;
+      if (!g) return;
+      const charge = g.d3Force?.("charge");
+      if (charge?.strength) {
+        charge.strength(-repelForce * 16);
+        g.d3ReheatSimulation();
+      }
+    }, [repelForce]);
+
+    // Update link force dynamically
+    useEffect(() => {
+      const g = instanceRef.current;
+      if (!g) return;
+      const link = g.d3Force?.("link");
+      if (link?.strength) {
+        link.strength(linkForce);
+        g.d3ReheatSimulation();
+      }
+    }, [linkForce]);
+
+    // Update link distance dynamically
+    useEffect(() => {
+      const g = instanceRef.current;
+      if (!g) return;
+      const link = g.d3Force?.("link");
+      if (link?.distance) {
+        link.distance(linkDistance);
+        g.d3ReheatSimulation();
+      }
+    }, [linkDistance]);
 
     useImperativeHandle(
       ref,

@@ -79,8 +79,11 @@ const editorThemeBase = {
   ".cm-content": {
     caretColor: "var(--text-normal)",
     fontFamily: "var(--font-text)",
-    padding: "16px 24px 80px 24px",
+    padding: "32px 24px 96px 24px",
     color: "var(--text-normal)",
+    maxWidth: "720px",
+    marginLeft: "auto",
+    marginRight: "auto",
   },
   ".cm-line": { color: "var(--text-normal)" },
   ".cm-lineNumbers .cm-gutterElement": {
@@ -100,7 +103,10 @@ const editorThemeBase = {
     color: "var(--text-normal)",
     borderTop: "1px solid var(--border-strong)",
   },
-  ".cm-activeLine": { backgroundColor: "transparent" },
+  ".cm-activeLine": { backgroundColor: "var(--hover)" },
+  ".cm-codeBlock": {
+    fontFamily: "var(--font-mono)",
+  },
   ".cm-selectionMatch": { backgroundColor: "var(--selection)" },
   "&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket": {
     backgroundColor: "var(--selection)",
@@ -156,41 +162,61 @@ const markdownHighlight = HighlightStyle.define([
     tag: t.heading1,
     color: "var(--text-normal)",
     fontWeight: "700",
-    fontSize: "1.6em",
-    lineHeight: "1.3",
+    fontSize: "1.9em",
+    lineHeight: "1.25",
   },
   {
     tag: t.heading2,
     color: "var(--text-normal)",
     fontWeight: "700",
-    fontSize: "1.35em",
-    lineHeight: "1.3",
+    fontSize: "1.5em",
+    lineHeight: "1.25",
   },
   {
     tag: t.heading3,
     color: "var(--text-normal)",
     fontWeight: "600",
-    fontSize: "1.2em",
+    fontSize: "1.25em",
+    lineHeight: "1.25",
   },
   {
     tag: t.heading4,
     color: "var(--text-normal)",
     fontWeight: "600",
-    fontSize: "1.08em",
+    fontSize: "1.1em",
+    lineHeight: "1.25",
   },
   {
-    tag: [t.heading5, t.heading6],
+    tag: t.heading5,
     color: "var(--text-normal)",
     fontWeight: "600",
+    fontSize: "1.0em",
+    lineHeight: "1.25",
+  },
+  {
+    tag: t.heading6,
+    color: "var(--text-muted)",
+    fontWeight: "600",
+    fontSize: "0.9em",
+    lineHeight: "1.25",
   },
   { tag: t.strong, color: "var(--text-normal)", fontWeight: "700" },
   { tag: t.emphasis, color: "var(--text-normal)", fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  // Inline code: mono font + slight accent — only spans `code`
+  // Inline code: mono font + background/padding + slight accent
   {
     tag: t.monospace,
     fontFamily: "var(--font-mono)",
     color: "var(--syn-mono)",
+    backgroundColor: "var(--hover)",
+    padding: "1px 4px",
+    borderRadius: "3px",
+  },
+  // Frontmatter YAML & metadata
+  {
+    tag: t.meta,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-muted)",
   },
   // Bare URLs (https://...) get the accent color; markdown `[text](url)`
   // links get NO color override — `t.link` would tint the whole `[text]`
@@ -204,7 +230,6 @@ const markdownHighlight = HighlightStyle.define([
   // Render it faint so the markers don't shout but stay visible.
   { tag: t.processingInstruction, color: "var(--text-faint)" },
   { tag: t.contentSeparator, color: "var(--text-muted)" },
-  { tag: t.meta, color: "var(--text-muted)" },
   // ─ Code-block tokens (only inside ```lang fences) ─
   { tag: t.keyword, color: "var(--syn-keyword)" },
   { tag: [t.string, t.special(t.string)], color: "var(--syn-string)" },

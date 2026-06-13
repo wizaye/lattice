@@ -90,6 +90,7 @@ pub struct Task {
     pub checked: bool,
     pub priority: Option<String>,
     pub due: Option<String>,
+    pub marker: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

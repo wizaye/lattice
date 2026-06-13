@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVaultStore } from "../../state/vaultStore";
 import { useEditorStore } from "../../state/editorStore";
+import { scanTasks } from "../../lib/tauriApi";
 import type { FileNode } from "../../state/types";
 import {
   loadKanbanConfig,
@@ -221,10 +222,46 @@ interface Props {
   onOpenFileByPath?: (path: string) => void;
 }
 
+const ID_RE = /<!--\s*id:\s*([\w-]+)\s*-->/;
+
+function mapBackendTaskToKanbanTask(t: any, columns: KanbanColumn[]): KanbanTask {
+  // Extract stable ID if present in text
+  let id = t.id;
+  let cleanText = t.text;
+  const idMatch = ID_RE.exec(t.text);
+  if (idMatch) {
+    id = idMatch[1];
+    cleanText = t.text.replace(ID_RE, "").trim();
+  }
+
+  // Extract tags from text
+  const tags: string[] = [];
+  let tagMatch: RegExpExecArray | null;
+  TAG_RE.lastIndex = 0;
+  while ((tagMatch = TAG_RE.exec(cleanText)) !== null) {
+    tags.push(tagMatch[1]);
+  }
+  cleanText = cleanText.replace(TAG_RE, "").trim();
+
+  // Determine file name
+  const fileName = t.note_path.split(/[/\\]/).pop()?.replace(/\.md$/i, "") || "";
+
+  return {
+    id,
+    text: cleanText,
+    status: markerToStatus(t.marker || (t.checked ? "x" : " "), columns),
+    fileId: t.note_path,
+    fileName,
+    line: t.line_number,
+    tags,
+  };
+}
+
 export function KanbanView({ onOpenFileByPath }: Props) {
   const fileTree = useVaultStore((s) => s.fileTree);
   const flatVault = useVaultStore((s) => s.flatVault);
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  const fileContents = useEditorStore((s) => s.fileContents);
 
   const [columns, setColumns] = useState<KanbanColumn[]>(DEFAULT_COLUMNS);
   const [filter, setFilter] = useState("");
@@ -234,11 +271,32 @@ export function KanbanView({ onOpenFileByPath }: Props) {
   // Local optimistic overrides so columns update instantly
   const [overrides, setOverrides] = useState<Record<string, string>>({});
 
+  const [baseTasks, setBaseTasks] = useState<KanbanTask[]>([]);
+
   const loadConfig = useCallback(async () => {
     if (!vaultPath) return;
     const config = await loadKanbanConfig(vaultPath);
     setColumns(config.columns);
   }, [vaultPath]);
+
+  const loadTasks = useCallback(async () => {
+    if (!vaultPath) {
+      setBaseTasks([]);
+      return;
+    }
+    try {
+      const backendTasks = await scanTasks();
+      if (backendTasks && backendTasks.length > 0) {
+        const mapped = backendTasks.map((t) => mapBackendTaskToKanbanTask(t, columns));
+        setBaseTasks(mapped);
+        return;
+      }
+    } catch (err) {
+      console.error("Failed to scan tasks:", err);
+    }
+    // Fallback if not tauri or if tauri returns empty
+    setBaseTasks(extractTasks(fileTree, columns));
+  }, [vaultPath, fileTree, columns]);
 
   // Initial load + event bindings
   useEffect(() => {
@@ -258,7 +316,10 @@ export function KanbanView({ onOpenFileByPath }: Props) {
     };
   }, [loadConfig]);
 
-  const baseTasks = useMemo(() => extractTasks(fileTree, columns), [fileTree, columns]);
+  // Sync tasks on mount, or when loadTasks, fileContents, or fileTree changes
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks, fileContents, fileTree]);
 
   const tasks = useMemo(
     () => baseTasks.map((t) => (overrides[t.id] ? { ...t, status: overrides[t.id] } : t)),
@@ -312,9 +373,20 @@ export function KanbanView({ onOpenFileByPath }: Props) {
       const task = baseTasks.find((t) => t.id === taskId);
       if (!task) return;
       const node = flatVault.get(task.fileId);
-      if (!node || !node.content) return;
+      if (!node) return;
 
-      const lines = node.content.split("\n");
+      let noteContent = node.content;
+      if (!noteContent) {
+        try {
+          noteContent = await useEditorStore.getState().loadFile(task.fileId);
+        } catch (err) {
+          console.error("Failed to load file content:", err);
+          return;
+        }
+      }
+      if (!noteContent) return;
+
+      const lines = noteContent.split("\n");
       let lineIdx = task.line - 1;
 
       // Resolve line idx dynamically if we have a stable ID
@@ -323,7 +395,7 @@ export function KanbanView({ onOpenFileByPath }: Props) {
         if (found !== -1) lineIdx = found;
       }
 
-      const newContent = updateTaskMarker(node.content, lineIdx, toCol, columns);
+      const newContent = updateTaskMarker(noteContent, lineIdx, toCol, columns);
       
       // Update store and write directly to disk
       useVaultStore.getState().updateFileContent(task.fileId, newContent);
@@ -355,10 +427,6 @@ export function KanbanView({ onOpenFileByPath }: Props) {
     <div className="kb-root">
       {/* Toolbar */}
       <div className="kb-toolbar">
-        <span className="kb-title">Kanban</span>
-        <span className="kb-subtitle">
-          {totalTasks} task{totalTasks !== 1 ? "s" : ""} across vault
-        </span>
         <div className="kb-spacer" />
         <button
           className="kb-config-btn"

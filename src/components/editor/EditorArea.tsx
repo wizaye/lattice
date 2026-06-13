@@ -52,6 +52,7 @@ import {
   IcFileAdd,
   IcFilePdf,
   IcFolderOpened,
+  IcGear,
   IcHistory,
   IcLink,
   IcLinkExternal,
@@ -1257,7 +1258,7 @@ function Pane(props: PaneProps) {
               {activeTab.viewMode === "preview" ? <IcEdit /> : <IcBook />}
             </button>
           )}
-          {(isGraphTab || isKanbanTab) ? (
+          {isGraphTab ? (
             <GraphMoreMenu
               onClose={
                 activeTab
@@ -1265,59 +1266,104 @@ function Pane(props: PaneProps) {
                   : undefined
               }
             />
+          ) : isKanbanTab ? (
+            <KanbanMoreMenu
+              onClose={
+                activeTab
+                  ? () => onCloseTab(leaf.id, activeTab.id)
+                  : undefined
+              }
+            />
+          ) : isCanvasTab ? (
+            <CanvasMoreMenu
+              fileId={activeTab!.fileId!}
+              onClose={
+                activeTab
+                  ? () => onCloseTab(leaf.id, activeTab.id)
+                  : undefined
+              }
+              onCopyPath={
+                activeTab?.fileId
+                  ? () => onCopyFilePath(activeTab.fileId!)
+                  : undefined
+              }
+              onRevealInNav={
+                activeTab?.fileId
+                  ? () => onRevealFileInNav(activeTab.fileId!)
+                  : undefined
+              }
+              onShowInExplorer={
+                activeTab?.fileId
+                  ? () => onShowInExplorer(activeTab.fileId!)
+                  : undefined
+              }
+              onOpenInDefaultApp={
+                activeTab?.fileId
+                  ? () => onOpenInDefaultApp(activeTab.fileId!)
+                  : undefined
+              }
+              onRename={
+                activeTab?.fileId
+                  ? () => onRenameFile(activeTab.fileId!)
+                  : undefined
+              }
+              onDelete={
+                activeTab?.fileId
+                  ? () => onDeleteFile(activeTab.fileId!)
+                  : undefined
+              }
+            />
           ) : (
-            !isCanvasTab && (
-              <DocMoreMenu
-                hasFile={!!activeTab?.fileId}
-                isPdf={isPdfTab}
-                onClose={
-                  activeTab
-                    ? () => onCloseTab(leaf.id, activeTab.id)
-                    : undefined
-                }
-                onToggleViewMode={
-                  activeTab
-                    ? () => onToggleViewMode(leaf.id, activeTab.id)
-                    : undefined
-                }
-                onSetViewMode={
-                  activeTab
-                    ? (mode) => onSetViewMode(leaf.id, activeTab.id, mode)
-                    : undefined
-                }
-                viewMode={activeTab?.viewMode ?? "source"}
-                onCopyPath={
-                  activeTab?.fileId
-                    ? () => onCopyFilePath(activeTab.fileId!)
-                    : undefined
-                }
-                onRevealInNav={
-                  activeTab?.fileId
-                    ? () => onRevealFileInNav(activeTab.fileId!)
-                    : undefined
-                }
-                onShowInExplorer={
-                  activeTab?.fileId
-                    ? () => onShowInExplorer(activeTab.fileId!)
-                    : undefined
-                }
-                onOpenInDefaultApp={
-                  activeTab?.fileId
-                    ? () => onOpenInDefaultApp(activeTab.fileId!)
-                    : undefined
-                }
-                onRename={
-                  activeTab?.fileId
-                    ? () => onRenameFile(activeTab.fileId!)
-                    : undefined
-                }
-                onDelete={
-                  activeTab?.fileId
-                    ? () => onDeleteFile(activeTab.fileId!)
-                    : undefined
-                }
-              />
-            )
+            <DocMoreMenu
+              hasFile={!!activeTab?.fileId}
+              isPdf={isPdfTab}
+              onClose={
+                activeTab
+                  ? () => onCloseTab(leaf.id, activeTab.id)
+                  : undefined
+              }
+              onToggleViewMode={
+                activeTab
+                  ? () => onToggleViewMode(leaf.id, activeTab.id)
+                  : undefined
+              }
+              onSetViewMode={
+                activeTab
+                  ? (mode) => onSetViewMode(leaf.id, activeTab.id, mode)
+                  : undefined
+              }
+              viewMode={activeTab?.viewMode ?? "source"}
+              onCopyPath={
+                activeTab?.fileId
+                  ? () => onCopyFilePath(activeTab.fileId!)
+                  : undefined
+              }
+              onRevealInNav={
+                activeTab?.fileId
+                  ? () => onRevealFileInNav(activeTab.fileId!)
+                  : undefined
+              }
+              onShowInExplorer={
+                activeTab?.fileId
+                  ? () => onShowInExplorer(activeTab.fileId!)
+                  : undefined
+              }
+              onOpenInDefaultApp={
+                activeTab?.fileId
+                  ? () => onOpenInDefaultApp(activeTab.fileId!)
+                  : undefined
+              }
+              onRename={
+                activeTab?.fileId
+                  ? () => onRenameFile(activeTab.fileId!)
+                  : undefined
+              }
+              onDelete={
+                activeTab?.fileId
+                  ? () => onDeleteFile(activeTab.fileId!)
+                  : undefined
+              }
+            />
           )}
         </div>
       </div>
@@ -1355,6 +1401,7 @@ function Pane(props: PaneProps) {
                     onChange={(json) =>
                       onUpdateFileContent?.(file.id, json)
                     }
+                    fileId={file.id}
                   />
                 );
               }
@@ -2577,3 +2624,222 @@ function GraphMoreMenu({
     </>
   );
 }
+
+function KanbanMoreMenu({
+  onClose,
+}: {
+  onClose?: () => void;
+}) {
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
+    useFlyoutMenu();
+
+  const run = (fn?: () => void) => () => {
+    closeMenu();
+    fn?.();
+  };
+
+  const openConfig = () => {
+    closeMenu();
+    window.dispatchEvent(new CustomEvent("lattice-open-kanban-config"));
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        className={`icon-btn tiny${open ? " active" : ""}`}
+        title="More options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={toggleOpen}
+      >
+        <IcMore />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="split-menu doc-more-menu"
+            role="menu"
+            style={menuStyle}
+          >
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={openConfig}
+            >
+              <IcGear className="split-menu-icon" />
+              <span>Customize board…</span>
+            </button>
+            {onClose && (
+              <>
+                <div className="split-menu-divider" role="separator" />
+                <button
+                  role="menuitem"
+                  className="split-menu-item"
+                  onClick={run(onClose)}
+                >
+                  <IcClose className="split-menu-icon" />
+                  <span>Close</span>
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+function CanvasMoreMenu({
+  fileId,
+  onClose,
+  onCopyPath,
+  onRevealInNav,
+  onShowInExplorer,
+  onOpenInDefaultApp,
+  onRename,
+  onDelete,
+}: {
+  fileId: string;
+  onClose?: () => void;
+  onCopyPath?: () => void;
+  onRevealInNav?: () => void;
+  onShowInExplorer?: () => void;
+  onOpenInDefaultApp?: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
+}) {
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
+    useFlyoutMenu();
+
+  const run = (fn?: () => void) => () => {
+    closeMenu();
+    fn?.();
+  };
+
+  const exportAction = (type: "png" | "svg" | "json") => () => {
+    closeMenu();
+    window.dispatchEvent(
+      new CustomEvent(`lattice-canvas-export-${type}`, { detail: { fileId } })
+    );
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        className={`icon-btn tiny${open ? " active" : ""}`}
+        title="More options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={toggleOpen}
+      >
+        <IcMore />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="split-menu doc-more-menu"
+            role="menu"
+            style={menuStyle}
+          >
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={exportAction("png")}
+            >
+              <IcCamera className="split-menu-icon" />
+              <span>Export as PNG</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={exportAction("svg")}
+            >
+              <IcSlideshow className="split-menu-icon" />
+              <span>Export as SVG</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={exportAction("json")}
+            >
+              <IcCode className="split-menu-icon" />
+              <span>Export as JSON</span>
+            </button>
+            <div className="split-menu-divider" role="separator" />
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={onRename ? run(onRename) : undefined}
+            >
+              <IcEdit className="split-menu-icon" />
+              <span>Rename…</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={onCopyPath ? run(onCopyPath) : undefined}
+            >
+              <IcCopy className="split-menu-icon" />
+              <span>Copy path</span>
+            </button>
+            <div className="split-menu-divider" role="separator" />
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={onOpenInDefaultApp ? run(onOpenInDefaultApp) : undefined}
+            >
+              <IcLinkExternal className="split-menu-icon" />
+              <span>Open in default app</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={onShowInExplorer ? run(onShowInExplorer) : undefined}
+            >
+              <IcFolderOpened className="split-menu-icon" />
+              <span>Show in system explorer</span>
+            </button>
+            <button
+              role="menuitem"
+              className="split-menu-item"
+              onClick={onRevealInNav ? run(onRevealInNav) : undefined}
+            >
+              <IcLocation className="split-menu-icon" />
+              <span>Reveal file in navigation</span>
+            </button>
+            {(onDelete || onClose) && (
+              <>
+                <div className="split-menu-divider" role="separator" />
+                {onDelete && (
+                  <button
+                    role="menuitem"
+                    className="split-menu-item danger"
+                    onClick={run(onDelete)}
+                  >
+                    <IcTrash className="split-menu-icon" />
+                    <span>Delete file</span>
+                  </button>
+                )}
+                {onClose && (
+                  <button
+                    role="menuitem"
+                    className="split-menu-item"
+                    onClick={run(onClose)}
+                  >
+                    <IcClose className="split-menu-icon" />
+                    <span>Close</span>
+                  </button>
+                )}
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+

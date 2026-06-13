@@ -13,6 +13,15 @@
      than --bg-app on dark, two steps darker than white on light. */
   --bg-menu: #2b2b2b;
 
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #141414;
+  --border-color: rgba(255, 255, 255, 0.10);
+  --border: rgba(255, 255, 255, 0.05);
+  --link-color: #7f6df2;
+  --text-primary: #dcddde;
+  --text-secondary: #8b8b8b;
+
   /* tabs */
   --tab-bg-active: #1e1e1e;
   --tab-bg-hover: #232323;
@@ -96,6 +105,15 @@
   --bg-editor: #ffffff;
   --bg-header: #f3f3f1;
   --bg-menu: #ffffff;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #fafaf8;
+  --bg-tertiary: #f3f3f1;
+  --border-color: rgba(0, 0, 0, 0.12);
+  --border: rgba(0, 0, 0, 0.06);
+  --link-color: #7f6df2;
+  --text-primary: #2e2e2e;
+  --text-secondary: #6b6b6b;
 
   --tab-bg-active: #ffffff;
   --tab-bg-hover: #ececea;

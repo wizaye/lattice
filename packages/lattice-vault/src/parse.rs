@@ -133,6 +133,7 @@ pub fn extract_tasks(content: &str, note_path: &str) -> Vec<Task> {
                 checked: check_char == "x" || check_char == "X",
                 priority,
                 due,
+                marker: check_char.to_string(),
             });
         }
     }

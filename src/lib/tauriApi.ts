@@ -141,6 +141,11 @@ export async function getBacklinks(vaultPath: string, activeFilePath: string): P
   return invoke<BacklinksResult>("get_backlinks", { vaultPath, activeFilePath });
 }
 
+export async function scanTasks(): Promise<any[]> {
+  if (!isTauri()) return [];
+  return invoke<any[]>("scan_tasks");
+}
+
 // ── Converter: backend tree → lattice FileNode tree ──
 
 /**

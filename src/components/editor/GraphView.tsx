@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { getVaultGraph, VaultGraphData } from "../../lib/tauriApi";
 import { useVaultStore } from "../../state/vaultStore";
 import { useEditorStore } from "../../state/editorStore";
@@ -49,6 +49,78 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
   // settings panel can be toggled without re-rendering the canvas.
   const [showSettings, setShowSettings] = useState(false);
   const [columns, setColumns] = useState<KanbanColumn[]>(DEFAULT_COLUMNS);
+
+  // Filters state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showTags, setShowTags] = useState(true);
+  const [showAttachments, setShowAttachments] = useState(true);
+  const [showOrphans, setShowOrphans] = useState(false);
+
+  // Display state
+  const [textFadeThreshold, setTextFadeThreshold] = useState(1.5);
+  const [nodeSize, setNodeSize] = useState(4);
+  const [linkThickness, setLinkThickness] = useState(0.6);
+
+  // Forces state
+  const [centerForce, setCenterForce] = useState(0.5);
+  const [repelForce, setRepelForce] = useState(10);
+  const [linkForce, setLinkForce] = useState(0.4);
+  const [linkDistance, setLinkDistance] = useState(150);
+
+  // Memoized filtered graph data
+  const filteredGraphData = useMemo(() => {
+    if (!graphData) return null;
+
+    let nodes = graphData.nodes.filter((node) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = node.name?.toLowerCase().includes(q);
+        const matchesPath = node.path?.toLowerCase().includes(q);
+        if (!matchesName && !matchesPath) return false;
+      }
+      if (!showTags && node.nodeType === "tag") {
+        return false;
+      }
+      if (!showAttachments && node.nodeType === "attachment") {
+        return false;
+      }
+      return true;
+    });
+
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    let links = graphData.links.filter((link) => {
+      const sourceId = typeof link.source === "object" ? link.source.id : link.source;
+      const targetId = typeof link.target === "object" ? link.target.id : link.target;
+      return nodeIds.has(sourceId) && nodeIds.has(targetId);
+    });
+
+    if (!showOrphans) {
+      const linkedNodeIds = new Set<string>();
+      for (const link of links) {
+        const sourceId = typeof link.source === "object" ? link.source.id : link.source;
+        const targetId = typeof link.target === "object" ? link.target.id : link.target;
+        linkedNodeIds.add(sourceId);
+        linkedNodeIds.add(targetId);
+      }
+      nodes = nodes.filter((node) => linkedNodeIds.has(node.id));
+    }
+
+    return { nodes, links };
+  }, [graphData, searchQuery, showTags, showAttachments, showOrphans]);
+
+  const handleReset = () => {
+    setSearchQuery("");
+    setShowTags(true);
+    setShowAttachments(true);
+    setShowOrphans(false);
+    setTextFadeThreshold(1.5);
+    setNodeSize(4);
+    setLinkThickness(0.6);
+    setCenterForce(0.5);
+    setRepelForce(10);
+    setLinkForce(0.4);
+    setLinkDistance(150);
+  };
 
   useEffect(() => {
     if (!vaultPath) return;
@@ -168,12 +240,19 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
           we don't init the force simulation on an empty payload (which
           would otherwise call zoomToFit on zero nodes and crash some
           force-graph builds). */}
-      {graphData && (
+      {filteredGraphData && (
         <GraphCanvas
           ref={canvasRef}
-          nodes={graphData.nodes}
-          links={graphData.links}
+          nodes={filteredGraphData.nodes}
+          links={filteredGraphData.links}
           columns={columns}
+          textFadeThreshold={textFadeThreshold}
+          nodeSize={nodeSize}
+          linkThickness={linkThickness}
+          centerForce={centerForce}
+          repelForce={repelForce}
+          linkForce={linkForce}
+          linkDistance={linkDistance}
           onNodeClick={(node) => {
             if (node?.nodeType === "task") {
               const rawTaskId = node.id.replace(/^task:/, "");
@@ -217,11 +296,29 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
       {showSettings && !loading && !error && (
         <GraphSettingsPanel
           onClose={() => setShowSettings(false)}
-          onReset={() => {
-            // Reset is a stub today — settings aren't yet persisted
-            // (issue: backend doesn't expose filter/group state). The
-            // affordance exists so the UX matches Obsidian.
-          }}
+          onReset={handleReset}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          showTags={showTags}
+          setShowTags={setShowTags}
+          showAttachments={showAttachments}
+          setShowAttachments={setShowAttachments}
+          showOrphans={showOrphans}
+          setShowOrphans={setShowOrphans}
+          textFadeThreshold={textFadeThreshold}
+          setTextFadeThreshold={setTextFadeThreshold}
+          nodeSize={nodeSize}
+          setNodeSize={setNodeSize}
+          linkThickness={linkThickness}
+          setLinkThickness={setLinkThickness}
+          centerForce={centerForce}
+          setCenterForce={setCenterForce}
+          repelForce={repelForce}
+          setRepelForce={setRepelForce}
+          linkForce={linkForce}
+          setLinkForce={setLinkForce}
+          linkDistance={linkDistance}
+          setLinkDistance={setLinkDistance}
         />
       )}
     </div>
@@ -238,9 +335,53 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
 function GraphSettingsPanel({
   onClose,
   onReset,
+  searchQuery,
+  setSearchQuery,
+  showTags,
+  setShowTags,
+  showAttachments,
+  setShowAttachments,
+  showOrphans,
+  setShowOrphans,
+  textFadeThreshold,
+  setTextFadeThreshold,
+  nodeSize,
+  setNodeSize,
+  linkThickness,
+  setLinkThickness,
+  centerForce,
+  setCenterForce,
+  repelForce,
+  setRepelForce,
+  linkForce,
+  setLinkForce,
+  linkDistance,
+  setLinkDistance,
 }: {
   onClose: () => void;
   onReset: () => void;
+  searchQuery: string;
+  setSearchQuery: (v: string) => void;
+  showTags: boolean;
+  setShowTags: (v: boolean) => void;
+  showAttachments: boolean;
+  setShowAttachments: (v: boolean) => void;
+  showOrphans: boolean;
+  setShowOrphans: (v: boolean) => void;
+  textFadeThreshold: number;
+  setTextFadeThreshold: (v: number) => void;
+  nodeSize: number;
+  setNodeSize: (v: number) => void;
+  linkThickness: number;
+  setLinkThickness: (v: number) => void;
+  centerForce: number;
+  setCenterForce: (v: number) => void;
+  repelForce: number;
+  setRepelForce: (v: number) => void;
+  linkForce: number;
+  setLinkForce: (v: number) => void;
+  linkDistance: number;
+  setLinkDistance: (v: number) => void;
 }) {
   return (
     <div className="graph-settings-panel" role="dialog" aria-label="Graph settings">
@@ -266,18 +407,35 @@ function GraphSettingsPanel({
       <GraphSettingsSection title="Filters" defaultOpen={false}>
         <label className="graph-settings-row">
           <span>Search files</span>
-          <input type="text" placeholder="path:" disabled />
+          <input
+            type="text"
+            placeholder="path:"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </label>
         <label className="graph-settings-checkbox">
-          <input type="checkbox" defaultChecked disabled />
+          <input
+            type="checkbox"
+            checked={showTags}
+            onChange={(e) => setShowTags(e.target.checked)}
+          />
           <span>Show tags</span>
         </label>
         <label className="graph-settings-checkbox">
-          <input type="checkbox" defaultChecked disabled />
+          <input
+            type="checkbox"
+            checked={showAttachments}
+            onChange={(e) => setShowAttachments(e.target.checked)}
+          />
           <span>Show attachments</span>
         </label>
         <label className="graph-settings-checkbox">
-          <input type="checkbox" disabled />
+          <input
+            type="checkbox"
+            checked={showOrphans}
+            onChange={(e) => setShowOrphans(e.target.checked)}
+          />
           <span>Show orphans</span>
         </label>
       </GraphSettingsSection>
@@ -287,33 +445,82 @@ function GraphSettingsPanel({
       <GraphSettingsSection title="Display" defaultOpen={false}>
         <label className="graph-settings-row">
           <span>Text fade threshold</span>
-          <input type="range" min={0} max={5} step={0.1} defaultValue={1.5} disabled />
+          <input
+            type="range"
+            min={0}
+            max={5}
+            step={0.1}
+            value={textFadeThreshold}
+            onChange={(e) => setTextFadeThreshold(parseFloat(e.target.value))}
+          />
         </label>
         <label className="graph-settings-row">
           <span>Node size</span>
-          <input type="range" min={1} max={10} step={0.5} defaultValue={4} disabled />
+          <input
+            type="range"
+            min={1}
+            max={10}
+            step={0.5}
+            value={nodeSize}
+            onChange={(e) => setNodeSize(parseFloat(e.target.value))}
+          />
         </label>
         <label className="graph-settings-row">
           <span>Link thickness</span>
-          <input type="range" min={0.1} max={3} step={0.1} defaultValue={0.6} disabled />
+          <input
+            type="range"
+            min={0.1}
+            max={3}
+            step={0.1}
+            value={linkThickness}
+            onChange={(e) => setLinkThickness(parseFloat(e.target.value))}
+          />
         </label>
       </GraphSettingsSection>
       <GraphSettingsSection title="Forces" defaultOpen={false}>
         <label className="graph-settings-row">
           <span>Center force</span>
-          <input type="range" min={0} max={1} step={0.05} defaultValue={0.5} disabled />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={centerForce}
+            onChange={(e) => setCenterForce(parseFloat(e.target.value))}
+          />
         </label>
         <label className="graph-settings-row">
           <span>Repel force</span>
-          <input type="range" min={0} max={20} step={0.5} defaultValue={10} disabled />
+          <input
+            type="range"
+            min={0}
+            max={20}
+            step={0.5}
+            value={repelForce}
+            onChange={(e) => setRepelForce(parseFloat(e.target.value))}
+          />
         </label>
         <label className="graph-settings-row">
           <span>Link force</span>
-          <input type="range" min={0} max={1} step={0.05} defaultValue={0.4} disabled />
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={linkForce}
+            onChange={(e) => setLinkForce(parseFloat(e.target.value))}
+          />
         </label>
         <label className="graph-settings-row">
           <span>Link distance</span>
-          <input type="range" min={10} max={500} step={10} defaultValue={150} disabled />
+          <input
+            type="range"
+            min={10}
+            max={500}
+            step={10}
+            value={linkDistance}
+            onChange={(e) => setLinkDistance(parseFloat(e.target.value))}
+          />
         </label>
       </GraphSettingsSection>
     </div>
