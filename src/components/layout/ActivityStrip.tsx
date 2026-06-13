@@ -1,5 +1,7 @@
 import {
+  IcBook,
   IcCalendar,
+  IcCloudUpload,
   IcFiles,
   IcGraph,
   IcGrid,
@@ -44,6 +46,10 @@ type Props = {
   onOpenGraph?: () => void;
   /** Open the full Kanban board in the editor pane (virtual tab). */
   onOpenKanban?: () => void;
+  /** Open the New Paper modal (Slice C). */
+  onOpenNewPaper?: () => void;
+  /** Open the Publish wizard (Slice D). */
+  onOpenPublishWizard?: () => void;
 };
 
 type StripEntry =
@@ -58,6 +64,8 @@ export function LeftActivityStrip({
   onToggleSidebar,
   onOpenGraph,
   onOpenKanban,
+  onOpenNewPaper,
+  onOpenPublishWizard,
 }: Props) {
   // Route a view click: switch view + ensure the sidebar is open,
   // unless we're re-clicking the active view while the sidebar is
@@ -80,6 +88,9 @@ export function LeftActivityStrip({
     { kind: "disabled", Icon: IcTerminal,       title: "Terminal (Coming soon)" },
     // Kanban opens as a full editor tab — not a sidebar panel.
     { kind: "action",   Icon: IcKanban,         title: "Kanban board",                    onClick: onOpenKanban },
+    // Separator-like gap between nav and utility actions
+    { kind: "action",   Icon: IcBook,           title: "New paper (Slice C)",             onClick: onOpenNewPaper },
+    { kind: "action",   Icon: IcCloudUpload,    title: "Publish vault",                   onClick: onOpenPublishWizard },
   ];
 
   return (

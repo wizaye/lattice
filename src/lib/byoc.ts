@@ -15,6 +15,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
+ * Returns true when the code is running inside a Tauri desktop window.
+ * In a plain browser / Vitest environment `window.__TAURI_INTERNALS__`
+ * is absent, so IPC calls would throw "IPC not available".
+ *
+ * All exported functions below check this guard and return safe empty
+ * defaults in browser mode — the same pattern as `vcs.ts`.
+ */
+const isTauri = (): boolean =>
+  typeof window !== "undefined" &&
+  "__TAURI_INTERNALS__" in window;
+
+/**
  * Provider identifier — kebab-case so it matches the Rust enum's
  * `#[serde(rename_all = "kebab-case")]` repr.  The string literal
  * union doubles as the `id` field on `BYOC_PROVIDERS` in
@@ -129,6 +141,7 @@ export interface DeviceCodePayload {
  * for a given binary.
  */
 export async function byocListProviders(): Promise<ProviderInfo[]> {
+  if (!isTauri()) return [];
   return invoke<ProviderInfo[]>("byoc_list_providers");
 }
 
@@ -142,6 +155,7 @@ export async function byocStatus(
   vaultPath: string,
   provider: ProviderId,
 ): Promise<ProviderStatus> {
+  if (!isTauri()) return { connected: false, accountLabel: null, remoteLabel: null, lastSyncAt: null, lastError: null };
   return invoke<ProviderStatus>("byoc_status", { vaultPath, provider });
 }
 
@@ -173,6 +187,7 @@ export async function byocDisconnect(
   vaultPath: string,
   provider: ProviderId,
 ): Promise<void> {
+  if (!isTauri()) return;
   return invoke<void>("byoc_disconnect", { vaultPath, provider });
 }
 
@@ -186,6 +201,7 @@ export async function byocPush(
   vaultPath: string,
   provider: ProviderId,
 ): Promise<PushResult> {
+  if (!isTauri()) throw new Error("BYOC push requires Tauri runtime");
   return invoke<PushResult>("byoc_push", { vaultPath, provider });
 }
 
@@ -198,6 +214,7 @@ export async function byocPull(
   vaultPath: string,
   provider: ProviderId,
 ): Promise<PullResult> {
+  if (!isTauri()) throw new Error("BYOC pull requires Tauri runtime");
   return invoke<PullResult>("byoc_pull", { vaultPath, provider });
 }
 
@@ -211,6 +228,7 @@ export async function byocSyncNow(
   vaultPath: string,
   provider: ProviderId,
 ): Promise<SyncResult> {
+  if (!isTauri()) throw new Error("BYOC sync requires Tauri runtime");
   return invoke<SyncResult>("byoc_sync_now", { vaultPath, provider });
 }
 

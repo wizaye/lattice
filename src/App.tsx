@@ -1075,6 +1075,8 @@ export default function App() {
             onToggleSidebar={toggleLeftSidebar}
             onOpenGraph={onOpenGraph}
             onOpenKanban={onOpenKanban}
+            onOpenNewPaper={openNewPaper}
+            onOpenPublishWizard={openPublishWizard}
           />
         </div>
       </div>
@@ -1100,8 +1102,6 @@ export default function App() {
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}
             onOpenManageVaults={openManageVaults}
-            onOpenNewPaper={openNewPaper}
-            onOpenPublishWizard={openPublishWizard}
             isMac={isMac}
             onToggleSidebar={toggleLeftSidebar}
           />

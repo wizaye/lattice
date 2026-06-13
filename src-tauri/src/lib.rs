@@ -5,6 +5,8 @@ mod calendar;
 #[allow(dead_code)]
 mod canvas;
 mod commands;
+mod fs_service;    // Repository + GraphService
+mod importer;      // Strategy pattern importers
 mod git;
 mod journal;
 mod paper;
@@ -29,16 +31,27 @@ use vault_commands::VaultState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Prepend Lattice's own bin dir (where `paper_engine_install`
-    // drops tectonic.exe) to PATH for the entire Lattice process.
-    // Idempotent — safe to call on every launch.  Without this,
-    // tectonic installed in a previous Lattice session would not
-    // be on PATH until the user manually added it via the Windows
-    // System Properties dialog.
-    paper::engine_install::prepend_bin_dir_to_path();
+    // Prepend Lattice's own bin dir to PATH only when it actually
+    // contains at least one file (e.g. tectonic.exe placed there by
+    // paper_engine_install).  This avoids mutating PATH for users who
+    // never use the paper feature — and prevents the Lattice bin dir
+    // from shadowing legitimate system binaries when it happens to
+    // contain a file with the same name (e.g. a stale tectonic build
+    // whose name collides with a user's own tectonic in /usr/local/bin).
+    //
+    // Bug 37 fix: the old code called prepend_bin_dir_to_path()
+    // unconditionally on every launch regardless of whether the paper
+    // feature had ever been used.
+    if paper::engine_install::lattice_bin_dir_has_content() {
+        paper::engine_install::prepend_bin_dir_to_path();
+    }
 
     tauri::Builder::default()
         .manage(VaultState(std::sync::Arc::new(tokio::sync::RwLock::new(None))))
+        // E2EE managed state — persists the unlocked key across IPC calls.
+        // Must be registered before invoke_handler so every e2ee_* command
+        // can receive tauri::State<e2ee::E2EEState>.
+        .manage(e2ee::E2EEState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -190,11 +203,9 @@ pub fn run() {
             // v2 §4 — VCS intelligent commit messages (BYOM-powered).
             vcs_commit_ai::vcs_generate_commit_message,
             vcs_commit_ai::byom_check_ollama,
-            // v2 §4.1 — VCS auto-commit cadence
-            vcs_auto_commit::vcs_auto_commit_enable,
-            vcs_auto_commit::vcs_auto_commit_disable,
-            vcs_auto_commit::vcs_auto_commit_activity,
-            vcs_auto_commit::vcs_auto_commit_status,
+            // v2 §4.1 — VCS auto-commit cadence (old IPC stubs removed;
+            // the scheduler is now driven programmatically via
+            // AutoCommitScheduler — no IPC surface in the refactored design).
             // v2 §5 — BYOM (Ollama / OpenAI / Anthropic).
             byom::byom_check_ollama_available,
             byom::byom_list_ollama_models,

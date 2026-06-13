@@ -92,21 +92,23 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   updateFileContent: (fileId: string, content: string) => {
-    const { fileTree } = get();
-    const visit = (nodes: FileNode[]): FileNode[] =>
-      nodes.map((n) => {
-        if (n.id === fileId && n.kind !== "folder") {
-          return { ...n, content };
-        }
-        if (n.children) {
-          return { ...n, children: visit(n.children) };
-        }
-        return n;
-      });
-    const updated = visit(fileTree);
-    set({
-      fileTree: updated,
-      flatVault: flattenVault(updated),
-    });
+    // Performance fix: instead of walking the full fileTree and rebuilding
+    // flatVault on every keystroke (O(n) per character), mutate only the
+    // flat map entry and skip the recursive tree walk entirely.
+    //
+    // The file tree in the sidebar never shows content — it only needs
+    // name / kind / children.  The only consumer of node.content is
+    // `loadFile` via editorStore (which has its own content cache), and
+    // the in-memory fallback in GraphView (which reads from flatVault).
+    // Both read from `flatVault`, so updating that map is sufficient.
+    //
+    // We do NOT update fileTree here: the tree is rebuilt from disk on
+    // the next refreshTree() call (create/rename/delete operations).
+    const { flatVault } = get();
+    const existing = flatVault.get(fileId);
+    if (!existing || existing.kind === "folder") return;
+    const updated = new Map(flatVault);
+    updated.set(fileId, { ...existing, content });
+    set({ flatVault: updated });
   },
 }));

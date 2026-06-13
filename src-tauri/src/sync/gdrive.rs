@@ -140,15 +140,17 @@ impl SyncProvider for GdriveProvider {
         m.schema = 1;
         m.is_connected = true;
         m.provider = "gdrive".into();
-        m.remote_label = Some(folder_name.clone());
-        m.last_delta_cursor = Some(folder_id);
+        m.remote_label = Some(folder_id.clone()); // Bug 17 fix: folder ID goes in remote_label
+        // last_delta_cursor is reserved for Drive's startPageToken
+        // pagination cursor used during incremental delta sync.  Never
+        // overwrite it with the folder ID.
         m.account_label = Some(user.email.clone().unwrap_or_else(|| "google".into()));
         manifest::save(vault, ProviderId::Gdrive, &m)?;
 
         Ok(AccountInfo {
             display_name: user.name.unwrap_or_else(|| "Google".into()),
             account_email: user.email,
-            remote_label: Some(folder_name),
+            remote_label: Some(format!("Lattice - {}", vault.file_name().unwrap_or_default().to_string_lossy())),
         })
     }
 
@@ -181,22 +183,62 @@ impl SyncProvider for GdriveProvider {
             .timeout(Duration::from_secs(60))
             .build()?;
 
-        // 1. Collect workspace files instead of git objects
+        // 1. Collect current workspace files
         let workspace_files = collect_workspace_files(vault)?;
+        let current_paths: std::collections::HashSet<String> = workspace_files
+            .iter()
+            .map(|p| {
+                p.strip_prefix(vault)
+                    .unwrap_or(p)
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+
         let mut m = manifest::load(vault, ProviderId::Gdrive)?.unwrap_or_default();
-        
-        let root_id = match m.last_delta_cursor.clone() {
+
+        // Bug 17 fix: read folder ID from remote_label (not last_delta_cursor)
+        let root_id = match m.remote_label.clone() {
             Some(id) => id,
             None => {
                 let vault_name = vault.file_name().unwrap_or_default().to_string_lossy();
                 let folder_name = format!("Lattice - {}", vault_name);
-                ensure_vault_folder(&http, &token.access_token, &folder_name).await?
+                let id = ensure_vault_folder(&http, &token.access_token, &folder_name).await?;
+                m.remote_label = Some(id.clone());
+                id
             }
         };
 
         let mut folder_cache = std::collections::HashMap::new();
         let mut count = 0u32;
-        
+
+        // Bug 16 fix: delete remote files that no longer exist locally.
+        // We compare the keys in file_map (remote files we know about)
+        // against the current workspace paths.  Any key present in the
+        // manifest but absent from the current vault has been deleted or
+        // renamed locally and must be removed from Drive.
+        let remote_keys: Vec<String> = m.file_map.keys().cloned().collect();
+        let mut deleted = 0u32;
+        for path_str in &remote_keys {
+            if !current_paths.contains(path_str) {
+                if let Some(meta) = m.file_map.get(path_str) {
+                    // Best-effort delete — if the remote file is already
+                    // gone (e.g. manual Drive cleanup) we skip gracefully.
+                    if let Err(e) = delete_remote_file(
+                        &http,
+                        &token.access_token,
+                        &meta.id,
+                    ).await {
+                        eprintln!("lattice: gdrive delete {} failed: {e}", path_str);
+                    } else {
+                        deleted += 1;
+                    }
+                }
+                m.file_map.remove(path_str);
+            }
+        }
+
+        // 2. Upload new/changed files
         for abs_path in &workspace_files {
             let rel_path = abs_path.strip_prefix(vault).unwrap_or(abs_path);
             let path_str = rel_path.to_string_lossy().to_string();
@@ -248,7 +290,9 @@ impl SyncProvider for GdriveProvider {
             count += 1;
         }
 
-        m.last_delta_cursor = Some(root_id);
+        // Bug 17 fix: do NOT write root_id into last_delta_cursor here.
+        // last_delta_cursor is reserved for the Drive delta-sync pagination
+        // token (startPageToken).  The folder ID lives in remote_label.
         m.last_sync_at = Some(now_unix());
         manifest::save(vault, ProviderId::Gdrive, &m)?;
 
@@ -256,7 +300,7 @@ impl SyncProvider for GdriveProvider {
             uploaded_objects: count,
             head: None,
             branch: current_branch(vault).ok(),
-            message: format!("Uploaded {count} file(s) to Lattice folder"),
+            message: format!("Uploaded {count} file(s), deleted {deleted} from Google Drive"),
         })
     }
 
@@ -276,6 +320,30 @@ impl SyncProvider for GdriveProvider {
 fn require_token(vault: &Path) -> Result<TokenSet, SyncError> {
     keychain::load(vault, ProviderId::Gdrive)?
         .ok_or_else(|| SyncError::BadInput("Google Drive not connected for this vault".into()))
+}
+
+/// Delete a remote file by its Drive file ID.
+/// Returns Ok(()) when the file is already absent (404 is success for delete).
+async fn delete_remote_file(
+    http: &reqwest::Client,
+    access_token: &str,
+    file_id: &str,
+) -> Result<(), SyncError> {
+    let url = format!("{FILES_API}/{file_id}");
+    let resp = http
+        .delete(&url)
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+    // 204 = deleted, 404 = already gone — both are acceptable outcomes.
+    if resp.status() == 204 || resp.status() == 404 {
+        return Ok(());
+    }
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    Err(SyncError::Api(format!(
+        "DELETE /drive/v3/files/{file_id} failed ({status}): {body}"
+    )))
 }
 
 #[derive(Debug, Serialize, Deserialize)]

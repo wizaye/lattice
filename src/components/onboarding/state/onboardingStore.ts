@@ -60,10 +60,29 @@ function defaults(): OnboardingState {
   };
 }
 
-function persist(state: OnboardingState) {
+const DATA_KEYS: Array<keyof OnboardingState> = [
+  "eulaAcceptedAt",
+  "persona",
+  "vaultPath",
+  "vaultOrigin",
+  "theme",
+  "density",
+  "completedAt",
+  "step",
+];
+
+function extractData(state: OnboardingState & Actions): OnboardingState {
+  const out = {} as OnboardingState;
+  for (const k of DATA_KEYS) {
+    (out as Record<string, unknown>)[k] = (state as Record<string, unknown>)[k];
+  }
+  return out;
+}
+
+function persist(state: OnboardingState & Actions) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(extractData(state)));
   } catch {
     /* best-effort */
   }
@@ -143,14 +162,35 @@ export const useOnboardingStore = create<OnboardingState & Actions>(
       set(next);
     },
     reset: () => {
-      const next = defaults();
+      const next = { ...get(), ...defaults() };
       persist(next);
       set(next);
     },
   }),
 );
 
-/** Stable selector — true while we should be showing the wizard. */
+/**
+ * Stable selector — returns true while the wizard should be visible.
+ * Checks for a truthy completedAt so null / undefined / "" all show onboarding.
+ */
 export function shouldShowOnboarding(s: OnboardingState): boolean {
-  return s.completedAt === null;
+  return !s.completedAt;
+}
+
+/**
+ * Per-step gate for the footer "Next" button.
+ * Returns false only on steps that require the user to take an explicit
+ * action before they may advance.
+ */
+export function canGoNext(s: OnboardingState): boolean {
+  switch (s.step) {
+    case 0:
+      // EULA must be accepted
+      return !!s.eulaAcceptedAt;
+    case 2:
+      // Persona must be selected
+      return s.persona !== null;
+    default:
+      return true;
+  }
 }

@@ -80,18 +80,26 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(300);
 /// part of the user's vault and would otherwise show up in their VCS
 /// tooling as an unrelated submodule.
 pub fn clone_quartz(dest: &Path) -> Result<(), String> {
-    if dest.exists() {
-        // Wipe the target so `git clone` doesn't fail with
-        // "destination path already exists and is not an empty directory".
-        std::fs::remove_dir_all(dest)
-            .map_err(|e| format!("failed to clear existing {}: {}", dest.display(), e))?;
+    // Bug 20 fix: do NOT delete the existing install before the clone
+    // succeeds.  The old code removed `dest` unconditionally at the top,
+    // so a clone failure (network error, timeout, disk full) left the
+    // user with NO working Quartz install and forced a full wizard re-run.
+    //
+    // New strategy: clone into a sibling `.new` directory first, then
+    // atomically swap on success.  On failure the original is intact.
+    let dest_new = dest.with_extension("new");
+
+    // Clean up any leftover `.new` from a previous failed attempt.
+    if dest_new.exists() {
+        std::fs::remove_dir_all(&dest_new)
+            .map_err(|e| format!("failed to clear {}: {}", dest_new.display(), e))?;
     }
-    if let Some(parent) = dest.parent() {
+    if let Some(parent) = dest_new.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create {}: {}", parent.display(), e))?;
     }
 
-    let dest_str = dest.to_string_lossy().to_string();
+    let dest_new_str = dest_new.to_string_lossy().to_string();
     let mut cmd = spawn("git");
     cmd.args([
         "clone",
@@ -99,27 +107,39 @@ pub fn clone_quartz(dest: &Path) -> Result<(), String> {
         "1",
         "--no-tags",
         QUARTZ_REPO_URL,
-        &dest_str,
+        &dest_new_str,
     ])
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
 
+    // Clone into the staging directory.  If this fails the original
+    // `dest` is untouched.
     run_with_timeout("git clone", cmd, CLONE_TIMEOUT)?;
 
     // Drop Quartz's git history — it isn't ours and confuses VCS UIs.
-    let dot_git = dest.join(".git");
-    if dot_git.exists() {
-        // best-effort cleanup; if Windows still has a file handle open
-        // (rare with --depth 1) we surface a friendly hint rather than
-        // erroring the whole flow.
-        if let Err(e) = std::fs::remove_dir_all(&dot_git) {
-            return Err(format!(
-                "cloned Quartz, but failed to remove {} (you can delete it manually): {}",
-                dot_git.display(),
-                e
-            ));
+    let dot_git_new = dest_new.join(".git");
+    if dot_git_new.exists() {
+        if let Err(e) = std::fs::remove_dir_all(&dot_git_new) {
+            // Non-fatal: proceed with swap and surface a hint.
+            eprintln!(
+                "lattice: cloned Quartz but failed to remove {} (you can delete it manually): {}",
+                dot_git_new.display(), e
+            );
         }
     }
+
+    // Now that the clone succeeded, swap: remove the old install and
+    // rename the new one into place.  Any error here leaves `.new` on
+    // disk so the user can inspect it.
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .map_err(|e| format!("failed to clear old Quartz install at {}: {}", dest.display(), e))?;
+    }
+    std::fs::rename(&dest_new, dest)
+        .map_err(|e| format!(
+            "failed to move new Quartz install into place ({} → {}): {}",
+            dest_new.display(), dest.display(), e
+        ))?;
 
     Ok(())
 }

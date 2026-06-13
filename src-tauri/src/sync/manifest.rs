@@ -92,10 +92,37 @@ pub fn save(vault: &Path, provider: ProviderId, manifest: &SyncManifest) -> Resu
     let blob = serde_json::to_string_pretty(manifest)?;
     // Atomic-ish write: stage to .tmp then rename.  Avoids a torn
     // file if the process dies mid-write.
+    //
+    // Bug 30 fix: on Windows, `fs::rename` to an existing file that is
+    // held open by another process (antivirus, a second Lattice window)
+    // returns `Access is denied` (ERROR_ACCESS_DENIED).  We retry up to
+    // 3 times with a short backoff so transient AV scanner windows
+    // don't cause a silent manifest corruption.
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, blob.as_bytes())?;
-    fs::rename(&tmp, &path)?;
-    Ok(())
+
+    const MAX_RETRIES: u32 = 3;
+    let mut last_err = None;
+    for attempt in 0..MAX_RETRIES {
+        match fs::rename(&tmp, &path) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < MAX_RETRIES - 1 {
+                    // Back off 50 ms between retries — enough for an AV
+                    // scanner to release its handle without being a
+                    // noticeable delay to the user.
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    }
+    // All retries exhausted — clean up the temp file and surface the error.
+    let _ = fs::remove_file(&tmp);
+    Err(SyncError::Io(format!(
+        "failed to write sync manifest after {MAX_RETRIES} attempts: {}",
+        last_err.map_or_else(|| "unknown".into(), |e| e.to_string())
+    )))
 }
 
 /// Remove the manifest (idempotent — no-op if absent).

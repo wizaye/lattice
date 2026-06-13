@@ -463,6 +463,18 @@ pub fn lattice_bin_dir() -> Option<PathBuf> {
     }
 }
 
+/// Returns true iff the Lattice bin directory exists and contains at
+/// least one file.  Used by `lib.rs::run` to gate the PATH mutation
+/// so users who never installed Tectonic via Lattice don't have
+/// `%LOCALAPPDATA%\Lattice\bin\` prepended to PATH on every launch
+/// (Bug 37 fix).
+pub fn lattice_bin_dir_has_content() -> bool {
+    lattice_bin_dir()
+        .filter(|d| d.is_dir())
+        .map(|d| std::fs::read_dir(d).ok().and_then(|mut r| r.next()).is_some())
+        .unwrap_or(false)
+}
+
 /// Prepend `lattice_bin_dir()` to the current process's PATH if not
 /// already present.  Safe to call multiple times — the dedup check
 /// keeps PATH from growing on repeated calls.

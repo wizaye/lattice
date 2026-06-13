@@ -36,7 +36,6 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use tiny_http::{Header, Method, Response, Server, StatusCode};
@@ -46,25 +45,30 @@ struct PreviewHandle {
     /// `Arc` so the serve loop can hold a clone while the main
     /// registry holds the original.  Dropping both stops the server.
     server: Arc<Server>,
-    /// Joined when the handle drops; the thread observes the dropped
-    /// `Arc<Server>` via `recv_timeout` and exits.
-    thread: Option<JoinHandle<()>>,
+    /// Shutdown signal sent to the serve thread on drop.
+    /// Bug 32 fix: replaced the racy `Arc::strong_count` check with an
+    /// explicit channel.  The old pattern checked the count then used
+    /// it as a break condition — between the check and the break another
+    /// thread could have incremented the count, making the TOCTOU
+    /// unsound.  A bounded channel is simpler and correct: sending on
+    /// drop is atomic with respect to the receive.
+    shutdown_tx: std::sync::mpsc::SyncSender<()>,
+    /// Joined when the handle drops so the port is released before a
+    /// follow-up start_preview tries to bind it.
+    thread: Option<std::thread::JoinHandle<()>>,
     /// `http://127.0.0.1:<port>/` form, returned to the UI.
     url: String,
 }
 
 impl Drop for PreviewHandle {
     fn drop(&mut self) {
-        // tiny_http's recommended shutdown is to drop all references
-        // to the server — `unblock()` then wakes any pending
-        // `incoming_requests` call.  We additionally call `unblock`
-        // here for paranoia in case our thread is parked on `recv`.
+        // Signal the serve thread to exit.  Ignore the error — if the
+        // receiver was already dropped (thread panicked) we don't need
+        // to do anything extra.
+        let _ = self.shutdown_tx.send(());
+        // Unblock tiny_http's recv so the thread wakes up promptly.
         self.server.unblock();
         if let Some(t) = self.thread.take() {
-            // Wait briefly so the thread releases the port before
-            // a follow-up start_preview tries to bind it.  A short
-            // join is safe — the serve loop exits as soon as it
-            // observes the unblock.
             let _ = t.join();
         }
     }
@@ -113,13 +117,20 @@ pub fn start(vault_root: &Path, public_dir: &Path) -> Result<String, String> {
     let server = Arc::new(server);
     let serve_server = Arc::clone(&server);
     let serve_root = public.clone();
+
+    // Create a bounded channel (capacity 1) for the shutdown signal.
+    // The serve thread owns the receiver; PreviewHandle::drop sends on
+    // the sender, which the thread observes to exit cleanly.
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::sync_channel::<()>(1);
+
     let thread = std::thread::Builder::new()
         .name(format!("lattice-preview-{port}"))
-        .spawn(move || serve_loop(serve_server, serve_root))
+        .spawn(move || serve_loop(serve_server, serve_root, shutdown_rx))
         .map_err(|e| format!("preview: failed to spawn serve thread: {e}"))?;
 
     let handle = PreviewHandle {
         server,
+        shutdown_tx,
         thread: Some(thread),
         url: url.clone(),
     };
@@ -148,25 +159,32 @@ pub fn url_for(vault_root: &Path) -> Option<String> {
 }
 
 /// Block on `incoming_requests`, dispatch each to [`handle_request`].
-/// Exits cleanly when the server's last `Arc` drops (which happens
-/// when [`stop`] removes the handle).
-fn serve_loop(server: Arc<Server>, root: PathBuf) {
-    // `recv_timeout` lets us poll for shutdown via the dropped Arc.
-    // When the registry releases its handle, only this thread holds an
-    // Arc; we still need the loop to wake up so the thread exits.
-    // tiny_http's `unblock()` wakes a blocked recv; if we time out we
-    // also check whether we're the last reference and exit.
+/// Exits when a message arrives on `shutdown_rx` (sent by
+/// [`PreviewHandle::drop`]) or the server's socket is closed.
+///
+/// Bug 32 fix: the previous implementation used `Arc::strong_count`
+/// to detect when the registry dropped its handle.  That is a TOCTOU
+/// race — between reading the count and deciding to exit, another
+/// thread could acquire a new Arc reference.  The explicit shutdown
+/// channel makes the signal atomic and race-free.
+fn serve_loop(
+    server: Arc<Server>,
+    root: PathBuf,
+    shutdown_rx: std::sync::mpsc::Receiver<()>,
+) {
     loop {
-        match server.recv_timeout(Duration::from_secs(2)) {
+        // Check for shutdown signal first (non-blocking).
+        match shutdown_rx.try_recv() {
+            Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+
+        match server.recv_timeout(Duration::from_secs(1)) {
             Ok(Some(req)) => {
                 let _ = handle_request(req, &root);
             }
             Ok(None) => {
-                // Timeout — check whether we're the last Arc.  If so,
-                // the registry has dropped us and we should exit.
-                if Arc::strong_count(&server) == 1 {
-                    break;
-                }
+                // Timed out — loop back and re-check the shutdown signal.
             }
             Err(_) => {
                 // Server is shutting down (incoming socket closed).
@@ -175,7 +193,6 @@ fn serve_loop(server: Arc<Server>, root: PathBuf) {
         }
     }
 }
-
 fn handle_request(req: tiny_http::Request, root: &Path) -> std::io::Result<()> {
     // Method gate — only static GETs/HEADs.
     match req.method() {

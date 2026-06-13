@@ -185,6 +185,13 @@ const REFRESH_DEBOUNCE_MS = 250;
 let debounceHandle: ReturnType<typeof setTimeout> | null = null;
 let pendingVault: string | null = null;
 
+// All Promise resolve callbacks waiting for the current debounce
+// window to fire.  When multiple callers await refresh() within the
+// same 250ms window, only one timeout fires but ALL callers should
+// settle — otherwise any caller whose timeout was cancelled hangs
+// forever (the leaked-promise bug).
+let resolveQueue: Array<() => void> = [];
+
 const isRealVault = (v: string | null | undefined): v is string =>
   typeof v === "string" && v.length > 0;
 
@@ -263,18 +270,27 @@ export const useVcsStore = create<VcsState>((set, get) => {
     graphHistory: [],
     branchOp: false,
 
-    refresh: async (vaultPath) => {
+    refresh: (vaultPath) => {
       // Debounce: if a caller fires refresh() 10 times in 200ms, we
       // run it exactly once at the trailing edge.  The most recent
-      // vaultPath wins, which is correct when the user switches
-      // vaults mid-save.
+      // vaultPath wins (correct on rapid vault switches).
+      //
+      // Fix (promise-leak bug): every caller gets a Promise that
+      // resolves when the debounce *actually fires*.  Previous code
+      // stored only one resolve in the timeout closure — when a
+      // second call cancelled the timeout, the first caller's Promise
+      // was orphaned and never settled, hanging any `await refresh()`.
+      // Now all resolve callbacks queue up; the single winning timeout
+      // drains them all.
       pendingVault = vaultPath;
       if (debounceHandle) clearTimeout(debounceHandle);
-      await new Promise<void>((resolve) => {
+      return new Promise<void>((resolve) => {
+        resolveQueue.push(resolve);
         debounceHandle = setTimeout(async () => {
           debounceHandle = null;
+          const toResolve = resolveQueue.splice(0); // take all pending
           await doRefresh(pendingVault);
-          resolve();
+          toResolve.forEach((r) => r());            // settle them all
         }, REFRESH_DEBOUNCE_MS);
       });
     },
@@ -586,6 +602,10 @@ export const useVcsStore = create<VcsState>((set, get) => {
         clearTimeout(debounceHandle);
         debounceHandle = null;
       }
+      // Drain any pending refresh() waiters so they don't hang forever
+      // after a vault switch clears the store.
+      resolveQueue.splice(0).forEach((r) => r());
+      pendingVault = null;
       set({
         status: null,
         history: [],

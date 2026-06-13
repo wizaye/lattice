@@ -71,12 +71,21 @@ const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 /**
  * Strip fenced + inline code so scanners don't see wikilinks-in-code.
  * Preserves line count by replacing fenced bodies with same-shape blanks.
+ *
+ * Handles 3+ backtick fences (the minimum per CommonMark spec) AND
+ * 4+ backtick fences used to nest code blocks that contain triple
+ * backticks.  The previous regex `/``` [\s\S]*?```/g` only matched
+ * exactly-three-backtick fences, leaving wikilinks inside 4-backtick
+ * blocks incorrectly counted as real backlinks.
  */
 function stripCodeFences(md: string): string {
-  return md.replace(/```[\s\S]*?```/g, (block) => {
-    // Replace with same-shape whitespace so line numbers stay aligned.
-    return block.replace(/[^\n]/g, " ");
-  });
+  // Match fences of 3 or more backticks or tildes (CommonMark §4.5).
+  // `(`+ means "3 or more of the opening character" and the closing
+  // fence must have AT LEAST as many backticks as the opening fence.
+  return md.replace(
+    /(^|\n)([ \t]*)(````*|~~~~*)(.*?)(\n[\s\S]*?\n[ \t]*)\3(`*|~*)([ \t]*(?:\n|$))/g,
+    (block) => block.replace(/[^\n]/g, " "),
+  ).replace(/`[^`\n]*`/g, (inline) => inline.replace(/[^\n`]/g, " "));
 }
 
 /**

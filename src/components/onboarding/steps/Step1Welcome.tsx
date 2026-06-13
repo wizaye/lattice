@@ -4,7 +4,6 @@
 import { useOnboardingStore, TOTAL_STEPS } from "../state/onboardingStore";
 
 export function Step1Welcome() {
-  const next = useOnboardingStore((s) => s.next);
   const goto = useOnboardingStore((s) => s.goto);
   const setPersona = useOnboardingStore((s) => s.setPersona);
 
@@ -33,12 +32,9 @@ export function Step1Welcome() {
         them.
       </p>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "flex-start", gap: 8, marginTop: 8 }}>
         <button className="ob-btn ghost" onClick={skipAll}>
           Skip all →
-        </button>
-        <button className="ob-btn primary" onClick={() => next()}>
-          Next →
         </button>
       </div>
     </div>

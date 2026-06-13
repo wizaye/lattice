@@ -24,6 +24,7 @@ import "./OnboardingShell.css";
 import {
   TOTAL_STEPS,
   useOnboardingStore,
+  canGoNext,
 } from "./state/onboardingStore";
 import { Step0Splash } from "./steps/Step0Splash";
 import { Step1Welcome } from "./steps/Step1Welcome";
@@ -56,6 +57,7 @@ export function OnboardingShell() {
   const next = useOnboardingStore((s) => s.next);
   const back = useOnboardingStore((s) => s.back);
   const complete = useOnboardingStore((s) => s.complete);
+  const nextAllowed = useOnboardingStore(canGoNext);
   // Step 0 (EULA) and Step 1 (welcome) intentionally aren't skippable
   // per §2 of the onboarding journey doc — Skip is hidden there.
   const canSkip = step >= 2 && step < TOTAL_STEPS - 1;
@@ -120,7 +122,12 @@ export function OnboardingShell() {
               Finish
             </button>
           ) : (
-            <button className="ob-btn primary" onClick={() => next()}>
+            <button
+              className="ob-btn primary"
+              onClick={() => next()}
+              disabled={!nextAllowed}
+              title={!nextAllowed ? "Complete the required step before continuing" : undefined}
+            >
               Next →
             </button>
           )}

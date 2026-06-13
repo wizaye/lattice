@@ -21,6 +21,7 @@
 
 pub mod bundle;
 pub mod compile;
+pub mod engine;   // Strategy pattern: CompileEngine trait + pipeline
 pub mod engine_install;
 pub mod md_to_tex;
 pub mod toml;

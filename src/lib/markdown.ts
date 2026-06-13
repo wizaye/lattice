@@ -83,8 +83,10 @@ export function updateLinksInMarkdown(
       j++;
     }
 
-    // Inline code blocks shouldn't span multiple lines in standard Markdown,
-    // but just in case, we reset it at the end of the line
+    // Inline code spans cannot cross line boundaries in standard Markdown
+    // (CommonMark spec §6.1: “backtick strings are on the same line”).
+    // Reset the flag here so an unclosed backtick on line N doesn't
+    // silently suppress wikilink processing on line N+1 (bug fix).
     inInlineCode = false;
     newContent += newLine + (i === lines.length - 1 ? "" : "\n");
   }
@@ -157,7 +159,11 @@ export async function renameAndUpdateLinks(oldPath: string, newPath: string): Pr
   const newPathMappings = new Map<string, string>(); // old absolute path -> new shortest unique path
   for (const oldTargetPath of targetFiles) {
     // Calculate the new absolute path
-    const newTargetPath = oldTargetPath.replace(oldPath, newPath);
+    const newTargetPath = oldTargetPath.replaceAll(oldPath, newPath);
+    // `replaceAll` fixes the first-occurrence-only bug: if `oldPath`
+    // appears more than once in the absolute path (repeated dir name or
+    // symlinked path), the previous `replace()` left later occurrences
+    // intact, producing a broken new path.
     newPathMappings.set(oldTargetPath, getShortestUniquePath(newTargetPath));
   }
 

@@ -1,0 +1,12 @@
+C:\Users\vijaygatla\OneDrive - Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-crypto\target\debug\deps\serde-a24e06fab1ccbe68.d: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\vijaygatla\OneDrive\ -\ Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-crypto\target\debug\build\serde-45cc841d36186c80\out/private.rs
+
+C:\Users\vijaygatla\OneDrive - Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-crypto\target\debug\deps\libserde-a24e06fab1ccbe68.rmeta: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\vijaygatla\OneDrive\ -\ Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-crypto\target\debug\build\serde-45cc841d36186c80\out/private.rs
+
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+C:\Users\vijaygatla\OneDrive\ -\ Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-crypto\target\debug\build\serde-45cc841d36186c80\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\vijaygatla\\OneDrive - Microsoft\\Desktop\\Camp_AIR_MCP_BOOTCAMP\\lattice\\packages\\lattice-crypto\\target\\debug\\build\\serde-45cc841d36186c80\\out

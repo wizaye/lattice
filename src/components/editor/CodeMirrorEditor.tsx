@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorState, RangeSetBuilder, StateEffect, StateField, Transaction } from "@codemirror/state";
 import {
+  openSearchPanel,
+  search,
+  searchKeymap,
+} from "@codemirror/search";
+import {
   EditorView,
   keymap,
   lineNumbers,
@@ -652,6 +657,7 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
           { key: "Shift-Tab", run: dedentListLine },
           ...defaultKeymap,
           ...historyKeymap,
+          ...searchKeymap,
           indentWithTab,
           {
             key: "Mod-s",
@@ -669,6 +675,8 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         flashLineField,
         flashLineTheme,
         listHangingIndent,
+        // Search panel — Ctrl+F / Cmd+F opens in-editor find bar
+        search({ top: false }),
         // Enable outliner extensions when appropriate
         ...(enableOutliner ? [outlinerExtension()] : []),
         // Vim mode (must come before other keymaps to take priority)
@@ -789,6 +797,22 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // DocMoreMenu "Find…" / "Replace…" → open CodeMirror search panel.
+  // The DocMoreMenu dispatches `lattice-editor-find` on the window;
+  // we self-filter by filePath so only the active file's editor opens.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ filePath?: string; withReplace?: boolean }>).detail;
+      if (detail?.filePath && detail.filePath !== filePath) return;
+      const view = viewRef.current;
+      if (!view) return;
+      view.focus();
+      openSearchPanel(view);
+    };
+    window.addEventListener("lattice-editor-find", handler as EventListener);
+    return () => window.removeEventListener("lattice-editor-find", handler as EventListener);
+  }, [filePath]);
 
   // Jump-to-line bridge (backlink snippet → editor line). Listens
   // globally because multiple CodeMirror editors may be mounted across

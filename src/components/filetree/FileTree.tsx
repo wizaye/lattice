@@ -562,6 +562,42 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
           depth={0}
         />
       )}
+      {/* Empty state when no vault is open */}
+      {nodes.length === 0 && !vaultPath && (
+        <div
+          style={{
+            padding: "24px 12px",
+            textAlign: "center",
+            color: "var(--text-faint)",
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ marginBottom: 8, fontSize: 20 }}>📁</div>
+          <div>No vault open</div>
+          <div style={{ marginTop: 4, color: "var(--text-muted)" }}>
+            Click the vault name below to open or create a folder.
+          </div>
+        </div>
+      )}
+      {/* Empty vault: vault is open but contains no files */}
+      {nodes.length === 0 && vaultPath && (
+        <div
+          style={{
+            padding: "24px 12px",
+            textAlign: "center",
+            color: "var(--text-faint)",
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ marginBottom: 8, fontSize: 20 }}>✨</div>
+          <div>Vault is empty</div>
+          <div style={{ marginTop: 4, color: "var(--text-muted)" }}>
+            Click <strong>New note</strong> in the toolbar above to create your first note.
+          </div>
+        </div>
+      )}
       {nodes.map((n) => (
         <TreeRow
           key={n.id}

@@ -12,7 +12,6 @@ import { useOnboardingStore } from "../state/onboardingStore";
 
 export function Step0Splash() {
   const acceptEula = useOnboardingStore((s) => s.acceptEula);
-  const next = useOnboardingStore((s) => s.next);
   const eulaAcceptedAt = useOnboardingStore((s) => s.eulaAcceptedAt);
   const [checked, setChecked] = useState<boolean>(eulaAcceptedAt !== null);
 
@@ -53,16 +52,6 @@ export function Step0Splash() {
         soon as the IPC commands from §5.3 land
         (<code>onboarding_import_detect</code>,
         <code>onboarding_ai_detect_ollama</code>).
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          className="ob-btn primary"
-          disabled={!checked}
-          onClick={() => next()}
-        >
-          Continue →
-        </button>
       </div>
     </div>
   );

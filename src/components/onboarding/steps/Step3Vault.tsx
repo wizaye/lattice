@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOnboardingStore } from "../state/onboardingStore";
 import { getPreset } from "../state/personaPresets";
-import { pickVaultFolder, createFolder } from "../../../lib/tauriApi";
+import { pickVaultFolder, createFolder, isTauri } from "../../../lib/tauriApi";
 import { useVaultStore } from "../../../state/vaultStore";
 
 type KnownVault = { id: string; name: string; path: string };
@@ -157,6 +157,15 @@ export function Step3Vault() {
         Markdown file. You can move it, back it up, or open it with any
         other editor.
       </p>
+
+      {!isTauri() && (
+        <div className="ob-stub" style={{ marginBottom: 12 }}>
+          <strong>Browser / dev-server mode:</strong> folder picker and vault
+          creation require the desktop app. Click <strong>Skip — set this up
+          later</strong> below to continue, then open a vault once you launch
+          the full Tauri build.
+        </div>
+      )}
 
       {vaultPath && (
         <div className="ob-vault-current" title={vaultPath}>

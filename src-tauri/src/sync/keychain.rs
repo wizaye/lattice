@@ -74,14 +74,30 @@ fn hash_prefix_16(s: &str) -> String {
     hex[..16].to_string()
 }
 
-fn normalized_vault_key(vault: &Path) -> String {
+fn normalized_vault_key(vault: &Path) -> Result<String, super::error::SyncError> {
     // Canonicalize so equivalent paths (relative segments, trailing
-    // separators) resolve to the same storage key.  Fall back to the
-    // raw input if canonicalization fails.
-    let mut s = std::fs::canonicalize(vault)
-        .unwrap_or_else(|_| vault.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    // separators, drive-letter case on Windows) resolve to the same
+    // storage key.
+    //
+    // Bug 18 fix: the old code silently fell back to the raw path when
+    // canonicalization failed (e.g. USB drive disconnected, temporary
+    // network share unmounted).  The stored token was written with the
+    // canonical hash, so the raw-path fallback produced a DIFFERENT hash
+    // and load() would return None even though a valid token exists —
+    // making the user appear disconnected and triggering unnecessary
+    // re-auth.  We now propagate the error so callers can surface a
+    // meaningful message ("vault drive not reachable") instead of
+    // silently re-prompting for credentials.
+    let canonical = std::fs::canonicalize(vault).map_err(|e| {
+        super::error::SyncError::BadInput(format!(
+            "cannot canonicalize vault path '{}': {} \
+             — make sure the vault drive is mounted",
+            vault.display(),
+            e
+        ))
+    })?;
+
+    let mut s = canonical.to_string_lossy().to_string();
 
     // Trim trailing separators to avoid `C:\vault` vs `C:\vault\`
     // generating different hashes.
@@ -95,7 +111,7 @@ fn normalized_vault_key(vault: &Path) -> String {
         s = s.replace('/', "\\").to_ascii_lowercase();
     }
 
-    s
+    Ok(s)
 }
 
 fn legacy_vault_key(vault: &Path) -> String {
@@ -104,11 +120,11 @@ fn legacy_vault_key(vault: &Path) -> String {
     vault.to_string_lossy().to_string()
 }
 
-fn vault_hash(vault: &Path) -> String {
+fn vault_hash(vault: &Path) -> Result<String, super::error::SyncError> {
     // BLAKE3 is content-addressed-style: deterministic + collision-free
     // for this domain.  16 hex chars (64 bits) is plenty of entropy
     // for a per-machine namespacing key.
-    hash_prefix_16(&normalized_vault_key(vault))
+    Ok(hash_prefix_16(&normalized_vault_key(vault)?))
 }
 
 fn legacy_vault_hash(vault: &Path) -> String {
@@ -116,8 +132,8 @@ fn legacy_vault_hash(vault: &Path) -> String {
 }
 
 #[allow(dead_code)] // used by non-Windows backend; also by storage_descriptor
-fn account_key(vault: &Path, provider: ProviderId) -> String {
-    format!("{}:{}", provider.as_str(), vault_hash(vault))
+fn account_key(vault: &Path, provider: ProviderId) -> Result<String, super::error::SyncError> {
+    Ok(format!("{}:{}", provider.as_str(), vault_hash(vault)?))
 }
 
 // ── public API: storage descriptor (for UI "where do my tokens live?") ─
@@ -166,7 +182,9 @@ pub fn storage_descriptor(vault: &Path, provider: ProviderId) -> StorageDescript
             backend: "keychain".into(),
             path: None,
             directory: None,
-            label: format!("{SERVICE} ({})", account_key(vault, provider)),
+            label: account_key(vault, provider)
+                .map(|k| format!("{SERVICE} ({k})"))
+                .unwrap_or_else(|_| format!("{SERVICE} (vault path unresolvable)")),
         }
     }
 }
@@ -240,7 +258,7 @@ mod win {
         Ok(dir.join(format!(
             "{}-{}.dpapi",
             provider.as_str(),
-            vault_hash(vault)
+            vault_hash(vault)?
         )))
     }
 
@@ -398,7 +416,7 @@ mod nix {
 
     #[cfg(not(debug_assertions))]
     fn entry(vault: &Path, provider: ProviderId) -> Result<keyring::Entry, SyncError> {
-        keyring::Entry::new(SERVICE, &account_key(vault, provider))
+        keyring::Entry::new(SERVICE, &account_key(vault, provider)?)
             .map_err(|e| SyncError::Keychain(e.to_string()))
     }
 

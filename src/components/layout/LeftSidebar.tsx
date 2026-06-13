@@ -1,10 +1,8 @@
 import { useRef, useState } from "react";
 import type { FileNode } from "../../state/types";
 import {
-  IcBook,
   IcBookmark,
   IcChevronDown,
-  IcCloudUpload,
   IcCollapseAll,
   IcEdit,
   IcFolder,
@@ -71,10 +69,6 @@ type Props = {
    *  modal state lives in App so the modal can render at the top of
    *  the tree (above the sidebars). */
   onOpenManageVaults: () => void;
-  /** Open the New Paper modal (Slice C). Footer button forwards. */
-  onOpenNewPaper: () => void;
-  /** Open the Publish wizard (Slice D). Footer button forwards. */
-  onOpenPublishWizard: () => void;
   isMac: boolean;
   onToggleSidebar: () => void;
 };
@@ -94,8 +88,6 @@ export function LeftSidebar({
   onToggleTheme,
   onOpenSettings,
   onOpenManageVaults,
-  onOpenNewPaper,
-  onOpenPublishWizard,
   isMac,
   onToggleSidebar,
 }: Props) {
@@ -299,22 +291,6 @@ export function LeftSidebar({
             and never get squeezed out — the vault label ellipsizes
             instead. (See LeftSidebar.css `.ls-footer-icons`.) */}
         <div className="ls-footer-icons">
-          <button
-            className="icon-btn tiny"
-            title="New paper"
-            aria-label="New paper"
-            onClick={onOpenNewPaper}
-          >
-            <IcBook />
-          </button>
-          <button
-            className="icon-btn tiny"
-            title="Publish vault"
-            aria-label="Publish vault"
-            onClick={onOpenPublishWizard}
-          >
-            <IcCloudUpload />
-          </button>
           <button
             className="icon-btn tiny"
             title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}

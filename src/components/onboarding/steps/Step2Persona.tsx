@@ -7,7 +7,6 @@ import { PERSONA_PRESETS } from "../state/personaPresets";
 export function Step2Persona() {
   const persona = useOnboardingStore((s) => s.persona);
   const setPersona = useOnboardingStore((s) => s.setPersona);
-  const next = useOnboardingStore((s) => s.next);
 
   return (
     <div>
@@ -40,16 +39,6 @@ export function Step2Persona() {
         You can change every one of these settings later in
         <strong> Settings → Preferences</strong>.
       </p>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          className="ob-btn primary"
-          onClick={() => next()}
-          disabled={persona === null}
-        >
-          Next →
-        </button>
-      </div>
     </div>
   );
 }

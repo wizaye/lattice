@@ -1276,7 +1276,6 @@ function Pane(props: PaneProps) {
             />
           ) : isCanvasTab ? (
             <CanvasMoreMenu
-              fileId={activeTab!.fileId!}
               onClose={
                 activeTab
                   ? () => onCloseTab(leaf.id, activeTab.id)
@@ -2152,6 +2151,7 @@ function DocMoreMenu({
               </button>
               <button role="menuitem" className="split-menu-item" onClick={stub}>
                 <IcMerge className="split-menu-icon" />
+
                 <span>Merge entire file with…</span>
               </button>
               <button role="menuitem" className="split-menu-item" onClick={stub}>
@@ -2166,11 +2166,31 @@ function DocMoreMenu({
               </button>
 
               <div className="split-menu-divider" role="separator" />
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={run(() => {
+                  window.dispatchEvent(
+                    new CustomEvent("lattice-editor-find", {
+                      detail: { filePath: null },
+                    }),
+                  );
+                })}
+              >
                 <IcSearch className="split-menu-icon" />
                 <span>Find…</span>
               </button>
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={run(() => {
+                  window.dispatchEvent(
+                    new CustomEvent("lattice-editor-find", {
+                      detail: { filePath: null, withReplace: true },
+                    }),
+                  );
+                })}
+              >
                 <IcReplace className="split-menu-icon" />
                 <span>Replace…</span>
               </button>
@@ -2245,55 +2265,16 @@ function DocMoreMenu({
 // ---------------------------------------------------------------------------
 
 /**
- * Tab right-click context menu — the cursor-positioned twin of
- * DocMoreMenu, scoped to ONE tab (the one the user right-clicked).
- *
- * Mirrors Obsidian's tab popup. Items wired here:
- *   - Close
- *   - Close others (skips pinned tabs)
- *   - Close all (skips pinned tabs)
- *   - Pin / Unpin
- *   - Reading view / Edit mode
- *   - Split right / Split down
- *   - Copy path
- *   - Reveal file in navigation
- *   - Show in system explorer
- *   - Open in default app
- *   - Rename
- *   - Delete file
- *
- * Positioning: we portal into document.body and place at fixed
- * (x, y) = click coords, then nudge so the popup stays in viewport
- * (flip-left if it would clip the right edge, push up if it would
- * clip the bottom).
- *
- * Close behaviour (mirrors DocMoreMenu):
- *   - Esc
- *   - Outside pointerdown
- *   - Selecting an item
- *   - Scroll / window blur (avoids a stale, drifting menu)
+ * Tab right-click context menu — cursor-positioned twin of DocMoreMenu,
+ * scoped to one tab.
  */
 function TabContextMenu({
-  x,
-  y,
-  tab,
-  tabCount,
-  onDismiss,
-  onClose,
-  onCloseOthers,
-  onCloseAll,
-  onTogglePin,
-  onToggleViewMode,
-  onSplit,
-  onCopyPath,
-  onRevealInNav,
-  onShowInExplorer,
-  onOpenInDefaultApp,
-  onRename,
-  onDelete,
+  x, y, tab, tabCount,
+  onDismiss, onClose, onCloseOthers, onCloseAll, onTogglePin,
+  onToggleViewMode, onSplit, onCopyPath, onRevealInNav,
+  onShowInExplorer, onOpenInDefaultApp, onRename, onDelete,
 }: {
-  x: number;
-  y: number;
+  x: number; y: number;
   tab: Tab;
   tabCount: number;
   onDismiss: () => void;
@@ -2310,228 +2291,114 @@ function TabContextMenu({
   onRename: () => void;
   onDelete: () => void;
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({ position: "fixed", top: y, left: x, zIndex: 2000, visibility: "hidden" });
 
-  // After the menu mounts we measure it and clamp into the viewport.
-  // We render once at (x, y) with visibility:hidden, take the rect,
-  // then reposition. This avoids a frame of off-screen flash and
-  // means we never need to hard-code a width.
   useLayoutEffect(() => {
-    const el = wrapRef.current;
+    const el = menuRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
     const margin = 6;
-    let left = x;
-    let top = y;
-    if (left + r.width + margin > vw) left = Math.max(margin, vw - r.width - margin);
-    if (top + r.height + margin > vh) top = Math.max(margin, vh - r.height - margin);
-    setPos({ left, top });
+    let left = x, top = y;
+    if (left + r.width + margin > vw) left = vw - r.width - margin;
+    if (top + r.height + margin > vh) top = vh - r.height - margin;
+    setStyle({ position: "fixed", top, left, zIndex: 2000, visibility: "visible" });
   }, [x, y]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onDismiss();
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      const el = wrapRef.current;
-      if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
-      onDismiss();
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); onDismiss(); } };
+    const onDown = (e: PointerEvent) => { if (!(e.target instanceof Node) || menuRef.current?.contains(e.target)) return; onDismiss(); };
     const onScroll = () => onDismiss();
-    const onBlur = () => onDismiss();
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("blur", onBlur);
     };
   }, [onDismiss]);
 
-  // Helper for wireable items: dismiss + run.
-  const run = (fn: () => void | Promise<void>) => () => {
-    onDismiss();
-    void fn();
-  };
-
+  const run = (fn: () => void) => () => { onDismiss(); fn(); };
   const hasFile = !!tab.fileId;
   const isPinned = !!tab.isPinned;
-  const isPreview = tab.viewMode === "preview";
-
-  // Position is computed in useLayoutEffect; we render the menu at
-  // the raw click coords for the first paint (hidden) so the measure
-  // pass has real DOM dimensions.
-  const style: React.CSSProperties = pos
-    ? { position: "fixed", left: pos.left, top: pos.top, zIndex: 2000 }
-    : {
-        position: "fixed",
-        left: x,
-        top: y,
-        zIndex: 2000,
-        visibility: "hidden",
-      };
 
   return createPortal(
     <div
-      ref={wrapRef}
-      className="split-menu doc-more-menu tab-context-menu"
+      ref={menuRef}
+      className="split-menu tab-context-menu"
       role="menu"
       style={style}
-      // Stop the right-click on the menu itself from re-triggering the
-      // tab's onContextMenu (which would close + reopen the menu in
-      // place — visually flickery).
       onContextMenu={(e) => e.preventDefault()}
     >
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        onClick={run(onClose)}
-        disabled={isPinned}
-        title={isPinned ? "Unpin first to close" : undefined}
-      >
+      <button role="menuitem" className="split-menu-item" disabled={isPinned} onClick={run(onClose)}>
         <IcClose className="split-menu-icon" />
         <span>Close</span>
       </button>
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        onClick={run(onCloseOthers)}
-        disabled={tabCount <= 1}
-      >
+      <button role="menuitem" className="split-menu-item" disabled={tabCount <= 1} onClick={run(onCloseOthers)}>
         <IcCloseAll className="split-menu-icon" />
         <span>Close others</span>
       </button>
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        onClick={run(onCloseAll)}
-      >
+      <button role="menuitem" className="split-menu-item" onClick={run(onCloseAll)}>
         <IcCloseAll className="split-menu-icon" />
         <span>Close all</span>
       </button>
-
       <div className="split-menu-divider" role="separator" />
-
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        onClick={run(onTogglePin)}
-      >
-        {isPinned ? (
-          <IcPinned className="split-menu-icon" />
-        ) : (
-          <IcPin className="split-menu-icon" />
-        )}
+      <button role="menuitem" className="split-menu-item" onClick={run(onTogglePin)}>
+        {isPinned ? <IcPin className="split-menu-icon" /> : <IcPinned className="split-menu-icon" />}
         <span>{isPinned ? "Unpin" : "Pin"}</span>
       </button>
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        disabled
-        title="Coming soon"
-      >
-        <IcUnlink className="split-menu-icon" />
-        <span>Unlink tab</span>
-      </button>
-
       {hasFile && (
         <>
           <div className="split-menu-divider" role="separator" />
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(onToggleViewMode)}
-          >
-            {isPreview ? (
-              <IcCode className="split-menu-icon" />
-            ) : (
-              <IcEye className="split-menu-icon" />
-            )}
-            <span>{isPreview ? "Source mode" : "Reading view"}</span>
+          <button role="menuitem" className="split-menu-item" onClick={run(onToggleViewMode)}>
+            <IcEye className="split-menu-icon" />
+            <span>Toggle reading view</span>
           </button>
         </>
       )}
-
       <div className="split-menu-divider" role="separator" />
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        onClick={run(() => onSplit("right"))}
-      >
+      <button role="menuitem" className="split-menu-item" onClick={run(() => onSplit("right"))}>
         <IcSplitH className="split-menu-icon" />
         <span>Split right</span>
       </button>
-      <button
-        role="menuitem"
-        className="split-menu-item"
-        onClick={run(() => onSplit("bottom"))}
-      >
+      <button role="menuitem" className="split-menu-item" onClick={run(() => onSplit("bottom"))}>
         <IcSplitV className="split-menu-icon" />
         <span>Split down</span>
       </button>
-
       {hasFile && (
         <>
           <div className="split-menu-divider" role="separator" />
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(onCopyPath)}
-          >
+          <button role="menuitem" className="split-menu-item" onClick={run(onCopyPath)}>
             <IcCopy className="split-menu-icon" />
             <span>Copy path</span>
           </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(onRevealInNav)}
-          >
+          <button role="menuitem" className="split-menu-item" onClick={run(onRevealInNav)}>
             <IcLocation className="split-menu-icon" />
             <span>Reveal file in navigation</span>
           </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(onShowInExplorer)}
-          >
+          <button role="menuitem" className="split-menu-item" onClick={run(onShowInExplorer)}>
             <IcFolderOpened className="split-menu-icon" />
             <span>Show in system explorer</span>
           </button>
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(onOpenInDefaultApp)}
-          >
+          <button role="menuitem" className="split-menu-item" onClick={run(onOpenInDefaultApp)}>
             <IcLinkExternal className="split-menu-icon" />
             <span>Open in default app</span>
           </button>
-
           <div className="split-menu-divider" role="separator" />
-          <button
-            role="menuitem"
-            className="split-menu-item"
-            onClick={run(onRename)}
-          >
+          <button role="menuitem" className="split-menu-item" onClick={run(onRename)}>
             <IcEdit className="split-menu-icon" />
             <span>Rename…</span>
           </button>
-          <button
-            role="menuitem"
-            className="split-menu-item danger"
-            onClick={run(onDelete)}
-          >
+          <button role="menuitem" className="split-menu-item danger" onClick={run(onDelete)}>
             <IcTrash className="split-menu-icon" />
             <span>Delete file</span>
+          </button>
+          <div className="split-menu-divider" role="separator" />
+          <button role="menuitem" className="split-menu-item" disabled title="Coming soon">
+            <IcUnlink className="split-menu-icon" />
+            <span>Unlink tab</span>
           </button>
         </>
       )}
@@ -2541,167 +2408,79 @@ function TabContextMenu({
 }
 
 // ---------------------------------------------------------------------------
+// GraphMoreMenu, KanbanMoreMenu, CanvasMoreMenu — slim menus for virtual tabs.
+// ---------------------------------------------------------------------------
 
-/**
- * Graph view "More options" 3-dot menu (`.pane-doc-actions`).
- *
- * Mirrors Obsidian's graph-tab popup: just four entries \u2014 Split
- * right, Split down, Copy screenshot, Bookmark. The markdown
- * DocMoreMenu has dozens of file-only items (Rename, Export to PDF,
- * Find/Replace, Open version history, etc.) which don't apply to a
- * synthetic graph tab, so we render a separate slim menu here.
- *
- * Split actions live in the dedicated SplitMenuButton (icon to the
- * left of this 3-dot button), NOT here — keeping them in both menus
- * was confusing UX.
- */
-function GraphMoreMenu({
-  onClose,
-}: {
-  onClose?: () => void;
-}) {
-  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
-    useFlyoutMenu();
-
-  const run = (fn?: () => void) => () => {
-    closeMenu();
-    fn?.();
-  };
+function GraphMoreMenu({ onClose }: { onClose?: () => void }) {
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } = useFlyoutMenu();
+  const run = (fn: () => void) => () => { closeMenu(); fn(); };
   const stub = () => closeMenu();
-
   return (
     <>
-      <button
-        ref={buttonRef}
-        className={`icon-btn tiny${open ? " active" : ""}`}
-        title="More options"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={toggleOpen}
-      >
+      <button ref={buttonRef} className={`icon-btn tiny${open ? " active" : ""}`} title="More options" onClick={toggleOpen}>
         <IcMore />
       </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="split-menu doc-more-menu"
-            role="menu"
-            style={menuStyle}
-          >
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={stub}
-            >
-              <IcCamera className="split-menu-icon" />
-              <span>Copy screenshot</span>
-            </button>
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={stub}
-            >
-              <IcBookmark className="split-menu-icon" />
-              <span>Bookmark…</span>
-            </button>
-            {onClose && (
-              <>
-                <div className="split-menu-divider" role="separator" />
-                <button
-                  role="menuitem"
-                  className="split-menu-item"
-                  onClick={run(onClose)}
-                >
-                  <IcClose className="split-menu-icon" />
-                  <span>Close</span>
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
+      {open && createPortal(
+        <div ref={menuRef} className="split-menu" role="menu" style={menuStyle}>
+          <button role="menuitem" className="split-menu-item" onClick={stub}>
+            <IcCamera className="split-menu-icon" />
+            <span>Copy screenshot</span>
+          </button>
+          <button role="menuitem" className="split-menu-item" onClick={stub}>
+            <IcBookmark className="split-menu-icon" />
+            <span>Bookmark</span>
+          </button>
+          {onClose && (
+            <>
+              <div className="split-menu-divider" role="separator" />
+              <button role="menuitem" className="split-menu-item" onClick={run(onClose)}>
+                <IcClose className="split-menu-icon" />
+                <span>Close</span>
+              </button>
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
     </>
   );
 }
 
-function KanbanMoreMenu({
-  onClose,
-}: {
-  onClose?: () => void;
-}) {
-  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
-    useFlyoutMenu();
-
-  const run = (fn?: () => void) => () => {
-    closeMenu();
-    fn?.();
-  };
-
-  const openConfig = () => {
-    closeMenu();
-    window.dispatchEvent(new CustomEvent("lattice-open-kanban-config"));
-  };
-
+function KanbanMoreMenu({ onClose }: { onClose?: () => void }) {
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } = useFlyoutMenu();
+  const run = (fn: () => void) => () => { closeMenu(); fn(); };
+  const stub = () => closeMenu();
   return (
     <>
-      <button
-        ref={buttonRef}
-        className={`icon-btn tiny${open ? " active" : ""}`}
-        title="More options"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={toggleOpen}
-      >
+      <button ref={buttonRef} className={`icon-btn tiny${open ? " active" : ""}`} title="More options" onClick={toggleOpen}>
         <IcMore />
       </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="split-menu doc-more-menu"
-            role="menu"
-            style={menuStyle}
-          >
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={openConfig}
-            >
-              <IcGear className="split-menu-icon" />
-              <span>Customize board…</span>
-            </button>
-            {onClose && (
-              <>
-                <div className="split-menu-divider" role="separator" />
-                <button
-                  role="menuitem"
-                  className="split-menu-item"
-                  onClick={run(onClose)}
-                >
-                  <IcClose className="split-menu-icon" />
-                  <span>Close</span>
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
+      {open && createPortal(
+        <div ref={menuRef} className="split-menu" role="menu" style={menuStyle}>
+          <button role="menuitem" className="split-menu-item" onClick={stub}>
+            <IcGear className="split-menu-icon" />
+            <span>Configure board…</span>
+          </button>
+          {onClose && (
+            <>
+              <div className="split-menu-divider" role="separator" />
+              <button role="menuitem" className="split-menu-item" onClick={run(onClose)}>
+                <IcClose className="split-menu-icon" />
+                <span>Close</span>
+              </button>
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
     </>
   );
 }
 
 function CanvasMoreMenu({
-  fileId,
-  onClose,
-  onCopyPath,
-  onRevealInNav,
-  onShowInExplorer,
-  onOpenInDefaultApp,
-  onRename,
-  onDelete,
+  onClose, onCopyPath, onRevealInNav, onShowInExplorer,
+  onOpenInDefaultApp, onRename, onDelete,
 }: {
-  fileId: string;
   onClose?: () => void;
   onCopyPath?: () => void;
   onRevealInNav?: () => void;
@@ -2710,136 +2489,65 @@ function CanvasMoreMenu({
   onRename?: () => void;
   onDelete?: () => void;
 }) {
-  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } =
-    useFlyoutMenu();
-
-  const run = (fn?: () => void) => () => {
-    closeMenu();
-    fn?.();
-  };
-
-  const exportAction = (type: "png" | "svg" | "json") => () => {
-    closeMenu();
-    window.dispatchEvent(
-      new CustomEvent(`lattice-canvas-export-${type}`, { detail: { fileId } })
-    );
-  };
-
+  const { open, menuStyle, buttonRef, menuRef, toggleOpen, closeMenu } = useFlyoutMenu();
+  const run = (fn: () => void) => () => { closeMenu(); fn(); };
+  const stub = () => closeMenu();
   return (
     <>
-      <button
-        ref={buttonRef}
-        className={`icon-btn tiny${open ? " active" : ""}`}
-        title="More options"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={toggleOpen}
-      >
+      <button ref={buttonRef} className={`icon-btn tiny${open ? " active" : ""}`} title="More options" onClick={toggleOpen}>
         <IcMore />
       </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="split-menu doc-more-menu"
-            role="menu"
-            style={menuStyle}
-          >
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={exportAction("png")}
-            >
-              <IcCamera className="split-menu-icon" />
-              <span>Export as PNG</span>
-            </button>
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={exportAction("svg")}
-            >
-              <IcSlideshow className="split-menu-icon" />
-              <span>Export as SVG</span>
-            </button>
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={exportAction("json")}
-            >
-              <IcCode className="split-menu-icon" />
-              <span>Export as JSON</span>
-            </button>
-            <div className="split-menu-divider" role="separator" />
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={onRename ? run(onRename) : undefined}
-            >
-              <IcEdit className="split-menu-icon" />
-              <span>Rename…</span>
-            </button>
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={onCopyPath ? run(onCopyPath) : undefined}
-            >
+      {open && createPortal(
+        <div ref={menuRef} className="split-menu" role="menu" style={menuStyle}>
+          <button role="menuitem" className="split-menu-item" onClick={onRename ? run(onRename) : stub}>
+            <IcEdit className="split-menu-icon" />
+            <span>Rename…</span>
+          </button>
+          {onCopyPath && (
+            <button role="menuitem" className="split-menu-item" onClick={run(onCopyPath)}>
               <IcCopy className="split-menu-icon" />
               <span>Copy path</span>
             </button>
-            <div className="split-menu-divider" role="separator" />
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={onOpenInDefaultApp ? run(onOpenInDefaultApp) : undefined}
-            >
-              <IcLinkExternal className="split-menu-icon" />
-              <span>Open in default app</span>
+          )}
+          {onRevealInNav && (
+            <button role="menuitem" className="split-menu-item" onClick={run(onRevealInNav)}>
+              <IcLocation className="split-menu-icon" />
+              <span>Reveal in navigation</span>
             </button>
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={onShowInExplorer ? run(onShowInExplorer) : undefined}
-            >
+          )}
+          {onShowInExplorer && (
+            <button role="menuitem" className="split-menu-item" onClick={run(onShowInExplorer)}>
               <IcFolderOpened className="split-menu-icon" />
               <span>Show in system explorer</span>
             </button>
-            <button
-              role="menuitem"
-              className="split-menu-item"
-              onClick={onRevealInNav ? run(onRevealInNav) : undefined}
-            >
-              <IcLocation className="split-menu-icon" />
-              <span>Reveal file in navigation</span>
+          )}
+          {onOpenInDefaultApp && (
+            <button role="menuitem" className="split-menu-item" onClick={run(onOpenInDefaultApp)}>
+              <IcLinkExternal className="split-menu-icon" />
+              <span>Open in default app</span>
             </button>
-            {(onDelete || onClose) && (
-              <>
-                <div className="split-menu-divider" role="separator" />
-                {onDelete && (
-                  <button
-                    role="menuitem"
-                    className="split-menu-item danger"
-                    onClick={run(onDelete)}
-                  >
-                    <IcTrash className="split-menu-icon" />
-                    <span>Delete file</span>
-                  </button>
-                )}
-                {onClose && (
-                  <button
-                    role="menuitem"
-                    className="split-menu-item"
-                    onClick={run(onClose)}
-                  >
-                    <IcClose className="split-menu-icon" />
-                    <span>Close</span>
-                  </button>
-                )}
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
+          )}
+          {onDelete && (
+            <>
+              <div className="split-menu-divider" role="separator" />
+              <button role="menuitem" className="split-menu-item danger" onClick={run(onDelete)}>
+                <IcTrash className="split-menu-icon" />
+                <span>Delete canvas</span>
+              </button>
+            </>
+          )}
+          {onClose && (
+            <>
+              <div className="split-menu-divider" role="separator" />
+              <button role="menuitem" className="split-menu-item" onClick={run(onClose)}>
+                <IcClose className="split-menu-icon" />
+                <span>Close</span>
+              </button>
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
     </>
   );
 }
-

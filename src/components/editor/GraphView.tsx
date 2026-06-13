@@ -138,6 +138,18 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
     };
   }, [vaultPath]);
 
+  // Bug fix: when vaultPath is null the data-fetcher useEffect returns
+  // early without ever calling setLoading(false), leaving the spinner
+  // spinning forever.  Explicitly clear the loading state whenever there
+  // is no vault to fetch from.
+  useEffect(() => {
+    if (!vaultPath) {
+      setLoading(false);
+      setGraphData(null);
+      setError(null);
+    }
+  }, [vaultPath]);
+
   // 1. Debounced Data Fetcher
   useEffect(() => {
     if (!vaultPath) return;
@@ -215,6 +227,36 @@ export default function GraphView({ onOpenFile }: { onOpenFile: (path: string) =
         overflow: "hidden",
       }}
     >
+      {/* Empty state: no vault open */}
+      {!loading && !error && !graphData && !vaultPath && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 12,
+            color: "var(--text-faint)",
+            fontSize: 13,
+            userSelect: "none",
+          }}
+        >
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
+            <circle cx="12" cy="12" r="3" />
+            <circle cx="4" cy="6" r="2" />
+            <circle cx="20" cy="6" r="2" />
+            <circle cx="4" cy="18" r="2" />
+            <circle cx="20" cy="18" r="2" />
+            <line x1="12" y1="9" x2="4" y2="7" />
+            <line x1="12" y1="9" x2="20" y2="7" />
+            <line x1="12" y1="15" x2="4" y2="17" />
+            <line x1="12" y1="15" x2="20" y2="17" />
+          </svg>
+          <span>Open a vault to see the knowledge graph</span>
+        </div>
+      )}
       {loading && !graphData && (
         <div className="graph-loader" aria-label="Loading graph">
           <div className="graph-spinner" />

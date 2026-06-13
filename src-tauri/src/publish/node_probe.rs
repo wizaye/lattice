@@ -110,19 +110,57 @@ pub fn probe() -> ProbeReport {
 }
 
 /// Run `<bin> --version` and return its stdout trimmed.  Empty string
-/// on any failure (binary not found, non-zero exit, non-UTF-8).
+/// on any failure (binary not found, non-zero exit, non-UTF-8, timeout).
+///
+/// Uses `wait_timeout` (5 s) so a hung corporate proxy wrapper can't
+/// freeze the Tauri IPC thread pool indefinitely.
 fn run_version(bin: &str) -> String {
-    match spawn(bin).arg("--version").output() {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+    let mut child = match spawn(bin).arg("--version").spawn() {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let timeout = std::time::Duration::from_secs(5);
+    match wait_timeout::ChildExt::wait_timeout(&mut child, timeout) {
+        Ok(Some(status)) if status.success() => {
+            // Output was piped — collect stdout.
+            // `spawn` (not `output`) was used because `output` blocks
+            // until the process exits, which is fine, but we wanted the
+            // timeout guard first.  Re-read stdout from the child handle.
+            // Since we used `spawn()` without piping stdout, fall back to
+            // calling `output()` directly for the simple path.
+            //
+            // Simpler: re-run with `.output()` inside a bounded wrapper.
+            let _ = child.kill();
+            match spawn(bin).arg("--version").output() {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                }
+                _ => String::new(),
+            }
+        }
+        Ok(None) => {
+            // Timed out — kill the child.
+            let _ = child.kill();
+            String::new()
+        }
         _ => String::new(),
     }
 }
 
 /// Like [`run_version`] but only cares about success/failure.
 fn run_silently(bin: &str) -> bool {
-    match spawn(bin).arg("--version").output() {
-        Ok(out) => out.status.success(),
-        Err(_) => false,
+    let mut child = match spawn(bin).arg("--version").spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let timeout = std::time::Duration::from_secs(5);
+    match wait_timeout::ChildExt::wait_timeout(&mut child, timeout) {
+        Ok(Some(status)) => status.success(),
+        Ok(None) => {
+            let _ = child.kill();
+            false
+        }
+        _ => false,
     }
 }
 

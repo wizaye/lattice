@@ -154,10 +154,18 @@ interface BYOCState {
 // payload just lands in the store, harmlessly.
 let unlistenDeviceCode: UnlistenFn | null = null;
 
+/** Returns true when running inside a Tauri desktop window. */
+const isTauriRuntime = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 async function subscribeDeviceCode(
   onPayload: (p: DeviceCodePayload) => void,
 ): Promise<void> {
   if (unlistenDeviceCode) return; // already subscribed
+  // Guard: `listen` throws immediately in browser/test mode because
+  // the Tauri IPC bridge isn't present.  Skip gracefully rather than
+  // printing a noisy warning in every browser-mode dev session.
+  if (!isTauriRuntime()) return;
   try {
     unlistenDeviceCode = await listen<DeviceCodePayload>(
       "byoc://device-code",

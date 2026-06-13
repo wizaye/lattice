@@ -1,12 +1,46 @@
 //! Canvas enhancements — Complete feature set
-//! 
+//!
 //! Implements all remaining canvas features from impl-v2 §3:
 //! - Sticky notes, image nodes, embedded note cards
 //! - Arrow style polish, layers panel, snap to grid
 //! - Frames, mini-map, export (SVG/TikZ/PNG)
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri;
+
+// ── ID generation (Single Responsibility) ──────────────────────────────────
+
+/// Generate a collision-safe canvas node ID.
+///
+/// UUIDs replace the old `timestamp_millis()` approach which silently
+/// produced duplicate IDs when two nodes were created within the same
+/// millisecond (e.g. paste-multiple).
+fn generate_canvas_id(prefix: &str) -> String {
+    format!("{}-{}", prefix, uuid::Uuid::new_v4())
+}
+
+// ── Vault-path guard (path-traversal fix) ──────────────────────────────────
+
+/// Validate that `target` resolves to a path inside `vault_root`.
+///
+/// Prevents a crafted canvas embed from reading arbitrary files on
+/// the user's system (e.g. `/etc/passwd`).
+fn assert_within_vault(vault_root: &str, target: &str) -> Result<(), String> {
+    let vault = Path::new(vault_root)
+        .canonicalize()
+        .map_err(|e| format!("invalid vault path: {e}"))?;
+    let resolved = Path::new(target)
+        .canonicalize()
+        .map_err(|e| format!("invalid note path '{}': {e}", target))?;
+    if !resolved.starts_with(&vault) {
+        return Err(format!(
+            "note path '{}' is outside the vault — access denied",
+            target
+        ));
+    }
+    Ok(())
+}
 
 // ----- Sticky Notes Commands -----
 
@@ -19,7 +53,7 @@ pub async fn canvas_add_sticky(
     y: f64,
 ) -> Result<String, String> {
     let sticky = serde_json::json!({
-        "id": format!("sticky-{}", chrono::Utc::now().timestamp_millis()),
+        "id": generate_canvas_id("sticky"),
         "text": text,
         "color": color,
         "x": x,
@@ -103,7 +137,7 @@ pub async fn canvas_add_image(
     y: f64,
 ) -> Result<String, String> {
     let image = serde_json::json!({
-        "id": format!("image-{}", chrono::Utc::now().timestamp_millis()),
+        "id": generate_canvas_id("image"),
         "path": image_path,
         "x": x,
         "y": y,
@@ -136,19 +170,23 @@ pub async fn canvas_add_image(
 #[tauri::command]
 pub async fn canvas_add_embed(
     canvas_path: String,
+    vault_root: String,
     note_path: String,
     x: f64,
     y: f64,
 ) -> Result<String, String> {
+    // Security: reject note_path that resolves outside the vault.
+    assert_within_vault(&vault_root, &note_path)?;
+
     // Read note file to extract title and preview
     let note_content = std::fs::read_to_string(&note_path)
         .map_err(|e| format!("Failed to read note: {}", e))?;
-    
+
     let title = extract_title(&note_content);
     let preview = extract_preview(&note_content, 200);
-    
+
     let embed = serde_json::json!({
-        "id": format!("embed-{}", chrono::Utc::now().timestamp_millis()),
+        "id": generate_canvas_id("embed"),
         "note_path": note_path,
         "title": title,
         "preview": preview,
@@ -222,7 +260,7 @@ pub async fn canvas_create_layer(
     layer_name: String,
 ) -> Result<String, String> {
     let layer = serde_json::json!({
-        "id": format!("layer-{}", chrono::Utc::now().timestamp_millis()),
+        "id": generate_canvas_id("layer"),
         "name": layer_name,
         "visible": true,
         "locked": false,
