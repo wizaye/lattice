@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EditorState, RangeSetBuilder, StateEffect, StateField, Transaction } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
 import {
   openSearchPanel,
   search,
@@ -48,15 +48,9 @@ import { useSettingsStore } from "../../state/settingsStore";
 import type { FileNode } from "../../state/types";
 import type { JumpToLineDetail } from "../../lib/backlinks";
 import { vimMode as makeVimExtension } from "./extensions/cm-vim";
-import { outlinerExtension, shouldEnableOutliner } from "./cm-outliner";
 import {
-  embedsExtension,
-  calloutsExtension,
-  headingFoldExtension,
-  sectionLinksExtension,
   slashCompletionSource,
   slashThemeExtension,
-  livePreviewExtension,
 } from "./extensions";
 
 // ── Theme ──
@@ -339,63 +333,7 @@ const flashLineTheme = EditorView.baseTheme({
   },
 });
 
-// ── List hanging indent ──
-// Why: Obsidian renders nested ordered/bulleted lists with hanging indent
-// so wrapped continuation lines align UNDER the content (not flush at
-// column 0). With plain `EditorView.lineWrapping`, our wraps fell back
-// to column 0, which made deeply-nested items look "sidelined" — the
-// nested markers blurred into the parent's wrap text.
-// How: for each line matching `^(\s*)([-*+]|\d+[.)])(\s+)`, add a line
-// decoration with `padding-left: Xch; text-indent: -Xch;` where X is the
-// full prefix width. The two declarations cancel for the first visual
-// line (so source still reads normally) but `padding-left` keeps every
-// wrapped continuation indented by X chars, giving the hanging-indent
-// shape. `ch` is the width of "0" in the active font — close enough to
-// the actual char width of `1. ` / `   1. `.
-// NOTE: We do NOT draw indent guide lines here — Obsidian only draws
-// them in reading mode (the source editor stays clean). The preview-mode
-// guide lives in EditorArea.css under `.md-preview li:has(> ul, > ol)`.
-const LIST_LINE_RE = /^(\s*)([-*+]|\d+[.)])(\s+)/;
 
-const listHangingIndent = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = this.build(view);
-    }
-    update(update: { docChanged: boolean; viewportChanged: boolean; view: EditorView }) {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = this.build(update.view);
-      }
-    }
-    build(view: EditorView): DecorationSet {
-      const builder = new RangeSetBuilder<Decoration>();
-      for (const { from, to } of view.visibleRanges) {
-        let pos = from;
-        while (pos <= to) {
-          const line = view.state.doc.lineAt(pos);
-          const m = LIST_LINE_RE.exec(line.text);
-          if (m) {
-            const prefix = m[0].length; // leading WS + marker + trailing WS
-            builder.add(
-              line.from,
-              line.from,
-              Decoration.line({
-                attributes: {
-                  style: `padding-left:${prefix}ch;text-indent:-${prefix}ch;`,
-                },
-              }),
-            );
-          }
-          if (line.to + 1 <= pos) break; // safety against zero-width loops
-          pos = line.to + 1;
-        }
-      }
-      return builder.finish();
-    }
-  },
-  { decorations: (v) => v.decorations },
-);
 
 // ── Wikilink autocomplete ──
 function collectAllFiles(
@@ -608,10 +546,6 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
 
     let debounceTimer: ReturnType<typeof setTimeout>;
 
-    // Check if outliner mode should be enabled
-    const tempState = EditorState.create({ doc: content ?? "" });
-    const enableOutliner = shouldEnableOutliner(tempState, filePath);
-
     const state = EditorState.create({
       doc: content ?? "",
       extensions: [
@@ -651,22 +585,12 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         wikilinkStyle,
         flashLineField,
         flashLineTheme,
-        listHangingIndent,
         // Search panel — Ctrl+F / Cmd+F opens in-editor find bar
         search({ top: false }),
-        // Enable outliner extensions when appropriate
-        ...(enableOutliner ? [outlinerExtension()] : []),
         // Vim mode (must come before other keymaps to take priority)
         ...makeVimExtension(vimEnabled),
-        // Obsidian-compat extensions (single ViewPlugin — no spread)
-        embedsExtension,
-        calloutsExtension,
-        ...headingFoldExtension,
-        sectionLinksExtension,
         // Slash command theme only (completion source merged below)
         slashThemeExtension,
-        // Live preview: collapse markdown syntax on non-cursor lines
-        ...livePreviewExtension,
         // Single autocompletion() merging wikilinks + slash commands
         autocompletion({
           override: [wikilinkCompletions, slashCompletionSource],
