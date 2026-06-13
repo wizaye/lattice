@@ -162,4 +162,10 @@ export const DEMO_VAULT_NODES: FileNode[] = [
     kind: "file",
     content: DEMO_KANBAN_CONTENT,
   },
+  {
+    id: "__mock__/trash",
+    name: "trash",
+    kind: "folder",
+    children: [],
+  },
 ];

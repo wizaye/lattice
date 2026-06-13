@@ -1,0 +1,50 @@
+.trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+.trash-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--text-normal);
+  width: 100%;
+  box-sizing: border-box;
+}
+.trash-list-item:hover {
+  background: var(--hover);
+}
+.trash-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.trash-item-icon svg,
+.trash-item-icon .codicon {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+}
+.trash-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trash-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+  flex-shrink: 0;
+}
+.trash-list-item:hover .trash-item-actions {
+  opacity: 1;
+}

@@ -60,13 +60,29 @@ pub fn rename_entry(old_path: String, new_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn delete_file(path: String) -> Result<(), String> {
-    repo().delete_file(&path)
+pub fn delete_file(path: String, permanent: bool) -> Result<(), String> {
+    if permanent {
+        let p = std::path::Path::new(&path);
+        if !p.exists() {
+            return Err(format!("File does not exist: '{}'", path));
+        }
+        std::fs::remove_file(p).map_err(|e| format!("Failed to permanently delete file '{}': {e}", path))
+    } else {
+        repo().delete_file(&path)
+    }
 }
 
 #[tauri::command]
-pub fn delete_folder(path: String) -> Result<(), String> {
-    repo().delete_dir(&path)
+pub fn delete_folder(path: String, permanent: bool) -> Result<(), String> {
+    if permanent {
+        let p = std::path::Path::new(&path);
+        if !p.exists() {
+            return Err(format!("Folder does not exist: '{}'", path));
+        }
+        std::fs::remove_dir_all(p).map_err(|e| format!("Failed to permanently delete folder '{}': {e}", path))
+    } else {
+        repo().delete_dir(&path)
+    }
 }
 
 #[tauri::command]

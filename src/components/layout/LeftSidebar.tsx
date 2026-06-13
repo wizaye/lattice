@@ -16,6 +16,7 @@ import {
   IcSearch,
   IcSortAZ,
   IcSun,
+  IcTrash,
 } from "../common/Icons";
 import { FileTree, type InlineEditState } from "../filetree/FileTree";
 import { useVaultStore } from "../../state/vaultStore";
@@ -24,6 +25,8 @@ import { VaultPickerMenu } from "../modals/VaultPickerMenu";
 import { ChangesPanel } from "./ChangesPanel";
 import { CalendarPanel } from "../calendar/CalendarPanel";
 import { CanvasListPanel } from "./CanvasListPanel";
+import { TrashPanel } from "./TrashPanel";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import "./LeftSidebar.css";
 
 // `changes` is the VCS + BYOC home (see docs/impl-v2.md §4 + §5.2).
@@ -44,7 +47,8 @@ export type LeftView =
   | "bookmarks"
   | "changes"
   | "calendar"
-  | "canvas";
+  | "canvas"
+  | "trash";
 
 type Props = {
   vaultName: string;
@@ -107,6 +111,25 @@ export function LeftSidebar({
   const vcsRefreshing = useVcsStore((s) => s.refreshing);
   const vcsRefresh = useVcsStore((s) => s.refresh);
   const [inlineEdit, setInlineEdit] = useState<InlineEditState>(null);
+
+  const trashNode = files.find((n) => n.name === "trash" && n.kind === "folder");
+  const trashItems = trashNode?.children || [];
+
+  const handleEmptyTrash = async () => {
+    const doEmpty = await confirm("Are you sure you want to permanently delete all items in the Trash?", {
+      title: "Empty Trash",
+      kind: "warning",
+    });
+    if (doEmpty) {
+      try {
+        const { emptyTrash } = await import("../../lib/tauriApi");
+        await emptyTrash();
+        useVaultStore.getState().refreshTree();
+      } catch (err) {
+        console.error("Empty trash failed:", err);
+      }
+    }
+  };
   return (
     <>
       {/* Header — view switcher tabs */}
@@ -131,6 +154,13 @@ export function LeftSidebar({
           onClick={() => onChangeView("bookmarks")}
         >
           <IcBookmark />
+        </button>
+        <button
+          className={`icon-btn${view === "trash" ? " active" : ""}`}
+          title="Trash"
+          onClick={() => onChangeView("trash")}
+        >
+          <IcTrash />
         </button>
         <div className="ls-header-drag" data-tauri-drag-region />
         {isMac && (
@@ -222,6 +252,22 @@ export function LeftSidebar({
               <span className="ls-toolbar-spacer" />
             </>
           )}
+          {view === "trash" && (
+            <>
+              <span className="ls-toolbar-label">Trash ({trashItems.length})</span>
+              <span className="ls-toolbar-spacer" />
+              {trashItems.length > 0 && (
+                <button
+                  className="icon-btn tiny"
+                  title="Empty Trash"
+                  onClick={handleEmptyTrash}
+                  style={{ color: "var(--text-accent-hover, #ff6b6b)" }}
+                >
+                  <IcTrash />
+                </button>
+              )}
+            </>
+          )}
         </div>
 
         {/* Active view — keyed on `view` so React remounts the subtree
@@ -232,7 +278,7 @@ export function LeftSidebar({
           <div key={view} className="ls-view">
             {view === "files" && (
               <FileTree 
-                nodes={files} 
+                nodes={files.filter((n) => n.name !== "trash")} 
                 selectedId={selectedId} 
                 onOpen={onOpenFile} 
                 inlineEdit={inlineEdit}
@@ -253,6 +299,7 @@ export function LeftSidebar({
             {view === "canvas" && (
               <CanvasListPanel onOpenFile={onOpenFile} />
             )}
+            {view === "trash" && <TrashPanel />}
           </div>
         </div>
       </div>

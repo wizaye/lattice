@@ -3205,6 +3205,7 @@ dependencies = [
  "lattice-crypto",
  "lattice-vault",
  "lazy_static",
+ "libc",
  "mime_guess",
  "pulldown-cmark",
  "rand",

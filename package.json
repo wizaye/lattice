@@ -31,6 +31,7 @@
     "@vscode/codicons": "^0.0.45",
     "force-graph": "^1.51.4",
     "katex": "^0.17.0",
+    "libc": "^1.0.0-b0",
     "loro-crdt": "^1.13.2",
     "markdown-it": "^14.2.0",
     "markdown-it-texmath": "^1.0.0",

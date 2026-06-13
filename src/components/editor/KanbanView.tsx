@@ -224,7 +224,7 @@ interface Props {
 
 const ID_RE = /<!--\s*id:\s*([\w-]+)\s*-->/;
 
-function mapBackendTaskToKanbanTask(t: any, columns: KanbanColumn[]): KanbanTask {
+function mapBackendTaskToKanbanTask(t: any, columns: KanbanColumn[], vaultPath: string | null): KanbanTask {
   // Extract stable ID if present in text
   let id = t.id;
   let cleanText = t.text;
@@ -246,11 +246,19 @@ function mapBackendTaskToKanbanTask(t: any, columns: KanbanColumn[]): KanbanTask
   // Determine file name
   const fileName = t.note_path.split(/[/\\]/).pop()?.replace(/\.md$/i, "") || "";
 
+  // Convert note_path to an absolute path so it matches keys in flatVault/editorStore
+  const isAbsolute = t.note_path.startsWith("/") || /^[a-zA-Z]:/.test(t.note_path);
+  const fileId = isAbsolute
+    ? t.note_path
+    : vaultPath
+    ? `${vaultPath}/${t.note_path}`.replace(/\/+/g, "/")
+    : t.note_path;
+
   return {
     id,
     text: cleanText,
     status: markerToStatus(t.marker || (t.checked ? "x" : " "), columns),
-    fileId: t.note_path,
+    fileId,
     fileName,
     line: t.line_number,
     tags,
@@ -287,7 +295,7 @@ export function KanbanView({ onOpenFileByPath }: Props) {
     try {
       const backendTasks = await scanTasks(vaultPath);
       if (backendTasks && backendTasks.length > 0) {
-        const mapped = backendTasks.map((t) => mapBackendTaskToKanbanTask(t, columns));
+        const mapped = backendTasks.map((t) => mapBackendTaskToKanbanTask(t, columns, vaultPath));
         setBaseTasks(mapped);
         return;
       }

@@ -112,18 +112,175 @@ export async function createFolder(path: string): Promise<void> {
 }
 
 export async function renameEntry(oldPath: string, newPath: string): Promise<void> {
-  if (!isTauri()) return;
+  if (!isTauri()) {
+    const { useVaultStore } = await import("../state/vaultStore");
+    const store = useVaultStore.getState();
+    const tree = [...store.fileTree];
+    let foundNode: any = null;
+
+    const removeNode = (nodes: any[]): any[] => {
+      return nodes.filter((n) => {
+        if (n.id === oldPath) {
+          foundNode = n;
+          return false;
+        }
+        if (n.children) {
+          n.children = removeNode(n.children);
+        }
+        return true;
+      });
+    };
+
+    const nextTree = removeNode(tree);
+    if (foundNode) {
+      foundNode.id = newPath;
+      foundNode.name = newPath.split("/").pop() || foundNode.name;
+      if (newPath.includes("/trash/")) {
+        const trashFolder = nextTree.find((n) => n.name === "trash");
+        if (trashFolder) {
+          if (!trashFolder.children) trashFolder.children = [];
+          trashFolder.children.push(foundNode);
+        }
+      } else {
+        nextTree.push(foundNode);
+      }
+      store.setFileTree(nextTree);
+    }
+    return;
+  }
   await invoke("rename_entry", { oldPath, newPath });
 }
 
-export async function deleteFile(path: string): Promise<void> {
-  if (!isTauri()) return;
-  return invoke<void>("delete_file", { path });
+export async function deleteFile(path: string, permanent = false): Promise<void> {
+  if (!isTauri()) {
+    const { useVaultStore } = await import("../state/vaultStore");
+    const store = useVaultStore.getState();
+    const tree = [...store.fileTree];
+
+    const removeNode = (nodes: any[]): any[] => {
+      return nodes.filter((n) => {
+        if (n.id === path) return false;
+        if (n.children) n.children = removeNode(n.children);
+        return true;
+      });
+    };
+
+    const nextTree = removeNode(tree);
+    store.setFileTree(nextTree);
+    return;
+  }
+  return invoke<void>("delete_file", { path, permanent });
 }
 
-export async function deleteFolder(path: string): Promise<void> {
-  if (!isTauri()) return;
-  return invoke<void>("delete_folder", { path });
+export async function deleteFolder(path: string, permanent = false): Promise<void> {
+  if (!isTauri()) {
+    const { useVaultStore } = await import("../state/vaultStore");
+    const store = useVaultStore.getState();
+    const tree = [...store.fileTree];
+
+    const removeNode = (nodes: any[]): any[] => {
+      return nodes.filter((n) => {
+        if (n.id === path) return false;
+        if (n.children) n.children = removeNode(n.children);
+        return true;
+      });
+    };
+
+    const nextTree = removeNode(tree);
+    store.setFileTree(nextTree);
+    return;
+  }
+  return invoke<void>("delete_folder", { path, permanent });
+}
+
+export async function moveToTrash(rel: string): Promise<any> {
+  if (!isTauri()) {
+    const { useVaultStore } = await import("../state/vaultStore");
+    const store = useVaultStore.getState();
+    const vaultPath = store.vaultPath || "__mock__";
+    const oldPath = rel.startsWith("/") || /^[a-zA-Z]:/.test(rel) ? rel : `${vaultPath}/${rel}`.replace(/\/+/g, "/");
+
+    const tree = [...store.fileTree];
+    let foundNode: any = null;
+
+    const removeNode = (nodes: any[]): any[] => {
+      return nodes.filter((n) => {
+        if (n.id === oldPath) {
+          foundNode = n;
+          return false;
+        }
+        if (n.children) {
+          n.children = removeNode(n.children);
+        }
+        return true;
+      });
+    };
+
+    const nextTree = removeNode(tree);
+    if (foundNode) {
+      const trashFolder = nextTree.find((n) => n.id === `${vaultPath}/trash` || n.name === "trash");
+      if (trashFolder) {
+        if (!trashFolder.children) trashFolder.children = [];
+        const filename = foundNode.name;
+        foundNode.id = `${vaultPath}/trash/${filename}`;
+        trashFolder.children.push(foundNode);
+      }
+      store.setFileTree(nextTree);
+    }
+    return null;
+  }
+  return invoke<any>("move_to_trash", { rel });
+}
+
+export async function restoreFromTrash(rel: string): Promise<any> {
+  if (!isTauri()) {
+    const { useVaultStore } = await import("../state/vaultStore");
+    const store = useVaultStore.getState();
+    const vaultPath = store.vaultPath || "__mock__";
+    const oldPath = rel.startsWith("/") || /^[a-zA-Z]:/.test(rel) ? rel : `${vaultPath}/${rel}`.replace(/\/+/g, "/");
+
+    const tree = [...store.fileTree];
+    let foundNode: any = null;
+
+    const removeNode = (nodes: any[]): any[] => {
+      return nodes.filter((n) => {
+        if (n.id === oldPath) {
+          foundNode = n;
+          return false;
+        }
+        if (n.children) {
+          n.children = removeNode(n.children);
+        }
+        return true;
+      });
+    };
+
+    const nextTree = removeNode(tree);
+    if (foundNode) {
+      const filename = foundNode.name;
+      foundNode.id = `${vaultPath}/${filename}`;
+      nextTree.push(foundNode);
+      store.setFileTree(nextTree);
+    }
+    return null;
+  }
+  return invoke<any>("restore_from_trash", { rel });
+}
+
+export async function emptyTrash(): Promise<void> {
+  if (!isTauri()) {
+    const { useVaultStore } = await import("../state/vaultStore");
+    const store = useVaultStore.getState();
+    const vaultPath = store.vaultPath || "__mock__";
+    const tree = [...store.fileTree];
+    const trashFolder = tree.find((n) => n.id === `${vaultPath}/trash` || n.name === "trash");
+    if (trashFolder) {
+      trashFolder.children = [];
+    }
+    store.setFileTree(tree);
+    return;
+  }
+  return invoke<void>("empty_trash");
 }
 
 export async function openNewWindow(): Promise<void> {

@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 1,
   "workspaces": {
     "": {
       "name": "lattice",
@@ -23,6 +22,7 @@
         "@vscode/codicons": "^0.0.45",
         "force-graph": "^1.51.4",
         "katex": "^0.17.0",
+        "libc": "^1.0.0-b0",
         "loro-crdt": "^1.13.2",
         "markdown-it": "^14.2.0",
         "markdown-it-texmath": "^1.0.0",
@@ -648,6 +648,8 @@
     "khroma": ["khroma@2.1.0", "", {}, "sha512-Ls993zuzfayK269Svk9hzpeGUKob/sIgZzyHYdjQoAdQetRKpOLj+k/QQQ/6Qi0Yz65mlROrfd+Ev+1+7dz9Kw=="],
 
     "layout-base": ["layout-base@1.0.2", "", {}, "sha512-8h2oVEZNktL4BH2JCOI90iD1yXwL6iNW7KcCKT2QZgQJR2vbqDsldCTPRU9NifTCqHZci57XvQQ15YTu+sTYPg=="],
+
+    "libc": ["libc@1.0.0-b0", "", {}, "sha512-Jjg80qv1KrxwdsHV4O7BW+wy4wSpFnjHg+z41HPVB98RWnCwdmcaNytkjOhTVJYIdxn28s1wWBukM6my4EN3OQ=="],
 
     "linkify-it": ["linkify-it@5.0.1", "", { "dependencies": { "uc.micro": "^2.0.0" } }, "sha512-wVoTjP4Q6R0NW5hiZkVJaFZPWgtXfoGF+6LucL3/FtiNjmcHhYjEr5f1Kqjirc1nBW07J/ZuRFumqr2oqccEWg=="],
 

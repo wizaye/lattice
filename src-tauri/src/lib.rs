@@ -68,6 +68,7 @@ pub fn run() {
             vault_commands::move_to_trash,
             vault_commands::move_file_to_vault_trash,
             vault_commands::restore_from_trash,
+            vault_commands::empty_trash,
             vault_commands::archive_note,
             vault_commands::unarchive_note,
             vault_commands::delete_note,

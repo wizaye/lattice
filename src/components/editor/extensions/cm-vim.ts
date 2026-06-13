@@ -17,14 +17,20 @@ export function vimMode(enabled: boolean): Extension[] {
     return [];
   }
 
-  // Register :hint ex command once
+  // Register ex commands once
   try {
     Vim.defineEx("hint",  "hint",  () => window.dispatchEvent(new CustomEvent("lattice-hint-mode")));
     Vim.defineEx("hints", "hints", () => window.dispatchEvent(new CustomEvent("lattice-hint-mode")));
+    Vim.defineEx("whichkey", "whichkey", () => window.dispatchEvent(new CustomEvent("lattice-open-whichkey")));
+    Vim.defineEx("help", "help", () => window.dispatchEvent(new CustomEvent("lattice-open-shortcuts")));
+    Vim.defineEx("keys", "keys", () => window.dispatchEvent(new CustomEvent("lattice-open-shortcuts")));
+    
     // Map uppercase F in normal mode to hint mode
-    // (lowercase f is already "find char" in vim)
-    // Note: Ctrl+Shift+H is the global shortcut; F gives the same in vim normal
     Vim.map("F", ":hint<CR>", "normal");
+    // Map space to open which-key cheatsheet
+    Vim.map("<Space>", ":whichkey<CR>", "normal");
+    // Map ? to open shortcuts cheatsheet
+    Vim.map("?", ":help<CR>", "normal");
   } catch {
     // Already registered (HMR) — ignore
   }

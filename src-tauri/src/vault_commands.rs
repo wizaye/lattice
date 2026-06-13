@@ -136,6 +136,25 @@ pub async fn restore_from_trash(
 }
 
 #[tauri::command]
+pub async fn empty_trash(state: State<'_, VaultState>) -> Result<(), String> {
+    let vault = get_vault(state).await?;
+    let trash_dir = vault.root().join("trash");
+    if trash_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(trash_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let _ = std::fs::remove_file(&path);
+                } else if path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&path);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn archive_note(rel: String, state: State<'_, VaultState>) -> Result<NoteMeta, String> {
     let vault = get_vault(state).await?;
     vault.archive_note(&rel).await.map_err(|e| e.to_string())

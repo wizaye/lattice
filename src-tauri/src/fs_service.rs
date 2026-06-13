@@ -186,6 +186,11 @@ impl WritableRepository for LocalFileRepository {
         if new.exists() {
             return Err(format!("Destination already exists: '{}'", new_path));
         }
+        if let Some(parent) = new.parent() {
+            if !parent.exists() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
         match std::fs::rename(old, new) {
             Ok(()) => Ok(()),
             Err(e) if is_cross_device(&e) => {

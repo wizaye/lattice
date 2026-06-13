@@ -687,6 +687,7 @@
    narrower than .doc-more-menu because it has fewer items. */
 .tab-context-menu {
   min-width: 220px;
+  right: auto;
   /* Position is set inline by TabContextMenu (left/top/zIndex). The
      animation transform interferes with our viewport-clamp math
      because getBoundingClientRect runs while the scale(0.98) is

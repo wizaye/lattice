@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useVaultStore } from "../../state/vaultStore";
 import type { FileNode } from "../../state/types";
+import { scanTasks } from "../../lib/tauriApi";
 
 interface Task {
   id: string;
@@ -56,9 +57,44 @@ interface Props {
 }
 
 export function KanbanPanel({ onOpenFile }: Props) {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
   const fileTree = useVaultStore((s) => s.fileTree);
-  const tasks = useMemo(() => extractTasks(fileTree), [fileTree]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const loadTasks = useCallback(async () => {
+    if (!vaultPath) {
+      setTasks([]);
+      return;
+    }
+    try {
+      const backendTasks = await scanTasks(vaultPath);
+      if (backendTasks && backendTasks.length > 0) {
+        const mapped: Task[] = backendTasks.map((t) => ({
+          id: t.id,
+          text: t.text.replace(/<!--\s*id:\s*([\w-]+)\s*-->/, "").replace(/#([\w/-]+)/g, "").trim(),
+          done: t.checked,
+          inProgress: t.marker === "/" || t.marker === "-",
+          fileId: t.note_path,
+          fileName: t.note_path.split(/[/\\]/).pop()?.replace(/\.md$/i, "") || "",
+          line: t.line_number,
+        }));
+        setTasks(mapped);
+        return;
+      }
+    } catch (err) {
+      console.error("Failed to scan tasks in KanbanPanel:", err);
+    }
+    setTasks(extractTasks(fileTree));
+  }, [vaultPath, fileTree]);
+
+  useEffect(() => {
+    loadTasks();
+    window.addEventListener("lattice-tasks-changed", loadTasks);
+    return () => {
+      window.removeEventListener("lattice-tasks-changed", loadTasks);
+    };
+  }, [loadTasks]);
 
   if (tasks.length === 0) {
     return (

@@ -18,6 +18,10 @@ pub struct Vault {
 }
 
 impl Vault {
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Open or create a vault at the given root path
     pub async fn open(root: PathBuf) -> Result<Self> {
         let root = root.canonicalize()
@@ -313,7 +317,11 @@ impl Vault {
         let filename = old_path.file_name()
             .ok_or_else(|| VaultError::InvalidStructure("No filename".to_string()))?;
         
-        let trash_path = self.root.join("trash").join(filename);
+        let trash_dir = self.root.join("trash");
+        if !trash_dir.exists() {
+            fs::create_dir_all(&trash_dir).await?;
+        }
+        let trash_path = trash_dir.join(filename);
         let trash_rel = format!("trash/{}", filename.to_string_lossy());
 
         fs::rename(&old_path, &trash_path).await?;

@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SyncError {
     /// Caller-side mistake: bad path, missing required field, etc.
     BadInput(String),

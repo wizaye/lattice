@@ -101,13 +101,23 @@ export default function App() {
     const handleOpenKanbanConfig = () => {
       setKanbanConfigOpen(true);
     };
+    const handleOpenWhichKey = () => {
+      setWhichKeyVisible(true);
+    };
+    const handleOpenShortcuts = () => {
+      setShortcutsOverlayOpen(true);
+    };
 
     window.addEventListener("lattice-open-task-modal" as any, handleOpenTaskModal);
     window.addEventListener("lattice-open-kanban-config" as any, handleOpenKanbanConfig);
+    window.addEventListener("lattice-open-whichkey" as any, handleOpenWhichKey);
+    window.addEventListener("lattice-open-shortcuts" as any, handleOpenShortcuts);
 
     return () => {
       window.removeEventListener("lattice-open-task-modal" as any, handleOpenTaskModal);
       window.removeEventListener("lattice-open-kanban-config" as any, handleOpenKanbanConfig);
+      window.removeEventListener("lattice-open-whichkey" as any, handleOpenWhichKey);
+      window.removeEventListener("lattice-open-shortcuts" as any, handleOpenShortcuts);
     };
   }, []);
 
@@ -342,6 +352,7 @@ export default function App() {
       switch (e.key) {
         case "f": setLeftView("files"); if (leftCollapsed) setLeftCollapsed(false); break;
         case "s": setLeftView("search"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "t": setLeftView("trash"); if (leftCollapsed) setLeftCollapsed(false); break;
         case "g": window.dispatchEvent(new CustomEvent("lattice-open-graph")); break;
         case "k": window.dispatchEvent(new CustomEvent("lattice-open-kanban")); break;
         case "c": setLeftView("canvas"); if (leftCollapsed) setLeftCollapsed(false); break;

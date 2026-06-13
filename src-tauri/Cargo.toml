@@ -30,6 +30,7 @@ regex = "1.12.3"
 lazy_static = "1.5.0"
 lattice-vault = { path = "../packages/lattice-vault" }
 lattice-crypto = { path = "../packages/lattice-crypto" }
+libc = "0.2"
 
 # Unique IDs for canvas nodes / window labels (collision-safe).
 uuid = { version = "1", features = ["v4"] }

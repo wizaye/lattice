@@ -81,6 +81,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (vaultPath) {
         void useVcsStore.getState().refresh(vaultPath);
       }
+      window.dispatchEvent(new CustomEvent("lattice-tasks-changed"));
     } catch (err) {
       console.error("Failed to save file:", err);
     }

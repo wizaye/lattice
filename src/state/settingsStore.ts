@@ -29,7 +29,7 @@ export interface SettingsState {
 
   // ── Files and links ──
   showFileExtensions: boolean;
-  deleteBehavior: "trash" | "permanent";
+  deleteBehavior: "system" | "local" | "permanent";
   attachmentFolder: string;
 
   // ── Appearance ──
@@ -58,7 +58,7 @@ function defaults(): SettingsState {
     vimMode: false,
 
     showFileExtensions: true,
-    deleteBehavior: "trash",
+    deleteBehavior: "local",
     attachmentFolder: "attachments",
 
     accentColor: "#7c5bf0",

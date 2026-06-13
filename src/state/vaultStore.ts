@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { FileNode } from "./types";
-import { listDirectory, toFrontendTree } from "../lib/tauriApi";
+import { listDirectory, toFrontendTree, isTauri } from "../lib/tauriApi";
 
 /** Flatten the vault tree for fast id-based lookup. */
 function flattenVault(nodes: FileNode[]): Map<string, FileNode> {
@@ -42,6 +42,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   openVault: async (path: string) => {
     try {
+      if (isTauri()) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("open_vault", { path });
+      }
       const backendNodes = await listDirectory(path);
       const tree = toFrontendTree(backendNodes);
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? "Vault";

@@ -410,7 +410,7 @@ mod nix {
         Ok(dir.join(format!(
             "{}-{}.json",
             provider.as_str(),
-            vault_hash(vault)
+            vault_hash(vault)?
         )))
     }
 
@@ -516,24 +516,31 @@ mod tests {
 
     #[test]
     fn vault_hash_is_deterministic() {
-        let p = PathBuf::from("/some/vault");
-        assert_eq!(vault_hash(&p), vault_hash(&p));
-        assert_eq!(vault_hash(&p).len(), 16);
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().to_path_buf();
+        assert_eq!(vault_hash(&p).unwrap(), vault_hash(&p).unwrap());
+        assert_eq!(vault_hash(&p).unwrap().len(), 16);
     }
 
     #[test]
     fn vault_hash_differs_per_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p1 = tmp.path().join("a");
+        let p2 = tmp.path().join("b");
+        std::fs::create_dir(&p1).unwrap();
+        std::fs::create_dir(&p2).unwrap();
         assert_ne!(
-            vault_hash(&PathBuf::from("/a")),
-            vault_hash(&PathBuf::from("/b"))
+            vault_hash(&p1).unwrap(),
+            vault_hash(&p2).unwrap()
         );
     }
 
     #[test]
     fn account_key_includes_provider() {
-        let p = PathBuf::from("/v");
-        assert!(account_key(&p, ProviderId::Github).starts_with("github:"));
-        assert!(account_key(&p, ProviderId::Gdrive).starts_with("gdrive:"));
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().to_path_buf();
+        assert!(account_key(&p, ProviderId::Github).unwrap().starts_with("github:"));
+        assert!(account_key(&p, ProviderId::Gdrive).unwrap().starts_with("gdrive:"));
     }
 
     #[cfg(windows)]
@@ -543,7 +550,8 @@ mod tests {
         // we don't pollute the real %LOCALAPPDATA%.
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var("LOCALAPPDATA", tmp.path());
-        let vault = PathBuf::from("/test-vault");
+        let vault = tmp.path().join("test-vault");
+        std::fs::create_dir(&vault).unwrap();
         let tokens = TokenSet {
             access_token: "secret-token-xyz".into(),
             refresh_token: None,

@@ -47,17 +47,21 @@ export function TaskDetailModal({ fileId, line, taskId, onClose }: TaskDetailMod
       setColumns(config.columns);
       setCustomFieldsSchema(config.metadataFields);
 
-      // 2. Ensure stable ID comment exists in note file
-      const stableId = await ensureTaskHasStableId(fileId, line, taskId);
+      // 2. Load task metadata from sidecar file only if we already have a stable ID
+      let stableId = taskId;
+      if (!taskId.includes(":")) {
+        const meta = await loadTaskMetadata(vaultPath, taskId);
+        setDescription(meta.description || "");
+        setDueDate(meta.dueDate || "");
+        setCustomFieldValues(meta.customFields || {});
+      } else {
+        setDescription("");
+        setDueDate("");
+        setCustomFieldValues({});
+      }
       setResolvedTaskId(stableId);
 
-      // 3. Load task metadata from sidecar file
-      const meta = await loadTaskMetadata(vaultPath, stableId);
-      setDescription(meta.description || "");
-      setDueDate(meta.dueDate || "");
-      setCustomFieldValues(meta.customFields || {});
-
-      // 4. Load current values from markdown file
+      // 3. Load current values from markdown file
       const noteContent = await useEditorStore.getState().loadFile(fileId);
       const lines = noteContent.split("\n");
       let lineIdx = -1;
@@ -120,17 +124,30 @@ export function TaskDetailModal({ fileId, line, taskId, onClose }: TaskDetailMod
   const handleSave = async () => {
     if (!vaultPath) return;
 
-    // 1. Save metadata sidecar
-    await saveTaskMetadata(vaultPath, resolvedTaskId, {
-      description,
-      dueDate,
-      customFields: customFieldValues,
-    });
+    let finalTaskId = resolvedTaskId;
+    const hasMetadata =
+      description.trim() !== "" ||
+      dueDate.trim() !== "" ||
+      Object.values(customFieldValues).some((v) => v && v.trim() !== "");
+
+    if (hasMetadata && finalTaskId.includes(":")) {
+      // User entered some metadata, so now we must generate and persist a stable ID comment
+      finalTaskId = await ensureTaskHasStableId(fileId, line, finalTaskId);
+    }
+
+    if (!finalTaskId.includes(":")) {
+      // Save metadata sidecar
+      await saveTaskMetadata(vaultPath, finalTaskId, {
+        description,
+        dueDate,
+        customFields: customFieldValues,
+      });
+    }
 
     // 2. Sync to markdown file
     await updateTaskInMarkdown(
       fileId,
-      resolvedTaskId,
+      finalTaskId,
       line,
       {
         status,

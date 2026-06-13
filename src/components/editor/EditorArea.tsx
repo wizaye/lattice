@@ -30,6 +30,7 @@ import { SlidesView } from "./SlidesView";
 import "./SlidesView.css";
 import { CanvasView } from "../canvas/CanvasView";
 import { EmptyTab } from "./EmptyTab";
+import { useSettingsStore } from "../../state/settingsStore";
 import { setDragImageBelowCursor } from "../common/dragGhost";
 import {
   IcArrowDown,
@@ -116,6 +117,38 @@ function paperRootForPath(
     if (flatVault.has(probe)) return cur;
   }
   return null;
+}
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+function getRelativePath(absolutePath: string, vaultPath: string | null): string {
+  if (!vaultPath) return absolutePath;
+  const abs = normalizePath(absolutePath);
+  const vault = normalizePath(vaultPath);
+  if (abs.startsWith(vault)) {
+    let rel = abs.slice(vault.length);
+    if (rel.startsWith("/")) rel = rel.slice(1);
+    return rel;
+  }
+  return absolutePath;
+}
+
+function getTrashPath(absolutePath: string, vaultPath: string, flatVault: Map<string, FileNode>): string {
+  const filename = absolutePath.split(/[/\\]/).pop() || "";
+  let target = `${vaultPath}/trash/${filename}`;
+  if (flatVault.has(target)) {
+    const dotIdx = filename.lastIndexOf(".");
+    if (dotIdx !== -1) {
+      const name = filename.slice(0, dotIdx);
+      const ext = filename.slice(dotIdx);
+      target = `${vaultPath}/trash/${name}_${Date.now()}${ext}`;
+    } else {
+      target = `${vaultPath}/trash/${filename}_${Date.now()}`;
+    }
+  }
+  return target;
 }
 
 /**
@@ -376,11 +409,15 @@ export function EditorArea(props: Props) {
   // so the user's next typing/clicking lands in the just-created split
   // (mirrors Obsidian / VS Code behavior).
   const onSplitInLeaf = useCallback(
-    (leafId: string, edge: Exclude<DropEdge, "center">) => {
+    (leafId: string, edge: Exclude<DropEdge, "center">, sourceTab?: Tab) => {
+      const leaf = findLeaf(tree, leafId);
+      const tabToClone = sourceTab || leaf?.tabs.find((t) => t.id === leaf.activeTabId);
+
       const newTab: Tab = {
         id: uid("tab"),
-        fileId: null,
-        title: "New tab",
+        fileId: tabToClone ? tabToClone.fileId : null,
+        title: tabToClone ? tabToClone.title : "New tab",
+        viewMode: tabToClone ? tabToClone.viewMode : undefined,
       };
       const newLeaf: Extract<SplitTree, { kind: "leaf" }> = {
         kind: "leaf",
@@ -515,21 +552,43 @@ export function EditorArea(props: Props) {
   const onDeleteFile = useCallback(
     async (fileId: string) => {
       // Lazy-import the dialog so vite dev (no Tauri) still works.
+      const vaultPath = useVaultStore.getState().vaultPath;
+      const isAlreadyInTrash = vaultPath ? fileId.startsWith(`${vaultPath}/trash/`) : false;
       let ok = false;
       try {
         const dlg = await import("@tauri-apps/plugin-dialog");
         const name = fileId.split(/[/\\]/).pop() ?? fileId;
-        ok = await dlg.confirm(`Delete "${name}"?`, {
-          title: "Delete file",
-          kind: "warning",
-        });
+        ok = await dlg.confirm(
+          isAlreadyInTrash
+            ? `Permanently delete "${name}"? This cannot be undone.`
+            : `Delete "${name}"?`,
+          {
+            title: isAlreadyInTrash ? "Permanently Delete file" : "Delete file",
+            kind: "warning",
+          },
+        );
       } catch {
         ok = window.confirm(`Delete "${fileId}"?`);
       }
       if (!ok) return;
       try {
-        const { deleteFile } = await import("../../lib/tauriApi");
-        await deleteFile(fileId);
+        const deleteBehavior = useSettingsStore.getState().deleteBehavior;
+        if (deleteBehavior === "local" && vaultPath && !isAlreadyInTrash) {
+          if (fileId.toLowerCase().endsWith(".md")) {
+            const rel = getRelativePath(fileId, vaultPath);
+            const { moveToTrash } = await import("../../lib/tauriApi");
+            await moveToTrash(rel);
+          } else {
+            const flatVault = useVaultStore.getState().flatVault;
+            const targetPath = getTrashPath(fileId, vaultPath, flatVault);
+            const { renameEntry } = await import("../../lib/tauriApi");
+            await renameEntry(fileId, targetPath);
+          }
+        } else {
+          const isPermanent = deleteBehavior === "permanent" || isAlreadyInTrash;
+          const { deleteFile } = await import("../../lib/tauriApi");
+          await deleteFile(fileId, isPermanent);
+        }
         await useVaultStore.getState().refreshTree();
       } catch (err) {
         console.error("Delete failed:", err);
@@ -786,7 +845,7 @@ type RenderProps = {
   onCloseOthers: (leafId: string, tabId: string) => void;
   onTogglePinTab: (leafId: string, tabId: string) => void;
   onNewTab: (leafId: string) => void;
-  onSplit: (leafId: string, edge: Exclude<DropEdge, "center">) => void;
+  onSplit: (leafId: string, edge: Exclude<DropEdge, "center">, sourceTab?: Tab) => void;
   onResizeSplit: (splitId: string, ratio: number) => void;
   onChangeActiveLeaf: (id: string) => void;
   onDropOnPane: (leafId: string, edge: DropEdge, data: DT) => void;
@@ -1183,7 +1242,7 @@ function Pane(props: PaneProps) {
               onCloseAll={() => onCloseAll(leaf.id)}
               onTogglePin={() => onTogglePinTab(leaf.id, t.id)}
               onToggleViewMode={() => onToggleViewMode(leaf.id, t.id)}
-              onSplit={(edge) => onSplit(leaf.id, edge)}
+              onSplit={(edge) => onSplit(leaf.id, edge, t)}
               onCopyPath={() => t.fileId && onCopyFilePath(t.fileId)}
               onRevealInNav={() => t.fileId && onRevealFileInNav(t.fileId)}
               onShowInExplorer={() => t.fileId && onShowInExplorer(t.fileId)}

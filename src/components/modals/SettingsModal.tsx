@@ -501,7 +501,8 @@ function SectionBody({
               value={store.deleteBehavior}
               onChange={(e) => store.set("deleteBehavior", e.target.value as any)}
             >
-              <option value="trash">Move to system trash</option>
+              <option value="local">Move to vault trash (trash/ folder)</option>
+              <option value="system">Move to system trash</option>
               <option value="permanent">Permanently delete</option>
             </select>
           </div>

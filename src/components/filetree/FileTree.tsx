@@ -27,6 +27,34 @@ function parentDir(p: string): string {
   return idx > 0 ? n.slice(0, idx) : "";
 }
 
+function getRelativePath(absolutePath: string, vaultPath: string | null): string {
+  if (!vaultPath) return absolutePath;
+  const abs = normalizePath(absolutePath);
+  const vault = normalizePath(vaultPath);
+  if (abs.startsWith(vault)) {
+    let rel = abs.slice(vault.length);
+    if (rel.startsWith("/")) rel = rel.slice(1);
+    return rel;
+  }
+  return absolutePath;
+}
+
+function getTrashPath(absolutePath: string, vaultPath: string, flatVault: Map<string, FileNode>): string {
+  const filename = absolutePath.split(/[/\\]/).pop() || "";
+  let target = `${vaultPath}/trash/${filename}`;
+  if (flatVault.has(target)) {
+    const dotIdx = filename.lastIndexOf(".");
+    if (dotIdx !== -1) {
+      const name = filename.slice(0, dotIdx);
+      const ext = filename.slice(dotIdx);
+      target = `${vaultPath}/trash/${name}_${Date.now()}${ext}`;
+    } else {
+      target = `${vaultPath}/trash/${filename}_${Date.now()}`;
+    }
+  }
+  return target;
+}
+
 // ── Context Menu ──
 interface ContextMenuState {
   x: number;
@@ -64,16 +92,26 @@ function ContextMenu({
   }, [onClose]);
 
   const items: { label: string; action: string; danger?: boolean }[] = [];
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const isTrashFolder = menu.node && vaultPath && menu.node.id === `${vaultPath}/trash`;
+  const isInTrash = menu.node && vaultPath && menu.node.id.startsWith(`${vaultPath}/trash/`);
 
-  if (menu.isRoot || (menu.node && menu.node.kind === "folder")) {
-    items.push({ label: "New File", action: "newFile" });
-    items.push({ label: "New Folder", action: "newFolder" });
-  }
+  if (isTrashFolder) {
+    items.push({ label: "Empty Trash", action: "emptyTrash", danger: true });
+  } else if (isInTrash) {
+    items.push({ label: "Restore", action: "restore" });
+    items.push({ label: "Delete Permanently", action: "delete", danger: true });
+  } else {
+    if (menu.isRoot || (menu.node && menu.node.kind === "folder")) {
+      items.push({ label: "New File", action: "newFile" });
+      items.push({ label: "New Folder", action: "newFolder" });
+    }
 
-  if (menu.node) {
-    if (items.length > 0) items.push({ label: "---", action: "" });
-    items.push({ label: "Rename", action: "rename" });
-    items.push({ label: "Delete", action: "delete", danger: true });
+    if (menu.node) {
+      if (items.length > 0) items.push({ label: "---", action: "" });
+      items.push({ label: "Rename", action: "rename" });
+      items.push({ label: "Delete", action: "delete", danger: true });
+    }
   }
 
   if (items.length === 0) return null;
@@ -472,16 +510,69 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
       }
     } else if (action === "rename" && node) {
       setInlineEdit({ path: node.id, type: "rename" });
+    } else if (action === "restore" && node) {
+      (async () => {
+        try {
+          if (node.kind === "file" && node.id.toLowerCase().endsWith(".md")) {
+            const rel = getRelativePath(node.id, vaultPath);
+            const { restoreFromTrash } = await import("../../lib/tauriApi");
+            await restoreFromTrash(rel);
+          } else {
+            // Restore folders or other files back to the vault root or inbox
+            const inboxPath = `${vaultPath}/inbox/${node.name}`;
+            await renameEntry(node.id, inboxPath);
+          }
+          useVaultStore.getState().refreshTree();
+        } catch (err) {
+          console.error("Restore failed:", err);
+        }
+      })();
+    } else if (action === "emptyTrash") {
+      const doEmpty = await confirm("Are you sure you want to permanently delete all items in the Trash?", {
+        title: "Empty Trash",
+        kind: "warning",
+      });
+      if (doEmpty) {
+        (async () => {
+          try {
+            const { emptyTrash } = await import("../../lib/tauriApi");
+            await emptyTrash();
+            useVaultStore.getState().refreshTree();
+          } catch (err) {
+            console.error("Empty trash failed:", err);
+          }
+        })();
+      }
     } else if (action === "delete" && node) {
-      const msg = node.kind === "folder" ? `Delete folder "${node.name}" and all contents?` : `Delete "${node.name}"?`;
-      const doDelete = await confirm(msg, { title: "Delete", kind: "warning" });
+      const deleteBehavior = useSettingsStore.getState().deleteBehavior;
+      const isAlreadyInTrash = !!(vaultPath && node.id.startsWith(`${vaultPath}/trash/`));
+      const msg = isAlreadyInTrash
+        ? `Permanently delete "${node.name}"? This cannot be undone.`
+        : node.kind === "folder"
+        ? `Delete folder "${node.name}" and all contents?`
+        : `Delete "${node.name}"?`;
+
+      const doDelete = await confirm(msg, { title: isAlreadyInTrash ? "Permanently Delete" : "Delete", kind: "warning" });
       if (doDelete) {
         (async () => {
           try {
-            if (node.kind === "folder") {
-              await deleteFolder(node.id);
+            if (deleteBehavior === "local" && vaultPath && !isAlreadyInTrash) {
+              if (node.kind === "file" && node.id.toLowerCase().endsWith(".md")) {
+                const rel = getRelativePath(node.id, vaultPath);
+                const { moveToTrash } = await import("../../lib/tauriApi");
+                await moveToTrash(rel);
+              } else {
+                const flatVault = useVaultStore.getState().flatVault;
+                const targetPath = getTrashPath(node.id, vaultPath, flatVault);
+                await renameEntry(node.id, targetPath);
+              }
             } else {
-              await deleteFile(node.id);
+              const isPermanent = deleteBehavior === "permanent" || isAlreadyInTrash;
+              if (node.kind === "folder") {
+                await deleteFolder(node.id, isPermanent);
+              } else {
+                await deleteFile(node.id, isPermanent);
+              }
             }
             useVaultStore.getState().refreshTree();
           } catch (err) {
