@@ -51,19 +51,9 @@ const DEFAULT_FOLDER: &str = "journals";
 /// `chrono` strftime pattern.  `%Y-%m-%d` keeps Logseq parity exactly.
 const DEFAULT_FILENAME_FORMAT: &str = "%Y-%m-%d";
 
-/// Built-in template used when the vault has no custom
-/// `templates/journal.md`.  Kept intentionally minimal — three bullets
-/// in outliner mode, a `## Notes` heading for free-form text, and a
-/// frontmatter block that marks the file as a daily-note (so future
-/// queries / smart folders can filter on `type: daily`).
-const DEFAULT_TEMPLATE: &str = "---\n\
-type: daily\n\
-date: {{date}}\n\
----\n\
-\n\
-# {{date}} — {{weekday}}\n\
-\n\
-- \n";
+/// Clean, no-frontmatter default.  Users who want structured metadata
+/// can add their own template at `<vault>/.lattice/templates/journal.md`.
+const DEFAULT_TEMPLATE: &str = "# {{date}} — {{weekday}}\n\n- \n";
 
 // ── Settings ────────────────────────────────────────────────────────────
 

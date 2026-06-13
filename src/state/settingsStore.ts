@@ -25,10 +25,7 @@ export interface SettingsState {
   autoSaveDelay: number; // ms, 0 = manual
   vimMode: boolean;
 
-  // ── Collaboration (Loro CRDT) ──
-  /** Enable the Loro CRDT layer. Phase 1: local-only history + undo.
-   *  Phase 2+: real-time multi-user sync via WebSocket. */
-  collabEnabled: boolean;
+  // ── Collaboration — removed (was Loro CRDT, not in Obsidian tech stack)
 
   // ── Files and links ──
   showFileExtensions: boolean;
@@ -59,7 +56,6 @@ function defaults(): SettingsState {
     spellCheck: false,
     autoSaveDelay: 1000,
     vimMode: false,
-    collabEnabled: false,
 
     showFileExtensions: true,
     deleteBehavior: "trash",

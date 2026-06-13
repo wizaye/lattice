@@ -25,7 +25,7 @@ class HrWidget extends WidgetType {
   toDOM() {
     const hr = document.createElement("hr");
     hr.style.cssText =
-      "border: none; border-top: 1px solid var(--border-weak, var(--border)); margin: 8px 0;";
+      "border: none; border-top: 1px solid var(--border-strong); margin: 8px 0;";
     return hr;
   }
   ignoreEvent() { return true; }

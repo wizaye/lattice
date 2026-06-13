@@ -141,8 +141,15 @@ export async function getBacklinks(vaultPath: string, activeFilePath: string): P
   return invoke<BacklinksResult>("get_backlinks", { vaultPath, activeFilePath });
 }
 
-export async function scanTasks(): Promise<any[]> {
+export async function scanTasks(vaultPath?: string): Promise<any[]> {
   if (!isTauri()) return [];
+  // Prefer the safe path-based scan that doesn't require VaultState and
+  // never creates any folder structure in the user's vault.
+  if (vaultPath && vaultPath !== "__mock__") {
+    return invoke<any[]>("scan_tasks_from_path", { vaultPath });
+  }
+  // Fallback to the VaultState-based scan (requires open_vault to have been
+  // called first — only used in special contexts).
   return invoke<any[]>("scan_tasks");
 }
 

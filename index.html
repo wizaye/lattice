@@ -4,7 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>Lattice</title>
+    <!-- Apply stored theme BEFORE first paint to prevent dark→light flash.
+         This mirrors the lazy init in App.tsx but runs synchronously. -->
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('lattice.theme');
+          if (t === 'light') document.documentElement.dataset.theme = 'light';
+        } catch (e) {}
+      })();
+    </script>
   </head>
 
   <body>

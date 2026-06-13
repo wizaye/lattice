@@ -285,7 +285,7 @@ export function KanbanView({ onOpenFileByPath }: Props) {
       return;
     }
     try {
-      const backendTasks = await scanTasks();
+      const backendTasks = await scanTasks(vaultPath);
       if (backendTasks && backendTasks.length > 0) {
         const mapped = backendTasks.map((t) => mapBackendTaskToKanbanTask(t, columns));
         setBaseTasks(mapped);
@@ -294,7 +294,8 @@ export function KanbanView({ onOpenFileByPath }: Props) {
     } catch (err) {
       console.error("Failed to scan tasks:", err);
     }
-    // Fallback if not tauri or if tauri returns empty
+    // Fallback: extract tasks from the in-memory vault tree (works when files
+    // have already been loaded into the editor store or have mock content).
     setBaseTasks(extractTasks(fileTree, columns));
   }, [vaultPath, fileTree, columns]);
 
@@ -302,19 +303,22 @@ export function KanbanView({ onOpenFileByPath }: Props) {
   useEffect(() => {
     loadConfig();
 
-    const handler = () => {
+    const onConfigChanged = () => {
       loadConfig();
-      // Clear overrides on remote changes to reload from actual file
       setOverrides({});
     };
-
-    window.addEventListener("lattice-kanban-config-changed", handler);
-    window.addEventListener("lattice-tasks-changed", handler);
-    return () => {
-      window.removeEventListener("lattice-kanban-config-changed", handler);
-      window.removeEventListener("lattice-tasks-changed", handler);
+    const onTasksChanged = () => {
+      setOverrides({});
+      loadTasks();
     };
-  }, [loadConfig]);
+
+    window.addEventListener("lattice-kanban-config-changed", onConfigChanged);
+    window.addEventListener("lattice-tasks-changed", onTasksChanged);
+    return () => {
+      window.removeEventListener("lattice-kanban-config-changed", onConfigChanged);
+      window.removeEventListener("lattice-tasks-changed", onTasksChanged);
+    };
+  }, [loadConfig, loadTasks]);
 
   // Sync tasks on mount, or when loadTasks, fileContents, or fileTree changes
   useEffect(() => {
@@ -401,6 +405,10 @@ export function KanbanView({ onOpenFileByPath }: Props) {
       useVaultStore.getState().updateFileContent(task.fileId, newContent);
       useEditorStore.getState().setFileContent(task.fileId, newContent);
       await useEditorStore.getState().saveFile(task.fileId);
+
+      // Notify the rest of the app (other Kanban instances, editor task
+      // decorations, etc.) that task state changed on disk.
+      window.dispatchEvent(new CustomEvent("lattice-tasks-changed"));
     },
     [baseTasks, flatVault, columns]
   );

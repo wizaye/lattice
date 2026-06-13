@@ -440,42 +440,12 @@ function SectionBody({
           </div>
         )}
 
-        <div className="settings-row" style={{ marginTop: 16 }}>
+        <div className="settings-row" style={{ marginTop: 16, opacity: 0.45, pointerEvents: "none" }}>
           <div className="settings-row-text">
-            <div className="settings-row-title">Collaboration (Loro CRDT) <span style={{ fontSize: 10, background: "var(--accent)", color: "#fff", borderRadius: 4, padding: "1px 6px", marginLeft: 6, verticalAlign: "middle" }}>BETA</span></div>
-            <div className="settings-row-desc">
-              Backs the editor with a <strong>Loro CRDT</strong> (Conflict-free Replicated Data Type) document.
-              Phase 1: local-only — richer undo history + full edit history.
-              Phase 2 (coming): real-time multi-user sync via WebSocket.
-              Uses the <strong>Fugue algorithm</strong> — best-in-class merge semantics.
-            </div>
+            <div className="settings-row-title">Real-time collaboration <span style={{ fontSize: 10, background: "var(--text-faint)", color: "#fff", borderRadius: 4, padding: "1px 6px", marginLeft: 6, verticalAlign: "middle" }}>Coming soon</span></div>
+            <div className="settings-row-desc">Multi-user editing via CRDT sync. Planned for a future release.</div>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={store.collabEnabled}
-              onChange={(e) => store.set("collabEnabled", e.target.checked)}
-            />
-            <span className="settings-slider"></span>
-          </label>
         </div>
-
-        {store.collabEnabled && (
-          <div style={{
-            marginTop: 8,
-            padding: "10px 14px",
-            background: "var(--bg-header)",
-            borderRadius: 8,
-            border: "1px solid color-mix(in srgb, var(--accent) 40%, var(--border))",
-            fontSize: 12,
-            color: "var(--text-muted)",
-            lineHeight: 1.6,
-          }}>
-            <strong style={{ color: "var(--accent)" }}>✓ CRDT active</strong> — every keystroke is tracked in a Loro document.
-            Your <code>.md</code> file is still written normally on save.
-            Full history is available via time-travel (coming in the next release).
-          </div>
-        )}
       </div>
     );
   }

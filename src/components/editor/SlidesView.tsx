@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
 import MarkdownIt from "markdown-it";
-import katex from "katex";
-// @ts-expect-error — no types ship with markdown-it-texmath.
-import texmath from "markdown-it-texmath";
 import Reveal from "reveal.js";
 // Reveal.js v6 exports CSS via top-level specifiers (no `dist/`
 // prefix) — its `package.json` `exports` map only allows
@@ -53,15 +50,6 @@ const slidesMd = new MarkdownIt({
   linkify: true,
   breaks: false,
   typographer: false,
-}).use(texmath, {
-  engine: katex,
-  delimiters: "dollars",
-  katexOptions: {
-    throwOnError: false,
-    errorColor: "var(--text-error, #e57373)",
-    strict: false as const,
-    trust: false,
-  },
 });
 
 // Same wikilink regex as MarkdownPreview — kept duplicated rather

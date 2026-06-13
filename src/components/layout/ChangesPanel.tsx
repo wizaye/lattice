@@ -194,6 +194,50 @@ export function ChangesPanel() {
   const pendingDeviceCode = useBYOCStore((s) => s.pendingDeviceCode);
   const clearDeviceCode = useBYOCStore((s) => s.clearDeviceCode);
 
+  // ── GitHub first-time sync setup modal ───────────────────────────
+  // Shows a one-time configuration popup before the OAuth Device Code
+  // flow whenever a vault connects to GitHub sync for the first time.
+  // "First time" = no existing manifest (row.lastSyncAt is null and
+  // row.connected is false).  After successful setup the preferences
+  // are stored so subsequent connects skip this step.
+  const [githubSetupOpen, setGithubSetupOpen] = useState(false);
+  const [githubSetupRepoName, setGithubSetupRepoName] = useState("");
+  const [githubSetupBranch, setGithubSetupBranch] = useState("main");
+  const githubSetupKey = vaultPath
+    ? `lattice.syncSetup.${vaultPath.replace(/[/\\:]/g, "_")}`
+    : null;
+  const hasGithubSetupRun = githubSetupKey
+    ? !!window.localStorage.getItem(githubSetupKey)
+    : false;
+
+  const startGithubConnect = () => {
+    if (!vaultPath) return;
+    if (hasGithubSetupRun) {
+      // Already configured — skip setup and connect directly
+      void byocConnectAction(vaultPath, "github");
+    } else {
+      // First time: default repo name derived from vault folder name
+      const defaultRepo = `lattice-${vaultPath.split(/[/\\]/).filter(Boolean).pop()?.toLowerCase().replace(/[^a-z0-9-]/g, "-") ?? "vault"}`;
+      setGithubSetupRepoName(defaultRepo);
+      setGithubSetupBranch("main");
+      setGithubSetupOpen(true);
+    }
+  };
+
+  const confirmGithubSetup = () => {
+    if (!vaultPath || !githubSetupKey) return;
+    // Persist setup as "done" so future connects skip this modal
+    try {
+      window.localStorage.setItem(
+        githubSetupKey,
+        JSON.stringify({ repo: githubSetupRepoName, branch: githubSetupBranch }),
+      );
+    } catch { /* ignore quota errors */ }
+    setGithubSetupOpen(false);
+    // Proceed with the OAuth Device Code flow
+    void byocConnectAction(vaultPath, "github");
+  };
+
   useEffect(() => {
     void byocLoadProviders();
   }, [byocLoadProviders]);
@@ -911,7 +955,13 @@ export function ChangesPanel() {
                       vaultPath={vaultPath}
                       onConnect={() => {
                         if (!vaultPath) return;
-                        void byocConnectAction(vaultPath, pid);
+                        // GitHub gets a first-time setup popup; other
+                        // providers connect directly.
+                        if (pid === "github") {
+                          startGithubConnect();
+                        } else {
+                          void byocConnectAction(vaultPath, pid);
+                        }
                       }}
                       onDisconnect={() => {
                         if (!vaultPath) return;
@@ -961,6 +1011,77 @@ export function ChangesPanel() {
           payload={pendingDeviceCode}
           onClose={clearDeviceCode}
         />
+      )}
+
+      {/* GitHub first-time sync setup modal */}
+      {githubSetupOpen && (
+        <div className="cp-modal-backdrop" onClick={() => setGithubSetupOpen(false)}>
+          <div className="cp-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cp-modal-head">
+              <span className="cp-modal-title">Set up GitHub Sync</span>
+              <button className="cp-iconbtn" onClick={() => setGithubSetupOpen(false)}>×</button>
+            </div>
+            <div className="cp-modal-body">
+              <p className="cp-modal-step">
+                Configure your GitHub sync settings. This only runs once per vault.
+                Future syncs will happen automatically.
+              </p>
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", color: "var(--text-muted)", fontSize: "12px", marginBottom: "4px" }}>
+                  Repository name
+                </label>
+                <input
+                  type="text"
+                  value={githubSetupRepoName}
+                  onChange={(e) => setGithubSetupRepoName(e.target.value)}
+                  placeholder="lattice-my-vault"
+                  style={{
+                    width: "100%",
+                    padding: "6px 8px",
+                    background: "var(--bg-editor)",
+                    border: "1px solid var(--border-strong)",
+                    borderRadius: "4px",
+                    color: "var(--text-normal)",
+                    fontSize: "13px",
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "2px", display: "block" }}>
+                  A private GitHub repo will be created with this name.
+                </span>
+              </div>
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", color: "var(--text-muted)", fontSize: "12px", marginBottom: "4px" }}>
+                  Main branch
+                </label>
+                <input
+                  type="text"
+                  value={githubSetupBranch}
+                  onChange={(e) => setGithubSetupBranch(e.target.value)}
+                  placeholder="main"
+                  style={{
+                    width: "100%",
+                    padding: "6px 8px",
+                    background: "var(--bg-editor)",
+                    border: "1px solid var(--border-strong)",
+                    borderRadius: "4px",
+                    color: "var(--text-normal)",
+                    fontSize: "13px",
+                  }}
+                />
+              </div>
+            </div>
+            <div className="cp-modal-foot" style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button className="cp-btn" onClick={() => setGithubSetupOpen(false)}>Cancel</button>
+              <button
+                className="cp-btn primary"
+                disabled={!githubSetupRepoName.trim()}
+                onClick={confirmGithubSetup}
+              >
+                Connect to GitHub
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Refresh hint pinned at the bottom — lets the user know the

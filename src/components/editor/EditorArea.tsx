@@ -1316,6 +1316,7 @@ function Pane(props: PaneProps) {
             <DocMoreMenu
               hasFile={!!activeTab?.fileId}
               isPdf={isPdfTab}
+              fileName={activeTab?.title ?? ""}
               onClose={
                 activeTab
                   ? () => onCloseTab(leaf.id, activeTab.id)
@@ -1989,6 +1990,7 @@ function TabbarOptionsMenu({
 function DocMoreMenu({
   hasFile,
   isPdf = false,
+  fileName = "",
   onClose,
   onToggleViewMode,
   onSetViewMode,
@@ -2001,16 +2003,11 @@ function DocMoreMenu({
   onDelete,
 }: {
   hasFile: boolean;
-  /** True when the active tab is a PDF — suppresses the
-   *  Reading/Source/Slides view-mode triple (PDFs have a fixed,
-   *  non-editable viewer). All file-action items (Rename, Copy path,
-   *  etc.) still show through. */
   isPdf?: boolean;
+  /** Display name of the active file — forwarded to the Export PDF dialog. */
+  fileName?: string;
   onClose?: () => void;
   onToggleViewMode?: () => void;
-  /** Discrete view-mode setter — used by the 3 mode-switcher items
-   *  (Reading / Source / Slides). When omitted those items fall back
-   *  to `onToggleViewMode` for the binary case. */
   onSetViewMode?: (mode: "source" | "preview" | "slides") => void;
   viewMode?: "source" | "preview" | "slides";
   onCopyPath?: () => void;
@@ -2160,7 +2157,17 @@ function DocMoreMenu({
               </button>
 
               <div className="split-menu-divider" role="separator" />
-              <button role="menuitem" className="split-menu-item" onClick={stub}>
+              <button
+                role="menuitem"
+                className="split-menu-item"
+                onClick={run(() => {
+                  window.dispatchEvent(
+                    new CustomEvent("lattice-export-pdf", {
+                      detail: { fileName },
+                    }),
+                  );
+                })}
+              >
                 <IcFilePdf className="split-menu-icon" />
                 <span>Export to PDF…</span>
               </button>

@@ -9,6 +9,24 @@ import { renameAndUpdateLinks } from "../../lib/markdown";
 import { confirm, message } from "@tauri-apps/plugin-dialog";
 import "./FileTree.css";
 
+/**
+ * Normalize a file-system path to use forward slashes (safe on both
+ * Windows and Unix, since Tauri/Rust accepts both).  Prevents the
+ * Windows backslash trap where `lastIndexOf("/")` returns -1 on a
+ * `C:\vault\folder\file.md` path, causing moves to land on the
+ * filesystem root instead of the intended parent directory.
+ */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+/** Get the parent directory of a path (normalized, cross-platform). */
+function parentDir(p: string): string {
+  const n = normalizePath(p);
+  const idx = n.lastIndexOf("/");
+  return idx > 0 ? n.slice(0, idx) : "";
+}
+
 // ── Context Menu ──
 interface ContextMenuState {
   x: number;
@@ -214,9 +232,11 @@ function TreeRow({
               if (parsed.type !== "nexus-sidebar-item") return;
               const { path: sourcePath, name: sourceName } = parsed;
 
-              if (sourcePath === node.id || node.id.startsWith(sourcePath + '/')) return;
-              const parentDir = sourcePath.substring(0, sourcePath.lastIndexOf("/"));
-              if (parentDir === node.id) return;
+              const sourceNorm = normalizePath(sourcePath);
+              const nodeNorm = normalizePath(node.id);
+              if (sourceNorm === nodeNorm || nodeNorm.startsWith(sourceNorm + '/')) return;
+              const srcParent = parentDir(sourcePath);
+              if (srcParent === nodeNorm) return;
 
               const newPath = `${node.id}/${sourceName}`;
               const doMove = await confirm(`Are you sure you want to move '${sourceName}' into '${node.name}'?`, { title: "Move Item", kind: "warning" });
@@ -322,17 +342,15 @@ function TreeRow({
           // Resolve target dir = parent of THIS file row. Top-level
           // files have no "/" in their id, so the parent is the vault
           // root itself.
-          const lastSlash = node.id.lastIndexOf("/");
-          const targetDir =
-            lastSlash >= 0
-              ? node.id.substring(0, lastSlash)
-              : useVaultStore.getState().vaultPath ?? "";
+          const targetDir = parentDir(node.id) || useVaultStore.getState().vaultPath || "";
           if (!targetDir) return;
 
           // Don't drop a folder into itself or one of its descendants.
-          if (sourcePath === targetDir || targetDir.startsWith(sourcePath + "/")) return;
+          const sourceNorm = normalizePath(sourcePath);
+          const targetDirNorm = normalizePath(targetDir);
+          if (sourceNorm === targetDirNorm || targetDirNorm.startsWith(sourceNorm + "/")) return;
           // No-op when already in the same directory.
-          const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf("/"));
+          const sourceParent = parentDir(sourcePath);
           if (sourceParent === targetDir) return;
 
           const newPath = `${targetDir}/${sourceName}`;
@@ -492,8 +510,8 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
         await useVaultStore.getState().refreshTree();
       } else if (inlineEdit.type === "rename") {
         const oldPath = inlineEdit.path;
-        const parentDir = oldPath.substring(0, oldPath.lastIndexOf("/"));
-        const newPath = `${parentDir}/${value}`;
+        const oldParentDir = parentDir(oldPath);
+        const newPath = `${oldParentDir}/${value}`;
         const isMd = oldPath.toLowerCase().endsWith(".md");
 
         if (isMd && vaultPath) {
@@ -530,8 +548,8 @@ export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit,
           const parsed = JSON.parse(data);
           if (parsed.type !== "nexus-sidebar-item") return;
           const { path: sourcePath, name: sourceName } = parsed;
-          const parentDir = sourcePath.substring(0, sourcePath.lastIndexOf("/"));
-          if (parentDir === vaultPath) return; // already in root
+          const srcParentDir = parentDir(sourcePath);
+          if (srcParentDir === vaultPath) return; // already in root
 
           const newPath = `${vaultPath}/${sourceName}`;
           const doMove = await confirm(`Move '${sourceName}' to the vault root?`, { title: "Move Item", kind: "warning" });

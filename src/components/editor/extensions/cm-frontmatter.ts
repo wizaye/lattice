@@ -13,15 +13,15 @@ class FrontmatterWidget extends WidgetType {
     const container = document.createElement("div");
     container.className = "cm-frontmatter-collapsed";
     container.style.cssText = `
-      background: var(--bg-tertiary, #f5f5f5);
-      border: 1px solid var(--border-color, #ddd);
+      background: var(--bg-header);
+      border: 1px solid var(--border-strong);
       border-radius: 4px;
       padding: 8px 12px;
       margin: 8px 0;
       font-size: 13px;
-      color: var(--text-secondary, #666);
+      color: var(--text-muted);
       cursor: pointer;
-      font-family: var(--font-monospace, monospace);
+      font-family: var(--font-mono);
     `;
 
     const propertyCount = Object.keys(this.properties).length;

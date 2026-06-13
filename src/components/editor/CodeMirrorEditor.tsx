@@ -47,13 +47,11 @@ import { useEditorStore } from "../../state/editorStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import type { FileNode } from "../../state/types";
 import type { JumpToLineDetail } from "../../lib/backlinks";
-import { outlinerExtension, shouldEnableOutliner } from "./cm-outliner";
 import { vimMode as makeVimExtension } from "./extensions/cm-vim";
-import { LoroProvider } from "../../lib/collab";
+import { outlinerExtension, shouldEnableOutliner } from "./cm-outliner";
 import {
   embedsExtension,
   calloutsExtension,
-  frontmatterExtension,
   headingFoldExtension,
   sectionLinksExtension,
   slashCompletionSource,
@@ -592,27 +590,6 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
   const showLineNumbers = useSettingsStore((s) => s.lineNumbers);
   const wordWrap = useSettingsStore((s) => s.wordWrap);
   const vimEnabled = useSettingsStore((s) => s.vimMode);
-  const collabEnabled = useSettingsStore((s) => s.collabEnabled);
-
-  // LoroProvider is created per file, stored in a ref so the same instance
-  // survives theme/setting changes that recreate the CM6 editor.
-  const loroProviderRef = useRef<LoroProvider | null>(null);
-
-  // Create or destroy the Loro provider when collab is toggled or file changes
-  useEffect(() => {
-    if (!collabEnabled || !filePath) {
-      loroProviderRef.current?.destroy();
-      loroProviderRef.current = null;
-      return;
-    }
-    // New file → new provider
-    const provider = new LoroProvider(filePath);
-    loroProviderRef.current = provider;
-    return () => {
-      provider.destroy();
-      if (loroProviderRef.current === provider) loroProviderRef.current = null;
-    };
-  }, [collabEnabled, filePath]);
 
   useEffect(() => {
     if (!editorRef.current || !filePath) return;
@@ -684,7 +661,6 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
         // Obsidian-compat extensions (single ViewPlugin — no spread)
         embedsExtension,
         calloutsExtension,
-        frontmatterExtension,
         ...headingFoldExtension,
         sectionLinksExtension,
         // Slash command theme only (completion source merged below)
@@ -696,8 +672,6 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
           override: [wikilinkCompletions, slashCompletionSource],
           activateOnTyping: true,
         }),
-        // Loro CRDT sync extension (only when collab is enabled)
-        ...(loroProviderRef.current ? [loroProviderRef.current.getCM6Extension()] : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && update.transactions.some(tr => tr.annotation(Transaction.userEvent))) {
             // Mark dirty immediately
@@ -743,23 +717,16 @@ export function CodeMirrorEditor({ content, filePath, onChange, onSave }: Props)
     const view = new EditorView({ state, parent: editorRef.current });
     viewRef.current = view;
 
-    // Bind the Loro provider to this view so remote changes can be applied
-    let unbindLoro: (() => void) | null = null;
-    if (loroProviderRef.current) {
-      unbindLoro = loroProviderRef.current.bind(view);
-    }
-
     return () => {
       clearTimeout(debounceTimer);
-      unbindLoro?.();
       view.destroy();
       viewRef.current = null;
       loadedFileRef.current = null;
     };
-    // Re-create when file path, theme, vim mode, or collab flag changes.
+    // Re-create when file path, theme, vim mode, or display settings change.
     // Content updates are handled by the sync effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, isDark, showLineNumbers, wordWrap, vimEnabled, collabEnabled]);
+  }, [filePath, isDark, showLineNumbers, wordWrap, vimEnabled]);
 
   // Sync external content into the editor doc.
   //

@@ -5,7 +5,7 @@ import { useVaultStore } from "./state/vaultStore";
 import { useEditorStore } from "./state/editorStore";
 import { useSettingsStore } from "./state/settingsStore";
 import { pickVaultFolder, createFolder as createFolderOnDisk } from "./lib/tauriApi";
-import { GRAPH_TAB_FILE_ID, KANBAN_TAB_FILE_ID } from "./state/mockVault";
+import { GRAPH_TAB_FILE_ID, KANBAN_TAB_FILE_ID, DEMO_NOTE_ID, DEMO_KANBAN_ID, DEMO_VAULT_NODES, DEMO_NOTE_CONTENT, DEMO_KANBAN_CONTENT, flattenVault } from "./state/mockVault";
 import {
   findLeaf,
   leaves,
@@ -46,6 +46,7 @@ import { NewPaperModal } from "./components/modals/NewPaperModal";
 import { TaskDetailModal } from "./components/modals/TaskDetailModal";
 import { KanbanConfigModal } from "./components/modals/KanbanConfigModal";
 import { PublishWizard } from "./components/modals/PublishWizard";
+import { ExportPdfModal } from "./components/modals/ExportPdfModal";
 import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
 import { OnboardingShell } from "./components/onboarding/OnboardingShell";
@@ -68,14 +69,11 @@ const LEFT_COLLAPSE_AT = LEFT_MIN - 40;
 const RIGHT_COLLAPSE_AT = RIGHT_MIN - 40;
 
 function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
-  // Open the GraphView by default so the user lands on something
-  // visual (and so the hard-coded "Graph View" entry in the file tree
-  // is highlighted on first paint). EditorArea recognises this special
-  // fileId and renders <GraphView/> instead of an editor.
+  // Open the demo note by default so the user sees a live rendered note.
   const tab: Tab = {
     id: uid("tab"),
-    fileId: GRAPH_TAB_FILE_ID,
-    title: "Graph View",
+    fileId: DEMO_NOTE_ID,
+    title: "Welcome to Lattice.md",
   };
   const leafId = uid("leaf");
   return {
@@ -137,6 +135,18 @@ export default function App() {
     const state = useVaultStore.getState();
     if (state.vaultPath || state.fileTree.length > 0) return;
     if (!useSettingsStore.getState().autoRestoreVault) return;
+
+    // Seed the mock vault so the demo note renders on first paint
+    // (before auto-restore tries to open a real folder).
+    const editorState = useEditorStore.getState();
+    editorState.setFileContent(DEMO_NOTE_ID, DEMO_NOTE_CONTENT);
+    editorState.setFileContent(DEMO_KANBAN_ID, DEMO_KANBAN_CONTENT);
+    useVaultStore.setState({
+      vaultPath: "__mock__",
+      vaultName: "Demo Vault",
+      fileTree: DEMO_VAULT_NODES,
+      flatVault: flattenVault(DEMO_VAULT_NODES),
+    });
 
     try {
       const lastPath = window.localStorage.getItem("lattice.lastVaultPath");
@@ -363,14 +373,13 @@ export default function App() {
         setHintModeActive(false);
         return;
       }
-      if (!vimEnabled) return;
-      // f in normal mode → Vimium hint mode
-      // Ctrl+Shift+H (any mode) → hint mode  (H = Hints, no browser conflict)
+      // Ctrl+Shift+H (any mode, vim or not) → hint mode
       if (e.key === "H" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
         e.preventDefault();
-        setHintModeActive(true);
+        setHintModeActive((v) => !v);
         return;
       }
+      if (!vimEnabled) return;
       // ? in normal mode → shortcut overlay
       if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const active = document.activeElement;
@@ -953,15 +962,41 @@ export default function App() {
       if (node) {
         openFile(node);
       } else {
-        console.warn(
-          "lattice-open-paper-pdf: PDF not found in vault after refresh:",
-          absPath,
-        );
+        // Fallback: the PDF may not be in the vault tree (e.g. it's
+        // inside a directory whose name starts with '.' or the path
+        // has different casing on Windows). Open it via the OS default
+        // PDF viewer instead of silently failing.
+        console.info("lattice-open-paper-pdf: PDF not in vault tree, opening via OS:", absPath);
+        try {
+          const mod = await import("@tauri-apps/plugin-opener");
+          await mod.openPath(absPath);
+        } catch (err) {
+          // Final fallback: file:// URL in a new browser tab
+          const url = `file:///${absPath.replace(/\\/g, "/")}`;
+          window.open(url, "_blank", "noreferrer");
+          console.warn("lattice-open-paper-pdf: openPath failed:", err);
+        }
       }
     };
     window.addEventListener("lattice-open-paper-pdf", handler);
     return () => window.removeEventListener("lattice-open-paper-pdf", handler);
   }, [openFile]);
+
+  // ---- Direct PDF export (Obsidian-style dialog) ---------------------------
+  // The DocMoreMenu "Export to PDF…" dispatches this event with the current
+  // file name in the detail.  We open the ExportPdfModal which gives the user
+  // page-size / margin / downscale controls before calling window.print().
+  const [exportPdfOpen, setExportPdfOpen] = useState(false);
+  const [exportPdfFileName, setExportPdfFileName] = useState("");
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileName?: string }>).detail;
+      setExportPdfFileName(detail?.fileName ?? "");
+      setExportPdfOpen(true);
+    };
+    window.addEventListener("lattice-export-pdf", handler);
+    return () => window.removeEventListener("lattice-export-pdf", handler);
+  }, []);
 
   // ---- Keyboard shortcuts -------------------------------------------------
   useEffect(() => {
@@ -1281,6 +1316,14 @@ export default function App() {
         vaultName={vaultName}
         onClose={closePublishWizard}
       />
+
+      {/* ===== Export to PDF dialog ===== */}
+      {exportPdfOpen && (
+        <ExportPdfModal
+          fileName={exportPdfFileName}
+          onClose={() => setExportPdfOpen(false)}
+        />
+      )}
 
       {/* ===== Task Detail Modal ===== */}
       {taskModalData && (

@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useRef } from "react";
 import MarkdownIt from "markdown-it";
-import katex from "katex";
-// markdown-it-texmath has no bundled types; the plugin signature we
-// rely on (`(md, options)`) is simple enough to declare inline rather
-// than carrying a dummy `.d.ts` shim around.
-// @ts-expect-error — no types ship with the package.
-import texmath from "markdown-it-texmath";
-import "katex/dist/katex.min.css";
+
+// Mermaid is loaded lazily (only when a mermaid block is actually in the
+// document) to keep the initial bundle small.
+let mermaidReady = false;
+async function ensureMermaid() {
+  if (mermaidReady) return;
+  const m = await import("mermaid");
+  const isDark = document.documentElement.dataset.theme !== "light";
+  m.default.initialize({
+    startOnLoad: false,
+    theme: isDark ? "dark" : "default",
+    securityLevel: "loose",
+    fontFamily: "var(--font-text, sans-serif)",
+  });
+  mermaidReady = true;
+  return m.default;
+}
 
 /**
  * Reading-mode renderer.
@@ -30,33 +40,18 @@ import "katex/dist/katex.min.css";
  * doc change — only the render call runs per change.
  */
 const md = new MarkdownIt({
-  html: false, // disallow raw HTML — we never trust file contents enough
-  linkify: true, // auto-link bare URLs
-  breaks: false, // GFM single-newline breaks would surprise markdown writers
-  typographer: false, // keep punctuation literal
-  highlight: undefined, // no syntax highlighting in preview for now
-}).use(texmath, {
-  // `dollars` is the Obsidian / Pandoc / GitHub flavor: $inline$ and
-  // $$display$$. `katex` swaps to KaTeX as the math engine (vs the
-  // default MathJax shape) so we don't ship MathJax's heavier runtime.
-  engine: katex,
-  delimiters: "dollars",
-  katexOptions: {
-    // Don't crash the whole document on a single malformed expression —
-    // render the offending span in red and keep going. This matches the
-    // "soft failure" behaviour both Obsidian and Quarto use.
-    throwOnError: false,
-    // Errors are typically a typo by the author; surfacing them in
-    // place (vs swallowing) makes them easy to spot.
-    errorColor: "var(--text-error, #e57373)",
-    // `strict: false` allows things like `\unicode` and unknown macros
-    // to render best-effort instead of erroring; we're a notes app, not
-    // a typesetter.
-    strict: false as const,
-    // KaTeX trust controls which commands can produce HTML (\href,
-    // \includegraphics). Default-deny — math in untrusted notes should
-    // not be able to inject links or load remote resources.
-    trust: false,
+  html: false,
+  linkify: true,
+  breaks: false,
+  typographer: false,
+  highlight: (str: string, lang: string) => {
+    if (lang === "mermaid") {
+      // Wrap in a div that will be processed by mermaid after render
+      const escaped = str.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `<div class="mermaid-diagram" data-mermaid="${encodeURIComponent(str)}">${escaped}</div>`;
+    }
+    // Plain pre/code for all other languages
+    return "";
   },
 });
 
@@ -127,6 +122,33 @@ type Props = {
 export function MarkdownPreview({ source, fileId }: Props) {
   const html = useMemo(() => renderHtml(source ?? "", fileId), [source, fileId]);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Render mermaid diagrams after the HTML is injected into the DOM.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const diagrams = Array.from(el.querySelectorAll<HTMLElement>(".mermaid-diagram"));
+    if (diagrams.length === 0) return;
+    let cancelled = false;
+    ensureMermaid().then((m) => {
+      if (cancelled || !m) return;
+      diagrams.forEach(async (div, idx) => {
+        const graphDef = decodeURIComponent(div.dataset.mermaid ?? "");
+        if (!graphDef) return;
+        try {
+          const id = `mermaid-${Date.now()}-${idx}`;
+          const { svg } = await m.render(id, graphDef);
+          if (!cancelled) {
+            div.innerHTML = svg;
+            div.removeAttribute("data-mermaid");
+          }
+        } catch (err) {
+          div.innerHTML = `<pre class="mermaid-error">${String(err)}</pre>`;
+        }
+      });
+    });
+    return () => { cancelled = true; };
+  }, [html]);
 
   // Delegated click handler: any anchor with `.md-wikilink` dispatches
   // the global event the editor already listens for in App.tsx. We use

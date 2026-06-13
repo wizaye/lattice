@@ -199,6 +199,32 @@ a:hover { text-decoration: underline; }
 }
 ::-webkit-scrollbar-corner { background: transparent; }
 
+/* Light-mode scrollbar overrides — keeps scrollbars visible on white surfaces */
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.20);
+}
+
+/* ============================================================
+   PRINT / PDF EXPORT
+   The .printing class (added by the lattice-export-pdf handler) and
+   the @media print rule both hide all UI chrome so window.print()
+   produces a clean document with only the active editor content.
+   ============================================================ */
+@media print {
+  .lattice-app > *:not(.col.editor) { display: none !important; }
+  .col.editor .pane-tabbar,
+  .col.editor .pane-doc-header,
+  .col.editor .win-controls,
+  .col.editor .paper-toolbar { display: none !important; }
+  .pane-body { overflow: visible !important; }
+  .cm-scroller { overflow: visible !important; }
+}
+
+body.printing > *:not(#root) { display: none !important; }
+
 /* ============================================================
    LAYOUT
    Horizontal flex of 4 columns (no right strip). Each column is a
