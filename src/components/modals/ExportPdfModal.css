@@ -1,0 +1,265 @@
+/* ============================================================
+   Export to PDF modal — matches Obsidian's layout
+   ============================================================ */
+
+.epdf-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.epdf-dialog {
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Subtle entry pop */
+  animation: epdf-pop 0.14s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+@keyframes epdf-pop {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Header ── */
+
+.epdf-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px 0;
+}
+
+.epdf-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.epdf-close-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--text-faint);
+  transition: color 0.12s, background 0.12s;
+  cursor: pointer;
+}
+.epdf-close-btn:hover {
+  color: var(--text-normal);
+  background: var(--hover);
+}
+
+/* ── Subtitle ── */
+
+.epdf-subtitle {
+  margin: 6px 16px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Settings rows ── */
+
+.epdf-rows {
+  padding: 0 16px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.epdf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.epdf-row:last-child { border-bottom: none; }
+
+.epdf-row--slider {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.epdf-row--slider .epdf-row-label { margin-bottom: 0; }
+
+.epdf-row-label {
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+/* ── Select ── */
+
+.epdf-select {
+  height: 26px;
+  padding: 0 24px 0 8px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-normal);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  appearance: none;
+  /* chevron */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+}
+.epdf-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* ── Toggle ── */
+
+.epdf-toggle {
+  display: inline-flex;
+  cursor: pointer;
+  user-select: none;
+}
+.epdf-toggle input { display: none; }
+
+.epdf-toggle-track {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--border-strong);
+  position: relative;
+  transition: background 0.18s;
+  display: flex;
+  align-items: center;
+}
+
+.epdf-toggle input:checked + .epdf-toggle-track {
+  background: var(--accent);
+}
+
+.epdf-toggle-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  position: absolute;
+  left: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: left 0.18s;
+}
+.epdf-toggle input:checked ~ .epdf-toggle-track .epdf-toggle-thumb {
+  left: 19px;
+}
+
+/* ── Slider ── */
+
+.epdf-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.epdf-slider {
+  flex: 1;
+  height: 4px;
+  appearance: none;
+  background: var(--border-strong);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.epdf-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-menu);
+  cursor: grab;
+}
+.epdf-slider::-webkit-slider-thumb:active { cursor: grabbing; }
+.epdf-slider:focus { outline: none; }
+.epdf-slider:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.epdf-slider-val {
+  width: 34px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* ── Footer ── */
+
+.epdf-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
+}
+
+.epdf-btn-export {
+  padding: 7px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.epdf-btn-export:hover { opacity: 0.88; }
+.epdf-btn-export:active { opacity: 0.76; }
+
+.epdf-btn-cancel {
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.epdf-btn-cancel:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+
+/* Light-mode tweaks */
+:root[data-theme="light"] .epdf-dialog {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+:root[data-theme="light"] .epdf-toggle-thumb {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* Print: show injected title, hide the dialog itself */
+@media print {
+  .epdf-overlay { display: none !important; }
+  #lattice-pdf-title-inject {
+    display: block !important;
+    font-size: 1.8em;
+    font-weight: 700;
+    margin: 0 0 1em;
+  }
+}

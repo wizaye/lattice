@@ -1,0 +1,14 @@
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\deps\thiserror-d2cdeb71a13ec769.d: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\thiserror-1da6cec3b66150db\out/private.rs
+
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\deps\libthiserror-d2cdeb71a13ec769.rlib: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\thiserror-1da6cec3b66150db\out/private.rs
+
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\deps\libthiserror-d2cdeb71a13ec769.rmeta: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\thiserror-1da6cec3b66150db\out/private.rs
+
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs:
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\thiserror-1da6cec3b66150db\out/private.rs:
+
+# env-dep:OUT_DIR=Q:\\src\\opensource\\lattice\\packages\\lattice-vault\\target\\release\\build\\thiserror-1da6cec3b66150db\\out

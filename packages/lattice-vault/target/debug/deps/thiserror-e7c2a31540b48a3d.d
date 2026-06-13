@@ -1,0 +1,12 @@
+C:\Users\vijaygatla\OneDrive - Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-vault\target\debug\deps\thiserror-e7c2a31540b48a3d.d: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs C:\Users\vijaygatla\OneDrive\ -\ Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-vault\target\debug\build\thiserror-485d8047c6d5a58b\out/private.rs
+
+C:\Users\vijaygatla\OneDrive - Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-vault\target\debug\deps\libthiserror-e7c2a31540b48a3d.rmeta: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs C:\Users\vijaygatla\OneDrive\ -\ Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-vault\target\debug\build\thiserror-485d8047c6d5a58b\out/private.rs
+
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\lib.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\aserror.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\display.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\var.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.18\src\private.rs:
+C:\Users\vijaygatla\OneDrive\ -\ Microsoft\Desktop\Camp_AIR_MCP_BOOTCAMP\lattice\packages\lattice-vault\target\debug\build\thiserror-485d8047c6d5a58b\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\vijaygatla\\OneDrive - Microsoft\\Desktop\\Camp_AIR_MCP_BOOTCAMP\\lattice\\packages\\lattice-vault\\target\\debug\\build\\thiserror-485d8047c6d5a58b\\out

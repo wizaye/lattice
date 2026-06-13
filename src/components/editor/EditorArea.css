@@ -9,7 +9,21 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-width: 0;
+  /* The editor contents have a non-trivial minimum layout footprint:
+     tab strip chrome (tab + new-tab + actions ≈ 170 px) and the
+     doc-header back/forward + centered title need room to read.
+     If we let editor-area shrink below this, the .pane-actions
+     buttons (flex-shrink: 0 by design — they must stay clickable)
+     get pushed past the column's right edge and visibly overlap the
+     right sidebar.
+
+     Instead we keep editor-area at a comfortable minimum and let the
+     OUTER `.col.editor` (which has `overflow: hidden`) clip the
+     overflowing right portion when the user drags a sidebar all the
+     way in. End result mirrors VS Code / Obsidian: the editor visibly
+     slides under the opposing sidebar instead of melting into
+     compressed glyph soup. */
+  min-width: 320px;
   min-height: 0;
   height: 100%;
   background: var(--bg-editor);
@@ -43,6 +57,12 @@
   flex-shrink: 0;
   position: relative;
   z-index: 2;
+  /* Defence-in-depth: even with .editor-area's min-width floor, if a
+     future change ever lets the tabbar's children request more than
+     the parent can give, clip them at the tabbar so they NEVER paint
+     past the column edge into the right sidebar. */
+  overflow: hidden;
+  min-width: 0;
 }
 /* Top-strip seam at the absolute bottom of the tab strip.
    The active tab is a short pill floating inside the 36 px strip
@@ -114,6 +134,11 @@
   flex-shrink: 0;
   position: relative;
   z-index: 1;
+  /* Same defence-in-depth as .pane-tabbar — the doc-header's centered
+     absolute title and the nav/action button groups should never bleed
+     past the editor column when it's been squeezed thin. */
+  overflow: hidden;
+  min-width: 0;
 }
 
 .pane-doc-nav {
@@ -343,6 +368,26 @@
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 0.9; }
 .tab-close:hover { background: var(--hover); opacity: 1 !important; }
 
+/* ---- Pinned tabs ---------------------------------------------------
+   Obsidian replaces the close (×) button with a pin icon on pinned
+   tabs. The pin is always visible (full opacity) regardless of
+   hover/active state — that's the whole point of the marker.
+   Clicking the pin unpins (in TabButton).                                 */
+.tab-close.pinned {
+  opacity: 0.85;
+  color: var(--accent);
+}
+.tab.pinned .tab-close.pinned { opacity: 0.95; }
+.tab-close.pinned:hover {
+  background: var(--hover);
+  opacity: 1 !important;
+}
+.tab-close.pinned .codicon {
+  /* The "pinned" codicon is slightly chunkier than the X — bump down
+     a hair so it doesn't overpower the tab title. */
+  font-size: 12px;
+}
+
 /* "+" new tab — lives OUTSIDE `.pane-tabs` as a sibling so it stays
    pinned next to the last tab even when the tab list overflows. */
 .tab-new {
@@ -564,11 +609,15 @@
   display: flex;
   flex-direction: column;
   padding: 4px;
-  background: var(--bg-menu, var(--bg-sidebar));
-  border: 1px solid var(--border-soft);
+  /* --bg-menu is intentionally lighter than --bg-editor so the menu
+     reads as a floating surface even when it overlaps the doc body.
+     Falling back to --bg-sidebar would blend (both are #1e1e1e on
+     dark). */
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   /* Subtle elevation so the menu reads as floating above the doc. */
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
   transform-origin: top right;
   animation: split-menu-pop 110ms ease-out;
 }
@@ -633,6 +682,31 @@
   overflow-y: auto;
 }
 
+/* Tab right-click menu — cursor-positioned via createPortal so it
+   floats above .pane-tabs (which has overflow:hidden). Slightly
+   narrower than .doc-more-menu because it has fewer items. */
+.tab-context-menu {
+  min-width: 220px;
+  /* Position is set inline by TabContextMenu (left/top/zIndex). The
+     animation transform interferes with our viewport-clamp math
+     because getBoundingClientRect runs while the scale(0.98) is
+     mid-flight — disable the entry animation for the portaled
+     variant so the first measurement matches the final rect. */
+  animation: none;
+}
+
+/* Disabled menu items (e.g. "Close" on a pinned tab, "Close others"
+   when there's only one tab). Subtle — half opacity, no hover. */
+.split-menu-item:disabled,
+.split-menu-item[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.split-menu-item:disabled:hover,
+.split-menu-item[disabled]:hover {
+  background: transparent;
+}
+
 /* Danger item ("Delete file") — red text + matching icon. */
 .split-menu-item.danger,
 .split-menu-item.danger .split-menu-icon,
@@ -643,3 +717,309 @@
   background: rgba(227, 100, 100, 0.12);
 }
 
+/* Tab dirty dot */
+.tab-close .dirty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-normal);
+  display: block;
+}
+.tab-close.dirty .close-icon {
+  display: none;
+}
+.tab-close.dirty:hover .dirty-dot {
+  display: none;
+}
+.tab-close.dirty:hover .close-icon {
+  display: block;
+}
+
+
+/* ---- Reading mode (MarkdownPreview) ---- */
+/*
+ * Host wrapper takes the full pane body so the rendered HTML can
+ * scroll independently. We pad the content like Obsidian: ~48px on
+ * each side, capped at ~720px width, centered. The CSS variables
+ * pick up the active theme automatically (dark/light) and inherit
+ * `--text-normal`, `--accent`, etc. from App.css.
+ */
+.markdown-preview-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-primary);
+  color: var(--text-normal);
+}
+
+/*
+ * Slides view wrapper. Same flex-fill contract as
+ * .markdown-preview-host so Reveal.js can measure its container —
+ * without `flex: 1` + `min-height: 0` the host collapses to 0
+ * because every child uses absolute positioning (Reveal positions
+ * each `<section>` with `position: absolute`), giving the flow no
+ * intrinsic height to propagate back up. The `display: flex` lets
+ * the inner `.slides-view` stretch to the host's full size. We
+ * deliberately do NOT set `overflow: auto` — Reveal handles its own
+ * fullscreen / scroll behaviour and we don't want a scrollbar on
+ * the host clipping the deck.
+ */
+.markdown-slides-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-editor);
+  color: var(--text-normal);
+}
+
+.md-preview {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 48px 96px;
+  font-family: var(--font-text, var(--font-ui));
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text-normal);
+  word-wrap: break-word;
+}
+
+.md-preview h1,
+.md-preview h2,
+.md-preview h3,
+.md-preview h4,
+.md-preview h5,
+.md-preview h6 {
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.4em 0 0.4em;
+  color: var(--text-normal);
+}
+
+.md-preview h1 { font-size: 1.9em; border-bottom: 1px solid var(--border-strong); padding-bottom: 0.2em; }
+.md-preview h2 { font-size: 1.5em; border-bottom: 1px solid var(--border-soft); padding-bottom: 0.15em; }
+.md-preview h3 { font-size: 1.25em; }
+.md-preview h4 { font-size: 1.1em; }
+.md-preview h5 { font-size: 1em; }
+.md-preview h6 { font-size: 0.9em; color: var(--text-muted); }
+
+.md-preview p { margin: 0.7em 0; }
+
+.md-preview a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.md-preview a:hover { text-decoration: underline; }
+
+.md-preview .md-wikilink {
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px dashed currentColor;
+}
+.md-preview .md-wikilink:hover { background: var(--hover); }
+
+/* Nested-list visual hierarchy \u2014 mirror Obsidian's reading mode.
+ * Top-level lists get standard left-padding; nested lists tighten the
+ * inner margin and add a subtle vertical guide along the left edge so
+ * each nesting level reads as a clear branch (not flush-with-parent).
+ * `list-style-position: outside` on `li` keeps the marker hanging in
+ * the gutter so wrapped text aligns under content (matches the source
+ * editor's `listHangingIndent` plugin). */
+.md-preview ul,
+.md-preview ol {
+  padding-left: 1.6em;
+  margin: 0.5em 0;
+}
+.md-preview li {
+  margin: 0.15em 0;
+  padding-left: 0.15em;
+  position: relative;
+}
+.md-preview li > ul,
+.md-preview li > ol {
+  margin: 0.15em 0 0.25em;
+  padding-left: 1.3em;
+}
+/* Indent guide: thin (1px), faded, centered in the parent's marker
+ * gutter — sits left of the nested marker and runs from just below the
+ * parent's content down through all nested children.
+ * `--text-faint` is the only token visible enough on `--bg-editor` for
+ * a true 1px line; we tone it down with `color-mix` so it doesn't
+ * compete with content. */
+.md-preview li:has(> ul, > ol)::before {
+  content: "";
+  position: absolute;
+  left: -0.65em;
+  top: 1.5em;
+  bottom: 0.1em;
+  width: 1px;
+  background: color-mix(in srgb, var(--text-faint) 45%, transparent);
+  pointer-events: none;
+}
+.md-preview li::marker {
+  color: var(--text-faint);
+}
+
+/* ---- Task List items in preview ---- */
+.md-preview .task-list-item {
+  list-style-type: none !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  margin: 0.3em 0;
+}
+
+.md-preview .md-task-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.md-preview .md-task-checkbox.md-task-inprogress {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: transparent;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 3px;
+  position: relative;
+}
+
+.md-preview .md-task-checkbox.md-task-inprogress::before {
+  content: "/";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.md-preview .task-list-item-text {
+  flex: 1;
+}
+
+.md-preview .md-task-meta-trigger {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.md-preview .task-list-item:hover .md-task-meta-trigger {
+  opacity: 0.6;
+}
+
+.md-preview .md-task-meta-trigger:hover {
+  background: var(--hover);
+  opacity: 1 !important;
+}
+
+.md-preview blockquote {
+  margin: 1em 0;
+  padding: 0.4em 1.2em;
+  border-left: 3px solid var(--accent);
+  color: var(--text-muted);
+  font-style: italic;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-radius: 0 4px 4px 0;
+}
+
+.md-preview code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0.1em 0.3em;
+  background: var(--hover);
+  border-radius: 3px;
+  color: var(--syn-mono, var(--text-normal));
+}
+
+.md-preview pre {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: color-mix(in srgb, var(--bg-editor) 85%, #000 15%);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 1em 0;
+  line-height: 1.5;
+}
+.md-preview pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 1em;
+  color: var(--text-normal);
+}
+
+.md-preview hr {
+  border: none;
+  border-top: 1px solid var(--border-strong);
+  margin: 2em 0;
+}
+
+.md-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 0.95em;
+}
+.md-preview th,
+.md-preview td {
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  text-align: left;
+}
+.md-preview th {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-editor));
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.md-preview tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-editor) 95%, var(--text-faint) 5%);
+}
+
+.md-preview img { max-width: 100%; height: auto; border-radius: 6px; }
+
+.md-preview strong { font-weight: 700; color: var(--text-normal); }
+.md-preview em { font-style: italic; }
+.md-preview del { text-decoration: line-through; color: var(--text-muted); }
+
+/* ── KaTeX math (markdown-it-texmath) ──────────────────────────────
+   katex.min.css is imported globally from MarkdownPreview.tsx, but it
+   ships fixed dark text that fights both light + dark themes.  We
+   re-tint glyphs to inherit, give display equations breathing room
+   inside the prose flow, and let block math scroll horizontally on
+   narrow viewports instead of wrapping (which would split sub/super
+   scripts mid-glyph and look wrong). */
+.md-preview .katex,
+.md-preview .katex-display {
+  color: var(--text-normal);
+}
+.md-preview .katex-display {
+  /* Center, breathe vertically, and isolate from neighbouring text. */
+  margin: 0.9em 0;
+  padding: 0.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* Inline math sits on the text baseline; keep it from inflating line
+   height the way KaTeX's default 1.2 line-height does. */
+.md-preview .katex { line-height: 1.2; }
+/* Soft-failure rendering: texmath wraps malformed math in
+   `<span class="katex-error">` when `throwOnError: false`.  Make those
+   visually distinct without screaming. */
+.md-preview .katex-error {
+  color: var(--text-error, #e57373);
+  border-bottom: 1px dotted var(--text-error, #e57373);
+}

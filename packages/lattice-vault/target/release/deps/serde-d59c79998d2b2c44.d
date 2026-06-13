@@ -1,0 +1,14 @@
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\deps\serde-d59c79998d2b2c44.d: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\serde-45ce9a9451367cdc\out/private.rs
+
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\deps\libserde-d59c79998d2b2c44.rlib: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\serde-45ce9a9451367cdc\out/private.rs
+
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\deps\libserde-d59c79998d2b2c44.rmeta: C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\serde-45ce9a9451367cdc\out/private.rs
+
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\vijaygatla\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+Q:\src\opensource\lattice\packages\lattice-vault\target\release\build\serde-45ce9a9451367cdc\out/private.rs:
+
+# env-dep:OUT_DIR=Q:\\src\\opensource\\lattice\\packages\\lattice-vault\\target\\release\\build\\serde-45ce9a9451367cdc\\out

@@ -1,0 +1,118 @@
+/* Vim Keybindings Reference */
+
+.vkr-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.vkr-inline {
+  /* inside Settings, no extra padding needed */
+}
+
+.vkr-header { margin-bottom: 4px; }
+.vkr-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-normal);
+  margin: 0 0 4px;
+}
+.vkr-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.vkr-filter {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-weak, var(--border));
+  background: var(--bg-2, var(--bg-editor));
+  color: var(--text-normal);
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+}
+.vkr-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.vkr-filter::placeholder { color: var(--text-faint); }
+
+.vkr-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.vkr-group {
+  background: var(--bg-header);
+  border-radius: 8px;
+  border: 1px solid var(--border-weak, var(--border));
+  overflow: hidden;
+}
+
+.vkr-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border-weak, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-header));
+}
+
+.vkr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.vkr-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+.vkr-row:last-child { border-bottom: none; }
+.vkr-row:hover { background: var(--hover); }
+
+.vkr-key {
+  padding: 5px 12px;
+  white-space: nowrap;
+  vertical-align: middle;
+  width: 42%;
+}
+
+.vkr-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-weak, var(--border));
+  background: var(--bg-2, var(--bg-editor));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.vkr-sep { color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+
+.vkr-desc {
+  padding: 5px 12px 5px 4px;
+  color: var(--text-muted);
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+.vkr-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 13px;
+  padding: 24px;
+}

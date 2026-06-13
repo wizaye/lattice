@@ -21,7 +21,7 @@
 }
 
 .tree-row:hover {
-  background: var(--hover-soft);
+  background: var(--hover);
 }
 
 .tree-row.selected {
@@ -31,6 +31,18 @@
 
 .tree-row.file:hover {
   background: var(--hover);
+}
+
+/* "Reveal file in navigation" briefly flashes the row so the user's
+   eye lands on it after the smooth scroll. The class is added by the
+   FileTree's lattice-reveal-file listener and removed 700 ms later. */
+.tree-row.reveal-flash {
+  animation: tree-reveal-flash 700ms ease-out;
+}
+@keyframes tree-reveal-flash {
+  0%   { background: rgba(127, 109, 242, 0.45); }
+  60%  { background: rgba(127, 109, 242, 0.28); }
+  100% { background: transparent; }
 }
 
 .tree-chev {
@@ -63,4 +75,69 @@
 .tree-row.folder {
   font-weight: 500;
   color: var(--text-normal);
+}
+
+.context-menu {
+  position: fixed;
+  /* Use the dedicated floating-popup token so the menu reads as a
+     surface on top of the editor (not transparent against bg-app
+     which is the same colour as the sidebar/editor). */
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
+  z-index: 1000;
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text-normal);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.context-menu-item:hover {
+  background: var(--hover);
+}
+.context-menu-danger {
+  color: #ff5555;
+}
+.context-menu-separator {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 4px 0;
+}
+.inline-input-wrapper {
+  margin: 0 4px;
+}
+.inline-input {
+  width: 100%;
+  background: var(--bg-app);
+  color: var(--text-normal);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 13px;
+  outline: none;
+}
+.inline-input:focus {
+  border-color: var(--accent);
+}
+.drag-over-folder {
+  background: var(--hover) !important;
+}
+
+/* File rows accept drops too — they route the move to the parent
+   directory (or vault root). A thin top border serves as the
+   "insertion line" hint so the user knows the drop will land at the
+   sibling level, not inside the file. */
+.tree-row.file.drag-over-sibling {
+  box-shadow: inset 0 1px 0 0 var(--accent);
 }

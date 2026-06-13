@@ -1,0 +1,1122 @@
+/* Changes panel — VCS + BYOC scaffolding for the left sidebar.
+ *
+ * Visual language is intentionally close to the existing FileTree
+ * (`.tree-row` density, codicon sizing) so switching between the
+ * Files view and Changes view doesn't feel like jumping between two
+ * apps. Each collapsible section uses native `<details>` for free
+ * keyboard a11y and reduced motion handling.
+ */
+
+.cp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- Collapsible section ---------- */
+
+.cp-section {
+  border-radius: 6px;
+}
+
+.cp-section > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 5px 6px 5px 4px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cp-section > summary::-webkit-details-marker { display: none; }
+.cp-section > summary:hover { background: var(--hover); color: var(--text-normal); }
+
+/* Twisty — codicons + native <details> don't ship a built-in marker;
+   fake one with a CSS triangle that rotates on [open]. */
+.cp-section > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0; height: 0;
+  margin-right: 6px;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  vertical-align: middle;
+  transition: transform 120ms ease;
+}
+.cp-section[open] > summary::before { transform: rotate(90deg); }
+
+.cp-summary-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: calc(100% - 18px);
+  /* The row needs an explicit min-width so the title child can
+     actually shrink-to-fit inside its flex parent. Without this the
+     title's intrinsic content width forced the badge to wrap (visible
+     bug at narrow sidebar widths where "Demo vault" broke onto a
+     second line and the gray pill background no longer hugged the
+     text). */
+  min-width: 0;
+}
+.cp-summary-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Let the title truncate with an ellipsis when the badge needs the
+     remaining room. Previously the title kept its intrinsic width
+     and the row wrapped instead, which broke the badge layout. */
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-summary-title .codicon {
+  font-size: var(--icon-xs);
+  color: var(--text-faint);
+}
+
+/* Badge in the summary row — count of changes / status flag */
+.cp-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  /* Keep the pill on a single line and prevent it from shrinking
+     when the row runs out of room — the title ellipsises first.
+     Without nowrap, labels like "Demo vault" wrapped to two lines
+     inside a 16px-tall pill and the gray background looked
+     misaligned with the text. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cp-badge.muted {
+  background: color-mix(in srgb, var(--text-faint) 18%, transparent);
+  color: var(--text-faint);
+}
+.cp-badge.danger {
+  background: color-mix(in srgb, var(--text-error, #e36464) 16%, transparent);
+  color: var(--text-error, #e36464);
+}
+
+.cp-section-body {
+  padding: 4px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------- Empty-state row ---------- */
+
+.cp-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text-faint) 7%, transparent);
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 12px;
+  /* Cap the card width so the muted pill doesn't sprawl across a
+     wide sidebar (visible when the user drags the splitter to its
+     max width). The text inside is short enough that anything past
+     ~360px just looks like wasted horizontal space. */
+  max-width: 360px;
+  align-self: flex-start;
+}
+.cp-empty .codicon {
+  font-size: 14px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* History-section error/recovery card.  Reuses .cp-empty for the
+   muted-pill chrome but switches to a column layout so we can stack
+   title + raw git error + Retry button without it overflowing the
+   narrow Changes panel.  The raw error string can be long (full
+   stderr from a failed `git log`) so we let it wrap and shrink the
+   font so it doesn't dominate the card. */
+.cp-history-error {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  font-style: normal;
+  background: color-mix(in srgb, var(--text-error, #f87171) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-error, #f87171) 30%, transparent);
+}
+.cp-history-error .cp-error-title {
+  color: var(--text-error, #f87171);
+  font-weight: 600;
+  font-size: 12px;
+}
+.cp-history-error .cp-error-msg {
+  display: block;
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  background: var(--background-primary, transparent);
+  padding: 6px 8px;
+  border-radius: 4px;
+  max-height: 96px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cp-history-retry {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* ---------- Commit form ---------- */
+
+.cp-commit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cp-commit-msg {
+  width: 100%;
+  background: var(--bg-editor);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 44px;
+}
+.cp-commit-msg:focus { border-color: var(--accent); outline: none; }
+.cp-commit-msg::placeholder { color: var(--text-faint); }
+.cp-commit-msg:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.cp-commit-actions {
+  display: flex;
+  align-items: center;
+  /* flex-wrap so the three buttons (Suggest / Commit all / Commit
+     staged) drop to a second row instead of clipping or pushing the
+     primary action off-screen when the sidebar is narrow. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+/* Let the buttons shrink within the row before wrapping kicks in,
+   and give them a sane min-width so the labels don't truncate. */
+.cp-commit-actions .cp-btn {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* ---------- Buttons ---------- */
+
+.cp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.cp-btn:hover:not(:disabled) { background: var(--hover); color: var(--text-normal); }
+.cp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cp-btn .codicon { font-size: var(--icon-xs); }
+
+.cp-btn.ghost { border-color: var(--border-soft); }
+.cp-btn.primary {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cp-btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.cp-btn.tiny {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.cp-btn.block {
+  width: 100%;
+  justify-content: center;
+}
+
+.cp-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+/* Pre-init banner: "N files found, click to start tracking".
+   Slightly heavier weight than .cp-hint so it reads as a callout
+   rather than a passive footnote, but still subordinate to the
+   primary CTA button below it. */
+.cp-hint.cp-banner {
+  padding: 8px 10px;
+  margin: 4px 0 8px;
+  background: var(--hover);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+/* Demo-mode callout for the mock vault's BYOC Sync section.  Same
+   shape as .cp-banner but uses a warm amber accent so it reads as
+   "this is a simulation" rather than "this needs attention".  The
+   <strong>Demo mode.</strong> prefix carries the visual weight; the
+   surrounding copy explains the simulation contract. */
+.cp-hint.cp-hint-demo {
+  padding: 8px 10px;
+  margin: 4px 0 10px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+}
+.cp-hint.cp-hint-demo strong {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* ---------- Not-tracked opt-in card ----------
+   Replaces the old "wall of untracked rows" pattern.  We show one
+   compact info card explaining the state, then a single primary
+   button — explicit consent flow.  Helper text below the button
+   explains the why so users understand what enabling does. */
+.cp-untracked {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.cp-untracked-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.cp-untracked-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-faint);
+}
+.cp-untracked-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cp-untracked-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cp-untracked-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+/* ---------- BYOC provider list ---------- */
+
+.cp-provider-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cp-provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  position: relative; /* anchor for the kebab dropdown */
+}
+.cp-provider:hover { background: var(--hover); }
+.cp-provider-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-normal);
+  font-size: 12px;
+  min-width: 0; /* let the label truncate instead of pushing the actions off-row */
+  flex: 1 1 auto;
+}
+.cp-provider-name > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-provider-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.cp-provider-dot[data-color="github"]    { background: #f0f6fc; box-shadow: inset 0 0 0 1px #57606a; }
+.cp-provider-dot[data-color="google"]    { background: #4285f4; }
+.cp-provider-dot[data-color="microsoft"] { background: #0078d4; }
+.cp-provider-dot[data-color="dropbox"]   { background: #0061ff; }
+.cp-provider-dot[data-color="apple"]     { background: #a1a1a6; }
+.cp-provider-dot[data-color="webdav"]    { background: #8a8a8a; }
+
+/* Right-side action cluster.  Lives on the same row as the provider
+   label and is right-aligned via flex.  Single-source for button
+   sizing so Connect / Sync / Not built / Soon all line up at the
+   same width across rows. */
+.cp-sync-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.cp-sync-actions .cp-btn.tiny {
+  min-width: 72px;
+  justify-content: center;
+}
+/* Kebab button — same height as the primary button, square footprint
+   so the row keeps a tidy right edge.  Slightly muted so the eye
+   parses Sync first, then the menu. */
+.cp-kebab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 4px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.cp-kebab-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.cp-kebab-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Dropdown menu anchored to the kebab.  Absolute-positioned so it
+   doesn't push the row layout around when it opens.  Right-aligned
+   so its right edge sits flush with the row's right padding. */
+.cp-provider-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 6px;
+  z-index: 30;
+  min-width: 220px;
+  /* --bg-menu is the canonical floating-popup background (defined in
+     App.css for both themes).  --bg-primary / --border do NOT exist
+     and silently fall back to transparent, which is what made this
+     menu read as a see-through overlay over the rows below. */
+  background: var(--bg-menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Solid backdrop — defeats any inherited opacity / parent transparency. */
+  backdrop-filter: none;
+}
+.cp-provider-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 12px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cp-provider-menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+.cp-provider-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.cp-provider-menu-item.danger {
+  color: var(--text-error, #ef4444);
+}
+.cp-provider-menu-sep {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 2px 0;
+}
+.cp-provider-menu-footer {
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.35;
+}
+.cp-provider-menu-footer strong {
+  display: block;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---------- VCS slice A: change list + history ---------- */
+
+/* Working-changes list — one row per dirty file.  Visual language
+   keeps the same density as the file tree so the eye doesn't jump
+   when switching views. */
+.cp-change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cp-change-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+.cp-change-row:hover { background: var(--hover); }
+.cp-change-row .cp-change-discard {
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+.cp-change-row:hover .cp-change-discard { opacity: 1; }
+
+.cp-change-glyph {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+}
+.cp-change-row[data-status="added"]     .cp-change-glyph,
+.cp-change-row[data-status="untracked"] .cp-change-glyph {
+  color: #5fb37b;
+  background: color-mix(in srgb, #5fb37b 16%, transparent);
+}
+.cp-change-row[data-status="modified"] .cp-change-glyph {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.cp-change-row[data-status="deleted"] .cp-change-glyph {
+  color: var(--text-error, #e36464);
+  background: color-mix(in srgb, var(--text-error, #e36464) 14%, transparent);
+}
+
+.cp-change-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-text);
+}
+.cp-change-discard {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.cp-change-discard:hover {
+  background: color-mix(in srgb, var(--text-error, #e36464) 18%, transparent);
+  color: var(--text-error, #e36464);
+}
+.cp-change-discard .codicon { font-size: 12px; }
+
+/* History — commit rows.  Three-column grid: sha, summary, time. */
+.cp-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cp-commit-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+.cp-commit-row:hover { background: var(--hover); }
+.cp-commit-sha {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cp-commit-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-commit-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ── Branches panel (Slice B) ─────────────────────────────────────
+ *
+ * Compact list with a glyph + name + optional ahead/behind + tip
+ * sha + relative time + per-row actions.  Current branch is bolded
+ * and gets the accent colour so it's always obvious where HEAD is.
+ *
+ * The inline "+ New branch" form expands in place so we don't need
+ * a modal for one of the most common ops.
+ */
+.cp-branches { display: flex; flex-direction: column; gap: 8px; }
+.cp-branch-section-h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin: 8px 4px 2px;
+  font-weight: 600;
+}
+.cp-branch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cp-branch-empty {
+  padding: 8px 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+.cp-branch-row {
+  /* glyph | name | track | tip | time | actions */
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto 48px auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-normal);
+}
+.cp-branch-row:hover { background: var(--hover); }
+.cp-branch-row.current {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.cp-branch-row.current .cp-branch-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+.cp-branch-row.remote { opacity: 0.85; }
+.cp-branch-row.remote .cp-branch-name { font-style: italic; }
+.cp-branch-glyph {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1;
+}
+.cp-branch-row.current .cp-branch-glyph { color: var(--accent); }
+.cp-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+.cp-branch-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.cp-branch-track .ahead { color: #5fb37b; }
+.cp-branch-track .behind { color: #ffb74d; }
+.cp-branch-tip {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cp-branch-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.cp-branch-actions {
+  display: inline-flex;
+  gap: 4px;
+  /* Hide until row hover for a quieter list — current row never
+     shows actions anyway. */
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+.cp-branch-row:hover .cp-branch-actions { opacity: 1; }
+.cp-branch-row.current .cp-branch-actions { display: none; }
+
+/* Inline "+ New branch" form */
+.cp-branch-new {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.cp-branch-new input[type="text"] {
+  width: 100%;
+  padding: 4px 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-secondary, transparent);
+  color: var(--text-normal);
+}
+.cp-branch-new input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.cp-branch-checkout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+}
+.cp-branch-new-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* Footnote at the bottom of the panel — HEAD sha + Refresh link. */
+.cp-footnote {
+  margin: 8px 6px 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11px;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.cp-linkbtn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.cp-linkbtn:hover:not(:disabled) { text-decoration: underline; }
+.cp-linkbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cp-hint.cp-error {
+  color: var(--text-error, #e36464);
+  background: color-mix(in srgb, var(--text-error, #e36464) 10%, transparent);
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------------
+ * Error card
+ * ---------------------------------------------------------------------
+ * Replaces the old inline "<p class='cp-hint cp-error'>" callout that
+ * appeared under the Commit button.  Three reasons we promoted it to a
+ * full card:
+ *
+ *  1. The old paragraph could be wider than the panel when the error
+ *     contained a long path or git hash, which forced horizontal
+ *     scrolling of the whole sidebar.  A card with `overflow:auto` on
+ *     a <pre> child keeps long errors contained.
+ *  2. Errors used to auto-disappear on the next status refresh, which
+ *     happens every time the user saves a file.  Now they're sticky,
+ *     so we need an explicit Dismiss affordance — hence the close (×)
+ *     button in the header.
+ *  3. OneDrive / cloud-sync errors require the user to share specifics
+ *     with us, and an unstyled paragraph isn't obviously copyable.
+ *     The Copy + Retry actions in the footer make that path explicit.
+ *
+ * We deliberately use design-tokens (var(--text-error), --bg-1, etc.)
+ * with hardcoded fallbacks so the card still renders cleanly if the
+ * theme system isn't loaded yet (e.g. during first paint).
+ */
+.cp-error-card {
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, var(--text-error, #e36464) 35%, transparent);
+  background: color-mix(in srgb, var(--text-error, #e36464) 8%, var(--bg-1, #1e1e1e));
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cp-error-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-error, #e36464) 20%, transparent);
+}
+
+.cp-error-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-error, #e36464);
+  letter-spacing: 0.02em;
+}
+
+.cp-error-card-close {
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--fg-2, #aaa);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cp-error-card-close:hover {
+  background: color-mix(in srgb, var(--text-error, #e36464) 18%, transparent);
+  color: var(--fg-0, #fff);
+}
+
+/* The <pre> intentionally preserves whitespace + line breaks so the
+ * unwound error-source chain ("foo → bar → ERROR_ACCESS_DENIED") stays
+ * readable when copied out.  max-height + overflow guards against a
+ * pathologically long stack swallowing the whole sidebar. */
+.cp-error-card-body {
+  margin: 0;
+  padding: 8px;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-error, #e36464);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.cp-error-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--text-error, #e36464) 20%, transparent);
+  background: color-mix(in srgb, var(--text-error, #e36464) 4%, transparent);
+}
+.cp-error-card-actions .cp-btn { flex: 0 0 auto; }
+
+/* ───────────────────────── Subsections (Staged / Unstaged / Untracked) ───────────────────────── */
+/*
+ * Each subsection is its own labelled block with a header (select-all
+ * checkbox + count + batch action buttons) and a body (rows).  Empty
+ * subsections render nothing — the parent's totalCount > 0 guard
+ * means we never see a section header with zero rows.
+ */
+.cp-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cp-subsection {
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-elevated-1, rgba(255, 255, 255, 0.02));
+}
+.cp-subsection-staged    { border-left: 2px solid #4caf50; }
+.cp-subsection-unstaged  { border-left: 2px solid #ffb74d; }
+.cp-subsection-untracked { border-left: 2px solid #64b5f6; }
+
+.cp-subsection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--text-primary, #ddd) 4%, transparent);
+}
+.cp-subsection-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.cp-subsection-toggle input { cursor: pointer; }
+.cp-subsection-title {
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-primary, #ddd);
+}
+.cp-subsection-count {
+  color: var(--text-muted, #888);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.cp-subsection-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* ───────────────────────── Rows ─────────────────────────────────── */
+/* Row is clickable to toggle selection; modifier keys (shift/ctrl)
+ * change the semantics inside ChangesPanel.tsx → onRowClick. */
+.cp-change-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.cp-change-row:hover { background: color-mix(in srgb, var(--text-primary, #ddd) 6%, transparent); }
+.cp-change-row.selected {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 14%, transparent);
+}
+.cp-change-row.selected:hover {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 20%, transparent);
+}
+
+.cp-change-check { cursor: pointer; flex: 0 0 auto; }
+.cp-change-glyph {
+  flex: 0 0 14px;
+  text-align: center;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted, #888);
+}
+.cp-change-row[data-status^="M"] .cp-change-glyph,
+.cp-change-row[data-status$="M"] .cp-change-glyph { color: #ffb74d; }
+.cp-change-row[data-status^="A"] .cp-change-glyph,
+.cp-change-row[data-status$="A"] .cp-change-glyph,
+.cp-change-row[data-status="?"] .cp-change-glyph { color: #4caf50; }
+.cp-change-row[data-status^="D"] .cp-change-glyph,
+.cp-change-row[data-status$="D"] .cp-change-glyph { color: #e57373; }
+.cp-change-row[data-status^="R"] .cp-change-glyph,
+.cp-change-row[data-status$="R"] .cp-change-glyph { color: #64b5f6; }
+
+.cp-change-path {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--text-primary, #ddd);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-change-action,
+.cp-change-discard {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+}
+.cp-change-action:hover,
+.cp-change-discard:hover {
+  background: color-mix(in srgb, var(--text-primary, #ddd) 10%, transparent);
+  color: var(--text-primary, #ddd);
+}
+.cp-change-action:disabled,
+.cp-change-discard:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---------- BYOC: provider meta + device-code modal (Slice B) ---------- */
+
+.cp-provider-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.cp-provider-error {
+  color: var(--text-error, #d96057);
+}
+
+/* Lightweight modal — only used by DeviceCodeModal today.  Sits on
+   top of everything inside the right sidebar; tinted backdrop nudges
+   focus to the dialog without blocking interaction with the editor. */
+.cp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.cp-modal {
+  background: var(--bg-secondary, #1f1f1f);
+  color: var(--text-normal);
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  min-width: 360px;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+.cp-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft, #2a2a2a);
+}
+.cp-modal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cp-modal-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-modal-step {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.cp-modal-step:first-child { margin-top: 0; }
+.cp-modal-link {
+  color: var(--accent, #3b82f6);
+  text-decoration: underline;
+  font-size: 12px;
+  word-break: break-all;
+}
+.cp-modal-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg-primary, #141414);
+  border: 1px solid var(--border-soft, #2a2a2a);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.cp-modal-code-text {
+  font-family: var(--font-mono, monospace);
+  font-size: 22px;
+  letter-spacing: 4px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  user-select: all;
+}
+.cp-modal-foot {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cp-iconbtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cp-iconbtn:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}

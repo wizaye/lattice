@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { initialVault, VAULT_NAME, flattenVault } from "./state/mockVault";
 import type { FileNode, SplitTree, Tab } from "./state/types";
+import { useVaultStore } from "./state/vaultStore";
+import { useEditorStore } from "./state/editorStore";
+import { useSettingsStore } from "./state/settingsStore";
+import { pickVaultFolder, createFolder as createFolderOnDisk } from "./lib/tauriApi";
+import { GRAPH_TAB_FILE_ID, KANBAN_TAB_FILE_ID, DEMO_NOTE_ID, DEMO_KANBAN_ID, DEMO_VAULT_NODES, DEMO_NOTE_CONTENT, DEMO_KANBAN_CONTENT, flattenVault } from "./state/mockVault";
 import {
   findLeaf,
   leaves,
@@ -15,27 +19,61 @@ import { LeftActivityStrip } from "./components/layout/ActivityStrip";
 import { EditorArea } from "./components/editor/EditorArea";
 import { WindowControls } from "./components/layout/TopBar";
 import { StatusPill } from "./components/layout/StatusPill";
+import { useVcsStore, selectDirtyCount } from "./state/vcsStore";
+import { useJournalStore } from "./state/journalStore";
+import {
+  type BacklinkGroup,
+  type MentionGroup,
+  type OutgoingRef,
+  type HeadingRef,
+  collectHeadings,
+  collectOutgoing,
+  collectTags,
+  computeBacklinks,
+  computeUnlinkedMentions,
+  countMentions,
+  countWords,
+} from "./lib/backlinks";
 import { SettingsModal } from "./components/modals/SettingsModal";
+import { WhichKeyOverlay, type WhichKeyItem } from "./components/common/WhichKeyOverlay";
+import { KeyboardShortcutsOverlay } from "./components/common/KeyboardShortcutsOverlay";
+import { HintOverlay } from "./components/common/HintOverlay";
 import {
   ManageVaultsModal,
   type Vault,
 } from "./components/modals/ManageVaultsModal";
+import { NewPaperModal } from "./components/modals/NewPaperModal";
+import { TaskDetailModal } from "./components/modals/TaskDetailModal";
+import { KanbanConfigModal } from "./components/modals/KanbanConfigModal";
+import { PublishWizard } from "./components/modals/PublishWizard";
+import { ExportPdfModal } from "./components/modals/ExportPdfModal";
 import { IcPanelLeft } from "./components/common/Icons";
 import { useDragResize } from "./hooks/useDragResize";
+import { OnboardingShell } from "./components/onboarding/OnboardingShell";
+import {
+  useOnboardingStore,
+  shouldShowOnboarding,
+} from "./components/onboarding/state/onboardingStore";
 
 const LEFT_MIN = 160;
-const LEFT_MAX = 520;
 const LEFT_DEFAULT = 240;
 const RIGHT_MIN = 200;
-const RIGHT_MAX = 520;
 const RIGHT_DEFAULT = 280;
 const STRIP_W = 36;
+// Auto-collapse threshold: dragging the splitter inward past this
+// many pixels below the panel's minimum width snaps the panel into
+// collapsed mode (matches the VS Code / Obsidian convention). The
+// stored width is preserved so toggling the panel open later
+// restores it to its previous size.
+const LEFT_COLLAPSE_AT = LEFT_MIN - 40;
+const RIGHT_COLLAPSE_AT = RIGHT_MIN - 40;
 
 function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
+  // Open the demo note by default so the user sees a live rendered note.
   const tab: Tab = {
     id: uid("tab"),
-    fileId: "file-rahul-1on1",
-    title: "Rahul's 1 on 1",
+    fileId: DEMO_NOTE_ID,
+    title: "Welcome to Lattice.md",
   };
   const leafId = uid("leaf");
   return {
@@ -44,117 +82,105 @@ function makeInitialTree(): { tree: SplitTree; activeLeafId: string } {
   };
 }
 
-function countWords(md: string): { words: number; characters: number } {
-  const stripped = md
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`[^`]*`/g, "")
-    .replace(/\[\[([^\]]+)\]\]/g, "$1")
-    .replace(/[#>*_`\-]/g, "")
-    .replace(/\[(.*?)\]\(.*?\)/g, "$1");
-  const words = stripped.split(/\s+/).filter(Boolean).length;
-  const characters = md.length;
-  return { words, characters };
-}
-
-type BacklinkRef = { fileId: string; fileName: string };
-type OutgoingRef = { name: string };
-type HeadingRef = { level: number; text: string };
-
-function collectBacklinks(
-  target: string,
-  vault: Map<string, FileNode>,
-): BacklinkRef[] {
-  const t = target.toLowerCase();
-  const out: BacklinkRef[] = [];
-  vault.forEach((node) => {
-    if (node.kind !== "file" || !node.content) return;
-    const re = /\[\[([^\]]+)\]\]/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(node.content))) {
-      if (m[1].toLowerCase() === t) {
-        out.push({ fileId: node.id, fileName: node.name });
-        break; // count each file at most once in the backlinks list
-      }
-    }
-  });
-  return out;
-}
-
-function collectOutgoing(content: string): OutgoingRef[] {
-  const re = /\[\[([^\]]+)\]\]/g;
-  const seen = new Set<string>();
-  const out: OutgoingRef[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content))) {
-    const name = m[1].split("|")[0].trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ name });
-  }
-  return out;
-}
-
-function collectTags(content: string): string[] {
-  // strip fenced code blocks so #foo inside ``` ``` isn't picked up
-  const stripped = content.replace(/```[\s\S]*?```/g, "");
-  const re = /(?:^|\s)#([A-Za-z0-9_\-/]+)/g;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(stripped))) {
-    const key = m[1].toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(m[1]);
-  }
-  return out;
-}
-
-function collectHeadings(content: string): HeadingRef[] {
-  const out: HeadingRef[] = [];
-  let inFence = false;
-  for (const raw of content.split(/\r?\n/)) {
-    if (/^```/.test(raw)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(raw);
-    if (!m) continue;
-    out.push({ level: m[1].length, text: m[2] });
-  }
-  return out;
-}
+// NOTE: word counting, backlinks, outgoing, tags, and headings all live in
+// `src/lib/backlinks.ts`. Inlining them here historically caused two bugs:
+//   1. `BacklinkRef[]` shape leaked into RightSidebar (which expects
+//      `BacklinkGroup[]` with snippets) and threw at render → blank screen.
+//   2. `[[Target|Alias]]` and `[[Target#anchor]]` never matched because
+//      the comparison used the raw match group instead of the cleaned
+//      target. Keep all collectors in the shared module.
 
 export default function App() {
-  // ---- Vault & active file -------------------------------------------------
-  // Vault is held in React state so canvas / future markdown edits can
-  // persist within the session. The tree is walked depth-first to apply
-  // a partial update to whichever node id matches — cheaper than a deep
-  // immutable update lib for the few-hundred-node mock vault.
-  const [vaultNodes, setVaultNodes] = useState<FileNode[]>(initialVault);
-  const vault = useMemo(() => flattenVault(vaultNodes), [vaultNodes]);
+  const [taskModalData, setTaskModalData] = useState<{ fileId: string; line: number; taskId: string } | null>(null);
+  const [kanbanConfigOpen, setKanbanConfigOpen] = useState(false);
 
-  /** Write back the new body for a file (markdown or canvas). No-op if
-   *  the id isn't a non-folder node. Used by CanvasView's save hook;
-   *  later the markdown editor will use this too. */
+  useEffect(() => {
+    const handleOpenTaskModal = (e: CustomEvent) => {
+      setTaskModalData(e.detail);
+    };
+    const handleOpenKanbanConfig = () => {
+      setKanbanConfigOpen(true);
+    };
+
+    window.addEventListener("lattice-open-task-modal" as any, handleOpenTaskModal);
+    window.addEventListener("lattice-open-kanban-config" as any, handleOpenKanbanConfig);
+
+    return () => {
+      window.removeEventListener("lattice-open-task-modal" as any, handleOpenTaskModal);
+      window.removeEventListener("lattice-open-kanban-config" as any, handleOpenKanbanConfig);
+    };
+  }, []);
+
+  // ---- Vault & active file -------------------------------------------------
+  // Vault state is managed by zustand. The store reads from the real
+  // filesystem via Tauri commands. Components receive the same props
+  // they always did — only the data source changed.
+  const vaultNodes = useVaultStore((s) => s.fileTree);
+  const vault = useVaultStore((s) => s.flatVault);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const vaultName = useVaultStore((s) => s.vaultName) || "Lattice";
+
+  // Live VCS dirty-count for the status-pill badge. Stays at 0 until
+  // the first refresh resolves (and falls back to 0 when no vault is
+  // open). Subscribing via the dedicated selector keeps re-renders
+  // limited to changes in the count specifically — the rest of the
+  // VcsStore (history, errors, etc.) doesn't touch App.
+  const dirtyCount = useVcsStore(selectDirtyCount);
+
+  // ── Auto-restore the last opened vault on first mount ──────────────────
+  // Reads the persisted vault path from localStorage and silently re-opens
+  // it. If no path is stored the app starts with an empty file tree — the
+  // user picks a folder via the sidebar or Manage Vaults modal.
+  useEffect(() => {
+    const state = useVaultStore.getState();
+    if (state.vaultPath || state.fileTree.length > 0) return;
+    if (!useSettingsStore.getState().autoRestoreVault) return;
+
+    // Seed the mock vault so the demo note renders on first paint
+    // (before auto-restore tries to open a real folder).
+    const editorState = useEditorStore.getState();
+    editorState.setFileContent(DEMO_NOTE_ID, DEMO_NOTE_CONTENT);
+    editorState.setFileContent(DEMO_KANBAN_ID, DEMO_KANBAN_CONTENT);
+    useVaultStore.setState({
+      vaultPath: "__mock__",
+      vaultName: "Demo Vault",
+      fileTree: DEMO_VAULT_NODES,
+      flatVault: flattenVault(DEMO_VAULT_NODES),
+    });
+
+    try {
+      const lastPath = window.localStorage.getItem("lattice.lastVaultPath");
+      if (lastPath) {
+        void useVaultStore.getState().openVault(lastPath).catch(() => {
+          // Folder may have been moved/deleted — silently clear the stored path
+          window.localStorage.removeItem("lattice.lastVaultPath");
+        });
+      }
+    } catch {
+      /* localStorage disabled — start empty */
+    }
+  }, []);
+
+  // ── Persist the current vault path whenever it changes ─────────────────
+  useEffect(() => {
+    if (!vaultPath) return;
+    try {
+      window.localStorage.setItem("lattice.lastVaultPath", vaultPath);
+    } catch {
+      /* ignore quota / disabled storage */
+    }
+  }, [vaultPath]);
+
+  // Debounce timer ref for auto-saving file content to disk
+  /** Write back the new body for a file (markdown or canvas). Updates
+   *  the in-memory vault tree + editor store, and marks it dirty. */
   const onUpdateFileContent = useCallback(
     (fileId: string, content: string) => {
-      setVaultNodes((prev) => {
-        const visit = (nodes: FileNode[]): FileNode[] =>
-          nodes.map((n) => {
-            if (n.id === fileId && n.kind !== "folder") {
-              return { ...n, content };
-            }
-            if (n.children) {
-              return { ...n, children: visit(n.children) };
-            }
-            return n;
-          });
-        return visit(prev);
-      });
+      // Update zustand vault store (in-memory tree)
+      useVaultStore.getState().updateFileContent(fileId, content);
+      // Update editor store (content cache)
+      useEditorStore.getState().setFileContent(fileId, content);
+      useEditorStore.getState().markDirty(fileId);
     },
     [],
   );
@@ -174,6 +200,48 @@ export default function App() {
     }
   }, [tree, activeLeafId]);
 
+  // ── Kick off VCS status refresh whenever the active vault changes.
+  // We skip the synthetic mock-vault sentinel (no real filesystem) and
+  // call `reset()` so any stale status from a previously-open vault is
+  // cleared instantly — otherwise the sidebar/pill briefly show numbers
+  // from the OLD vault while the new refresh is in flight.
+  //
+  // After the status refresh resolves, we ALSO warm up the three
+  // derived views (commit history, graph DAG, branches list) — but
+  // ONLY when the vault is actually tracked (`status.initialized`).
+  // The Changes panel used to lazy-load these on first render of
+  // each section, which left the user staring at empty cards after
+  // opening a vault until they clicked into history/branches.  By
+  // priming the store here we make the panel feel instant when the
+  // user navigates to it, regardless of which left view was last
+  // active.  All three IPCs are cheap (single `git` subprocess) and
+  // fire in parallel.
+  //
+  // Re-runs only when `vaultPath` itself changes (NOT every render),
+  // so the cost is essentially zero for normal use. The refresh call
+  // is debounced inside `vcsStore` to coalesce rapid switches.
+  useEffect(() => {
+    const store = useVcsStore.getState();
+    if (!vaultPath) {
+      store.reset();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await store.refresh(vaultPath);
+      if (cancelled) return;
+      const fresh = useVcsStore.getState();
+      if (fresh.cacheKey !== vaultPath) return;
+      if (!fresh.status?.initialized) return;
+      void fresh.refreshHistory(vaultPath, 100);
+      void fresh.refreshGraph(vaultPath, 200);
+      void fresh.refreshBranches(vaultPath);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultPath]);
+
   const onTreeChange = useCallback((next: SplitTree | null) => {
     if (next) setTree(next);
     else {
@@ -185,11 +253,42 @@ export default function App() {
   }, []);
 
   // ---- Sidebar state ------------------------------------------------------
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(LEFT_DEFAULT);
-  const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT);
-  const [leftView, setLeftView] = useState<LeftView>("files");
+  // Sidebar state is persisted to localStorage so it survives page reloads.
+  const [leftCollapsed, setLeftCollapsed] = useState(() => {
+    try { return window.localStorage.getItem("lattice.layout.leftCollapsed") === "true"; } catch { return false; }
+  });
+  const [rightCollapsed, setRightCollapsed] = useState(() => {
+    try { return window.localStorage.getItem("lattice.layout.rightCollapsed") === "true"; } catch { return false; }
+  });
+  const [leftWidth, setLeftWidth] = useState(() => {
+    try {
+      const v = window.localStorage.getItem("lattice.layout.leftWidth");
+      return v ? Number(v) : LEFT_DEFAULT;
+    } catch { return LEFT_DEFAULT; }
+  });
+  const [rightWidth, setRightWidth] = useState(() => {
+    try {
+      const v = window.localStorage.getItem("lattice.layout.rightWidth");
+      return v ? Number(v) : RIGHT_DEFAULT;
+    } catch { return RIGHT_DEFAULT; }
+  });
+  const [leftView, setLeftView] = useState<LeftView>(() => {
+    try {
+      const v = window.localStorage.getItem("lattice.layout.leftView");
+      return (v as LeftView) ?? "files";
+    } catch { return "files"; }
+  });
+
+  // Persist sidebar state whenever it changes
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("lattice.layout.leftCollapsed", String(leftCollapsed));
+      window.localStorage.setItem("lattice.layout.rightCollapsed", String(rightCollapsed));
+      window.localStorage.setItem("lattice.layout.leftWidth", String(leftWidth));
+      window.localStorage.setItem("lattice.layout.rightWidth", String(rightWidth));
+      window.localStorage.setItem("lattice.layout.leftView", leftView);
+    } catch { /* ignore */ }
+  }, [leftCollapsed, rightCollapsed, leftWidth, rightWidth, leftView]);
 
   // Transient “this sidebar is currently sliding open/closed” flag. It
   // gates the CSS `transition: width` so dragging the resize handle stays
@@ -212,6 +311,97 @@ export default function App() {
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
+  // ---- Which-key overlay --------------------------------------------------
+  // Shown when Space is pressed in vim normal mode (or Ctrl+Shift+K globally).
+  const vimEnabled = useSettingsStore((s) => s.vimMode);
+  const [whichKeyVisible, setWhichKeyVisible] = useState(false);
+  const [shortcutsOverlayOpen, setShortcutsOverlayOpen] = useState(false);
+  const [hintModeActive, setHintModeActive] = useState(false);
+
+  const WHICH_KEY_ITEMS: WhichKeyItem[] = useMemo(() => [
+    { keyLabel: "f", label: "Files", detail: "Switch sidebar to Files view" },
+    { keyLabel: "s", label: "Search", detail: "Switch sidebar to Search view" },
+    { keyLabel: "g", label: "Graph view", detail: "Open the force-graph in a tab" },
+    { keyLabel: "k", label: "Kanban board", detail: "Open Kanban as a full editor tab" },
+    { keyLabel: "c", label: "Canvas files", detail: "Show canvas files panel" },
+    { keyLabel: "n", label: "New tab", detail: "Open a blank tab" },
+    { keyLabel: "w", label: "Close tab", detail: "Close the active tab" },
+    { keyLabel: "d", label: "Daily note", detail: "Open today's daily note (Ctrl+Shift+D)" },
+    { keyLabel: ",", label: "Settings", detail: "Open Settings modal" },
+    { keyLabel: "?", label: "Keybindings", detail: "Open Settings → Hotkeys" },
+  ], []);
+
+  useEffect(() => {
+    if (!whichKeyVisible) return;
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setWhichKeyVisible(false);
+      // Dispatch app-level events so we avoid forward-reference issues
+      // (onOpenGraph / onOpenKanban are declared further down).
+      switch (e.key) {
+        case "f": setLeftView("files"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "s": setLeftView("search"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "g": window.dispatchEvent(new CustomEvent("lattice-open-graph")); break;
+        case "k": window.dispatchEvent(new CustomEvent("lattice-open-kanban")); break;
+        case "c": setLeftView("canvas"); if (leftCollapsed) setLeftCollapsed(false); break;
+        case "n": window.dispatchEvent(new CustomEvent("lattice-new-tab")); break;
+        case "w": window.dispatchEvent(new CustomEvent("lattice-close-tab")); break;
+        case "d": window.dispatchEvent(new CustomEvent("lattice-daily-note")); break;
+        case ",": openSettings(); break;
+        case "?": setShortcutsOverlayOpen(true); break;
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whichKeyVisible, leftCollapsed, openSettings]);
+
+  // Listen for Space in vim normal mode to show which-key
+  // Also listen for Ctrl+/ globally to show shortcut overlay
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl+/ (or Cmd+/) → always opens the shortcut overlay
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOverlayOpen((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        setWhichKeyVisible(false);
+        setShortcutsOverlayOpen(false);
+        setHintModeActive(false);
+        return;
+      }
+      // Ctrl+Shift+H (any mode, vim or not) → hint mode
+      if (e.key === "H" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        setHintModeActive((v) => !v);
+        return;
+      }
+      if (!vimEnabled) return;
+      // ? in normal mode → shortcut overlay
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const active = document.activeElement;
+        if (active?.classList.contains("cm-content")) {
+          e.preventDefault();
+          setShortcutsOverlayOpen(true);
+          return;
+        }
+      }
+      if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Only fire in normal mode — check the last-known vim mode via event
+        const active = document.activeElement;
+        if (active?.classList.contains("cm-content")) {
+          e.preventDefault();
+          setWhichKeyVisible(true);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [vimEnabled]);
+
   // ---- Manage Vaults modal -----------------------------------------------
   // The list of known vaults is local-only for now (no filesystem yet).
   // First entry is hard-coded to match the active VAULT_NAME so the
@@ -220,42 +410,103 @@ export default function App() {
   // — the modal already exposes typed callbacks so swapping in Tauri
   // commands is a one-file change.
   const [vaultsOpen, setVaultsOpen] = useState(false);
-  const [knownVaults, setKnownVaults] = useState<Vault[]>(() => [
-    {
-      id: "current",
-      name: VAULT_NAME,
-      path: "C:\\Users\\you\\Documents\\" + VAULT_NAME,
-    },
-    {
-      id: "corp",
-      name: "vijay's corp obsidian vault",
-      path: "C:\\Work\\corp-notes",
-    },
-    {
-      id: "boq",
-      name: "BoQ",
-      path: "C:\\Users\\you\\Documents\\BoQ",
-    },
-  ]);
+  const [knownVaults, setKnownVaults] = useState<Vault[]>(() => {
+    // Load known vaults from localStorage
+    try {
+      const stored = window.localStorage.getItem("lattice.knownVaults");
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return [];
+  });
+
+  // Persist known vaults to localStorage
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("lattice.knownVaults", JSON.stringify(knownVaults));
+    } catch { /* ignore */ }
+  }, [knownVaults]);
+
   const openManageVaults = useCallback(() => setVaultsOpen(true), []);
   const closeManageVaults = useCallback(() => setVaultsOpen(false), []);
-  const onOpenVault = useCallback((_id: string) => {
-    // Future: swap the in-memory vault for the selected one. For now
-    // we just close the modal so the click registers visually.
-    setVaultsOpen(false);
+
+  // ---- New Paper modal (Slice C) -----------------------------------------
+  // The modal scaffolds a `paper.toml`-anchored folder via the real
+  // `paper_create` IPC.  We surface it from the LeftSidebar footer
+  // (next to Settings) AND respond to a `lattice-open-new-paper`
+  // window event so future entry points (file-tree right-click,
+  // command palette, etc.) don't need to thread props through the
+  // whole tree.
+  const [newPaperOpen, setNewPaperOpen] = useState(false);
+  const openNewPaper = useCallback(() => setNewPaperOpen(true), []);
+  const closeNewPaper = useCallback(() => setNewPaperOpen(false), []);
+
+  // ---- Publish wizard (Slice D) ------------------------------------------
+  const [publishOpen, setPublishOpen] = useState(false);
+  const openPublishWizard = useCallback(() => setPublishOpen(true), []);
+  const closePublishWizard = useCallback(() => setPublishOpen(false), []);
+
+  // Cross-cutting: let any component dispatch a CustomEvent to open
+  // either modal without needing the callback in scope.
+  useEffect(() => {
+    const onNewPaper = () => setNewPaperOpen(true);
+    const onPublish = () => setPublishOpen(true);
+    window.addEventListener("lattice-open-new-paper", onNewPaper);
+    window.addEventListener("lattice-open-publish-wizard", onPublish);
+    return () => {
+      window.removeEventListener("lattice-open-new-paper", onNewPaper);
+      window.removeEventListener("lattice-open-publish-wizard", onPublish);
+    };
   }, []);
+
+  const doOpenVaultByPath = useCallback(async (path: string) => {
+    await useVaultStore.getState().openVault(path);
+    const name = path.split(/[/\\]/).filter(Boolean).pop() ?? "Vault";
+    // Add to known vaults if not already there
+    setKnownVaults((vs) => {
+      if (vs.some((v) => v.path === path)) return vs;
+      return [...vs, { id: `vault-${Date.now()}`, name, path }];
+    });
+  }, []);
+
+  const onOpenVault = useCallback((id: string) => {
+    const v = knownVaults.find((vault) => vault.id === id);
+    if (v) {
+      doOpenVaultByPath(v.path);
+    }
+    setVaultsOpen(false);
+  }, [knownVaults, doOpenVaultByPath]);
+
   const onRemoveVault = useCallback((id: string) => {
     setKnownVaults((vs) => vs.filter((v) => v.id !== id));
   }, []);
-  const onCreateNewVault = useCallback(() => {
-    // Stub — would prompt the user for a name + folder via Tauri dialog.
-  }, []);
-  const onOpenFolderAsVault = useCallback(() => {
-    // Stub — would invoke the native folder picker.
-  }, []);
-  const onOpenExistingVault = useCallback(() => {
-    // Stub — same as open folder for now.
-  }, []);
+
+  const onCreateNewVault = useCallback(async () => {
+    const selected = await pickVaultFolder();
+    if (selected) {
+      try {
+        await createFolderOnDisk(selected);
+      } catch { /* folder might already exist, that's ok */ }
+      await doOpenVaultByPath(selected);
+      setVaultsOpen(false);
+    }
+  }, [doOpenVaultByPath]);
+
+  const onOpenFolderAsVault = useCallback(async () => {
+    const selected = await pickVaultFolder();
+    if (selected) {
+      await doOpenVaultByPath(selected);
+      setVaultsOpen(false);
+    }
+  }, [doOpenVaultByPath]);
+
+  const onOpenExistingVault = useCallback(async () => {
+    // Same as open folder for now
+    const selected = await pickVaultFolder();
+    if (selected) {
+      await doOpenVaultByPath(selected);
+      setVaultsOpen(false);
+    }
+  }, [doOpenVaultByPath]);
 
   // ---- Theme --------------------------------------------------------------
   type Theme = "dark" | "light";
@@ -276,10 +527,36 @@ export default function App() {
     setTheme((t) => (t === "dark" ? "light" : "dark"));
   }, []);
 
+  // ---- Settings CSS Injection ----------------------------------------------
+  const accentColor = useSettingsStore((s) => s.accentColor);
+  const fontSize = useSettingsStore((s) => s.fontSize);
+  const fontFamily = useSettingsStore((s) => s.fontFamily);
+  const density = useSettingsStore((s) => s.density);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--accent", accentColor);
+    root.style.setProperty("--editor-font-size", `${fontSize}px`);
+    root.style.setProperty("--font-text", fontFamily);
+    root.dataset.density = density;
+  }, [accentColor, fontSize, fontFamily, density]);
+
   const leftStartRef = useRef(LEFT_DEFAULT);
   const rightStartRef = useRef(RIGHT_DEFAULT);
 
   const [dragging, setDragging] = useState<"left" | "right" | null>(null);
+
+  // Track window width so the resize clamps know how much room is
+  // actually available between the two sidebars. We only care about
+  // x-axis changes for the splitter math, but innerHeight is cheap.
+  const [windowWidth, setWindowWidth] = useState<number>(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const beginLeftDrag = useCallback(() => {
     leftStartRef.current = leftWidth;
@@ -291,16 +568,130 @@ export default function App() {
   }, [rightWidth]);
   const endDrag = useCallback(() => setDragging(null), []);
 
-  const onLeftDelta = useCallback((d: number) => {
-    setLeftWidth(
-      Math.max(LEFT_MIN, Math.min(LEFT_MAX, leftStartRef.current + d)),
-    );
-  }, []);
-  const onRightDelta = useCallback((d: number) => {
-    setRightWidth(
-      Math.max(RIGHT_MIN, Math.min(RIGHT_MAX, rightStartRef.current - d)),
-    );
-  }, []);
+  // The active cap for each sidebar respects the OPPOSING side's
+  // MIN width: when stretched fully, the opposing sidebar should
+  // still get at least its MIN reserved. Without this, the opposing
+  // sidebar's header content (e.g., the right sidebar's tabbed
+  // panel strip) gets squeezed into a region too narrow for its
+  // intrinsic chrome and ends up sliding under the floating
+  // window-controls cluster (min/max/close). Matches Obsidian where
+  // each sidebar's drag-handle stops at exactly the point where the
+  // other sidebar would be reduced to its minimum.
+  const leftMaxDynamic = Math.max(
+    LEFT_MIN,
+    windowWidth - STRIP_W - (rightCollapsed ? 0 : RIGHT_MIN),
+  );
+  const rightMaxDynamic = Math.max(
+    RIGHT_MIN,
+    windowWidth - STRIP_W - (leftCollapsed ? 0 : LEFT_MIN),
+  );
+
+  // Refs mirror the collapsed state so the pointer-move callback
+  // (which uses a stale closure) can read the current value without
+  // re-creating itself on every state change.
+  const leftCollapsedRef = useRef(leftCollapsed);
+  const rightCollapsedRef = useRef(rightCollapsed);
+  useEffect(() => {
+    leftCollapsedRef.current = leftCollapsed;
+  }, [leftCollapsed]);
+  useEffect(() => {
+    rightCollapsedRef.current = rightCollapsed;
+  }, [rightCollapsed]);
+  // Refs for the current widths too — the drag handler reads them
+  // (for the push-the-opposing-sidebar-inward behaviour below) but we
+  // do NOT want them in the useCallback deps, because that would
+  // rebind the window pointermove listener on every pixel of every
+  // drag, causing visible jitter.
+  const leftWidthRef = useRef(leftWidth);
+  const rightWidthRef = useRef(rightWidth);
+  useEffect(() => {
+    leftWidthRef.current = leftWidth;
+  }, [leftWidth]);
+  useEffect(() => {
+    rightWidthRef.current = rightWidth;
+  }, [rightWidth]);
+
+  const onLeftDelta = useCallback(
+    (d: number) => {
+      const requested = leftStartRef.current + d;
+      // Past the collapse threshold? Snap shut and stop tracking
+      // width updates for the rest of this drag.
+      if (requested < LEFT_COLLAPSE_AT) {
+        if (!leftCollapsedRef.current) {
+          setLeftAnimating(false);
+          setLeftCollapsed(true);
+        }
+        return;
+      }
+      // Drag came back from the collapse zone — re-open the panel
+      // mid-drag so the user can keep adjusting without releasing.
+      if (leftCollapsedRef.current) {
+        setLeftAnimating(false);
+        setLeftCollapsed(false);
+      }
+      // Hard cap: the OPPOSING sidebar must always retain at least
+      // RIGHT_MIN visible. Past this point the drag stops growing.
+      const hardCap = Math.max(
+        LEFT_MIN,
+        windowWidth - STRIP_W - (rightCollapsedRef.current ? 0 : RIGHT_MIN),
+      );
+      const newLeft = Math.max(LEFT_MIN, Math.min(hardCap, requested));
+      setLeftWidth(newLeft);
+      // PUSH behaviour: once the editor is squeezed to 0, further
+      // dragging pushes the right sidebar inward — never below
+      // RIGHT_MIN. We do NOT push back when the user reverses the
+      // drag; the right keeps its squeezed width until the user
+      // grabs its own handle (matches Obsidian).
+      if (!rightCollapsedRef.current) {
+        const remainingForRight = windowWidth - STRIP_W - newLeft;
+        if (rightWidthRef.current > remainingForRight) {
+          setRightWidth(Math.max(RIGHT_MIN, remainingForRight));
+        }
+      }
+    },
+    [windowWidth],
+  );
+  const onRightDelta = useCallback(
+    (d: number) => {
+      // Right-side delta is inverted: moving the cursor RIGHT shrinks
+      // the right sidebar, so subtract.
+      const requested = rightStartRef.current - d;
+      if (requested < RIGHT_COLLAPSE_AT) {
+        if (!rightCollapsedRef.current) {
+          setRightAnimating(false);
+          setRightCollapsed(true);
+        }
+        return;
+      }
+      if (rightCollapsedRef.current) {
+        setRightAnimating(false);
+        setRightCollapsed(false);
+      }
+      const hardCap = Math.max(
+        RIGHT_MIN,
+        windowWidth - STRIP_W - (leftCollapsedRef.current ? 0 : LEFT_MIN),
+      );
+      const newRight = Math.max(RIGHT_MIN, Math.min(hardCap, requested));
+      setRightWidth(newRight);
+      if (!leftCollapsedRef.current) {
+        const remainingForLeft = windowWidth - STRIP_W - newRight;
+        if (leftWidthRef.current > remainingForLeft) {
+          setLeftWidth(Math.max(LEFT_MIN, remainingForLeft));
+        }
+      }
+    },
+    [windowWidth],
+  );
+
+  // If the window shrinks (or the OTHER sidebar grows) and our
+  // current width is now above the dynamic cap, ease back down to
+  // the cap so the sidebars don't end up overlapping.
+  useEffect(() => {
+    if (leftWidth > leftMaxDynamic) setLeftWidth(leftMaxDynamic);
+  }, [leftMaxDynamic, leftWidth]);
+  useEffect(() => {
+    if (rightWidth > rightMaxDynamic) setRightWidth(rightMaxDynamic);
+  }, [rightMaxDynamic, rightWidth]);
 
   const leftPointerDown = useDragResize("x", onLeftDelta, endDrag);
   const rightPointerDown = useDragResize("x", onRightDelta, endDrag);
@@ -315,9 +706,19 @@ export default function App() {
     return f && f.kind === "file" ? f : null;
   }, [tree, activeLeafId, vault]);
 
-  const backlinks = useMemo<BacklinkRef[]>(() => {
+  const backlinks = useMemo<BacklinkGroup[]>(() => {
     if (!activeFile) return [];
-    return collectBacklinks(activeFile.name, vault);
+    return computeBacklinks(activeFile, vault);
+  }, [activeFile, vault]);
+
+  // Unlinked mentions: plain-text mentions of the active file's basename
+  // in other notes that aren't yet `[[wikilinks]]`. Shown in a second
+  // section under Backlinks in the right sidebar; the engine caps the
+  // workload (max 50 files, 5 snippets each) so even huge vaults stay
+  // responsive on the main thread.
+  const unlinked = useMemo<MentionGroup[]>(() => {
+    if (!activeFile) return [];
+    return computeUnlinkedMentions(activeFile, vault);
   }, [activeFile, vault]);
 
   const outgoing = useMemo<OutgoingRef[]>(() => {
@@ -340,7 +741,9 @@ export default function App() {
       return { backlinks: 0, words: 0, characters: 0 } as const;
     const { words, characters } = countWords(activeFile.content ?? "");
     return {
-      backlinks: backlinks.length,
+      // Status pill shows TOTAL mention count, not file count. Matches
+      // Obsidian's behaviour and the rs-stats strip in the sidebar.
+      backlinks: countMentions(backlinks),
       words,
       characters,
     };
@@ -350,20 +753,278 @@ export default function App() {
   const openFile = useCallback(
     (file: FileNode) => {
       if (file.kind === "folder") return;
+      // The hard-coded "Graph View" entry in the vault opens the
+      // GraphView virtual tab, not a markdown editor. We route to the
+      // same logic as the activity-strip graph button so a single tab
+      // is reused when the graph is already open in this leaf.
+      if (file.kind === "graph") {
+        const newTab: Tab = {
+          id: uid("tab"),
+          fileId: GRAPH_TAB_FILE_ID,
+          title: "Graph View",
+        };
+        setTree((prev) => {
+          const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
+          if (!leaf) return prev;
+          const existing = leaf.tabs.find(
+            (t) => t.fileId === GRAPH_TAB_FILE_ID,
+          );
+          if (existing) {
+            if (leaf.activeTabId === existing.id) return prev;
+            return (
+              mapLeaves(prev, (l) =>
+                l.id === leaf.id ? { ...l, activeTabId: existing.id } : l,
+              ) || prev
+            );
+          }
+          return (
+            mapLeaves(prev, (l) =>
+              l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+            ) || prev
+          );
+        });
+        return;
+      }
       const tab: Tab = { id: uid("tab"), fileId: file.id, title: file.name };
       const next = mapLeaves(tree, (leaf) =>
         leaf.id === activeLeafId ? openTabInLeaf(leaf, tab) : leaf,
       );
       if (next) setTree(next);
+      useEditorStore.getState().loadFile(file.id).then((content) => {
+        // Also update the vault store so the file tree has content for
+        // backlinks/outgoing/tags computation
+        useVaultStore.getState().updateFileContent(file.id, content);
+      }).catch((err) => {
+        console.error("Failed to load file:", err);
+      });
     },
     [tree, activeLeafId],
   );
+
+  const onOpenFileByPath = useCallback((path: string) => {
+    const file = useVaultStore.getState().flatVault.get(path);
+    if (file) openFile(file);
+  }, [openFile]);
+
+  const onOpenKanban = useCallback(() => {
+    const newTab: Tab = {
+      id: uid("tab"),
+      fileId: KANBAN_TAB_FILE_ID,
+      title: "Kanban",
+    };
+    setTree((prev) => {
+      const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
+      if (!leaf) return prev;
+      const existing = leaf.tabs.find((t) => t.fileId === KANBAN_TAB_FILE_ID);
+      if (existing) {
+        if (leaf.activeTabId === existing.id) return prev;
+        return mapLeaves(prev, (l) =>
+          l.id === leaf.id ? { ...l, activeTabId: existing.id } : l,
+        ) || prev;
+      }
+      return mapLeaves(prev, (l) =>
+        l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+      ) || prev;
+    });
+  }, [activeLeafId]);
+
+  const onOpenGraph = useCallback(() => {
+    const newTab: Tab = {
+      id: uid("tab"),
+      fileId: "__graph__",
+      title: "Graph View",
+    };
+    setTree((prev) => {
+      const leaf = findLeaf(prev, activeLeafId) || leaves(prev)[0];
+      if (!leaf) return prev;
+
+      const existing = leaf.tabs.find((t) => t.fileId === "__graph__");
+      if (existing) {
+        // Already active in this pane — return prev unchanged so React
+        // doesn't reconcile EditorArea and force GraphView to remount.
+        // Remounting re-runs force-graph's zoomToFit, which is what
+        // made the graph "zoom itself" when the user clicked the
+        // sidebar graph button while the graph tab was already open.
+        if (leaf.activeTabId === existing.id) return prev;
+        return (
+          mapLeaves(prev, (l) =>
+            l.id === leaf.id ? { ...l, activeTabId: existing.id } : l,
+          ) || prev
+        );
+      }
+
+      return (
+        mapLeaves(prev, (l) =>
+          l.id === leaf.id ? openTabInLeaf(l, newTab) : l,
+        ) || prev
+      );
+    });
+  }, [activeLeafId]);
+
+  // ---- Which-key event bridges --------------------------------------------
+  // The which-key overlay uses window events to avoid forward-reference issues.
+  useEffect(() => {
+    const onGraph    = () => onOpenGraph();
+    const onKanban   = () => onOpenKanban();
+    const onHintMode = () => setHintModeActive(true);
+    const onNewTab   = () => {
+      const tab = { id: uid("tab"), fileId: null, title: "New tab" };
+      const next = mapLeaves(tree, (l) => l.id === activeLeafId ? openTabInLeaf(l, tab) : l);
+      if (next) setTree(next);
+    };
+    const onCloseTab = () => {
+      const leaf = findLeaf(tree, activeLeafId);
+      if (!leaf) return;
+      const remaining = leaf.tabs.filter((t) => t.id !== leaf.activeTabId);
+      if (remaining.length === 0) return;
+      const next = mapLeaves(tree, (l) =>
+        l.id === leaf.id ? { ...l, tabs: remaining, activeTabId: remaining[remaining.length - 1].id } : l,
+      );
+      if (next) setTree(next);
+    };
+    const onDailyNote = () => {
+      const vPath = useVaultStore.getState().vaultPath;
+      if (!vPath) return;
+      void (async () => {
+        const result = await useJournalStore.getState().openToday(vPath).catch(() => null);
+        if (result) {
+          await useVaultStore.getState().refreshTree();
+          onOpenFileByPath(result.path);
+        }
+      })();
+    };
+    window.addEventListener("lattice-open-graph",   onGraph);
+    window.addEventListener("lattice-open-kanban",  onKanban);
+    window.addEventListener("lattice-hint-mode",    onHintMode);
+    window.addEventListener("lattice-new-tab",      onNewTab);
+    window.addEventListener("lattice-close-tab",    onCloseTab);
+    window.addEventListener("lattice-daily-note",   onDailyNote);
+    return () => {
+      window.removeEventListener("lattice-open-graph",  onGraph);
+      window.removeEventListener("lattice-open-kanban", onKanban);
+      window.removeEventListener("lattice-hint-mode",   onHintMode);
+      window.removeEventListener("lattice-new-tab",     onNewTab);
+      window.removeEventListener("lattice-close-tab",   onCloseTab);
+      window.removeEventListener("lattice-daily-note",  onDailyNote);
+    };
+  }, [onOpenGraph, onOpenKanban, onOpenFileByPath, tree, activeLeafId]);
+
+  // ---- Wikilink navigation ------------------------------------------------
+  // The CodeMirror editor dispatches a custom event when a [[wikilink]] is
+  // clicked. We listen for it here and open the target file.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.target) return;
+      const linkTarget = detail.target as string;
+      // Search the vault tree for a file matching the link target
+      const flat = useVaultStore.getState().flatVault;
+      let found: FileNode | null = null;
+      flat.forEach((node) => {
+        if (found) return;
+        if (node.kind === "folder") return;
+        // Match by name (without extension)
+        const nameWithout = node.name.replace(/\.md$/i, "").replace(/\.canvas$/i, "");
+        if (nameWithout.toLowerCase() === linkTarget.toLowerCase()) {
+          found = node;
+        }
+      });
+      if (found) {
+        openFile(found);
+      }
+    };
+    window.addEventListener("lattice-open-wikilink", handler);
+    return () => window.removeEventListener("lattice-open-wikilink", handler);
+  }, [openFile]);
+
+  // ---- Paper PDF auto-open ----------------------------------------------
+  // PaperToolbar fires `lattice-open-paper-pdf` after a successful
+  // compile.  We refresh the vault tree so the just-written
+  // `<paper>/build/main.pdf` shows up in `flatVault`, then route
+  // through `onOpenFileByPath` — which opens it as a real editor
+  // tab using `PdfView`.  This is what turns "Compile PDF" from
+  // "ok, the file is somewhere on disk" into a true preview.
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { absPath?: string }
+        | undefined;
+      const absPath = detail?.absPath;
+      if (!absPath) return;
+      try {
+        await useVaultStore.getState().refreshTree();
+      } catch (err) {
+        console.warn("lattice-open-paper-pdf: refreshTree failed:", err);
+      }
+      // vault.get is keyed by absolute path (see tauriApi.ts:147 —
+      // `id: node.path`) so we can pass `absPath` straight through.
+      const node = useVaultStore.getState().flatVault.get(absPath);
+      if (node) {
+        openFile(node);
+      } else {
+        // Fallback: the PDF may not be in the vault tree (e.g. it's
+        // inside a directory whose name starts with '.' or the path
+        // has different casing on Windows). Open it via the OS default
+        // PDF viewer instead of silently failing.
+        console.info("lattice-open-paper-pdf: PDF not in vault tree, opening via OS:", absPath);
+        try {
+          const mod = await import("@tauri-apps/plugin-opener");
+          await mod.openPath(absPath);
+        } catch (err) {
+          // Final fallback: file:// URL in a new browser tab
+          const url = `file:///${absPath.replace(/\\/g, "/")}`;
+          window.open(url, "_blank", "noreferrer");
+          console.warn("lattice-open-paper-pdf: openPath failed:", err);
+        }
+      }
+    };
+    window.addEventListener("lattice-open-paper-pdf", handler);
+    return () => window.removeEventListener("lattice-open-paper-pdf", handler);
+  }, [openFile]);
+
+  // ---- Direct PDF export (Obsidian-style dialog) ---------------------------
+  // The DocMoreMenu "Export to PDF…" dispatches this event with the current
+  // file name in the detail.  We open the ExportPdfModal which gives the user
+  // page-size / margin / downscale controls before calling window.print().
+  const [exportPdfOpen, setExportPdfOpen] = useState(false);
+  const [exportPdfFileName, setExportPdfFileName] = useState("");
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileName?: string }>).detail;
+      setExportPdfFileName(detail?.fileName ?? "");
+      setExportPdfOpen(true);
+    };
+    window.addEventListener("lattice-export-pdf", handler);
+    return () => window.removeEventListener("lattice-export-pdf", handler);
+  }, []);
 
   // ---- Keyboard shortcuts -------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
+      // v2 §2.4 — Ctrl/Cmd+Shift+D opens today's daily-note.  Checked
+      // BEFORE the unshifted single-letter handlers below so Shift+D
+      // doesn't accidentally hit the `D` branch of any future addition.
+      if (e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const vault = useVaultStore.getState().vaultPath;
+        if (!vault || vault === "__mock__") return;
+        void (async () => {
+          try {
+            const result = await useJournalStore
+              .getState()
+              .openToday(vault);
+            // Refresh the vault tree so the freshly-created file
+            // appears in the file pane before we route the open.
+            await useVaultStore.getState().refreshTree();
+            onOpenFileByPath(result.path);
+          } catch (err) {
+            console.error("[journal] Ctrl+Shift+D failed:", err);
+          }
+        })();
+        return;
+      }
       if (e.key.toLowerCase() === "b") {
         e.preventDefault();
         toggleLeftSidebar();
@@ -394,20 +1055,37 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tree, activeLeafId]);
+  }, [tree, activeLeafId, onOpenFileByPath]);
 
   // ---- Resize handle X positions (full-height overlays) ------------------
-  // x = left edge of the handle. Hidden while the sidebar is mid-animation
-  // so the handle doesn’t snap to the final position before the column
-  // catches up.
+  // x = left edge of the handle, in pixels. Hidden while the sidebar
+  // is mid-animation so the handle doesn't snap to the final position
+  // before the column catches up.
+  //
+  // Both handles are expressed in the same units (pixels off the left
+  // edge of the viewport). Previously the right handle used a CSS
+  // calc() string while the left used a pure number — under fractional
+  // device-pixel ratios those two strategies rounded differently, so
+  // the two handles drifted by a sub-pixel and the splitter felt
+  // misaligned. Now they share a single anchor: windowWidth.
   const leftHandleX =
     !leftCollapsed && !leftAnimating
       ? STRIP_W + leftWidth - 3 /* center the 6px zone on the edge */
       : null;
   const rightHandleX =
     !rightCollapsed && !rightAnimating
-      ? `calc(100% - ${rightWidth + 3}px)`
+      ? windowWidth - rightWidth - 3
       : null;
+
+  // ── Onboarding gate ────────────────────────────────────────────────────
+  // Show the onboarding wizard on first run. Once the user completes it
+  // (setting completedAt), shouldShowOnboarding returns false and the
+  // main workspace renders normally. The check is reactive via zustand.
+  const showOnboarding = useOnboardingStore(shouldShowOnboarding);
+
+  if (showOnboarding) {
+    return <OnboardingShell />;
+  }
 
   return (
     <div className="lattice-app">
@@ -416,7 +1094,7 @@ export default function App() {
         <div className="col-header center" data-tauri-drag-region>
           {!isMac && (
             <button
-              className="icon-btn"
+              className="icon-btn tiny"
               title={leftCollapsed ? "Show left sidebar" : "Hide left sidebar"}
               onClick={toggleLeftSidebar}
             >
@@ -425,7 +1103,16 @@ export default function App() {
           )}
         </div>
         <div className="col-body">
-          <LeftActivityStrip />
+          <LeftActivityStrip
+            view={leftView}
+            onChangeView={setLeftView}
+            leftCollapsed={leftCollapsed}
+            onToggleSidebar={toggleLeftSidebar}
+            onOpenGraph={onOpenGraph}
+            onOpenKanban={onOpenKanban}
+            onOpenNewPaper={openNewPaper}
+            onOpenPublishWizard={openPublishWizard}
+          />
         </div>
       </div>
 
@@ -439,12 +1126,13 @@ export default function App() {
       >
         <div className="sidebar-inner" style={{ width: leftWidth }}>
           <LeftSidebar
-            vaultName={VAULT_NAME}
+            vaultName={vaultName}
             view={leftView}
             onChangeView={setLeftView}
             files={vaultNodes}
             selectedId={activeFile?.id ?? null}
             onOpenFile={openFile}
+            onOpenFileByPath={onOpenFileByPath}
             theme={theme}
             onToggleTheme={toggleTheme}
             onOpenSettings={openSettings}
@@ -464,11 +1152,12 @@ export default function App() {
           onChangeActiveLeaf={setActiveLeafId}
           onTreeChange={onTreeChange}
           onUpdateFileContent={onUpdateFileContent}
+          onOpenFileByPath={onOpenFileByPath}
           leftSidebarCollapsed={leftCollapsed}
           onToggleLeftSidebar={toggleLeftSidebar}
           rightSidebarCollapsed={rightCollapsed}
           onToggleRightSidebar={toggleRightSidebar}
-          topRightInsetPx={isMac ? 0 : 146 /* window-controls cluster width + small gap */}
+          topRightInsetPx={isMac || !rightCollapsed ? 0 : 146 /* only reserve room for the window-controls cluster when the right sidebar is hidden \u2014 otherwise the controls sit over the sidebar, not the editor */}
           topLeftInsetPx={isMac && leftCollapsed ? 40 : 0}
         />
       </div>
@@ -484,10 +1173,37 @@ export default function App() {
         <div className="sidebar-inner" style={{ width: rightWidth }}>
           <RightSidebar
             hasOpenFile={activeFile !== null}
+            activeFileName={
+              activeFile ? activeFile.name.replace(/\.(md|markdown)$/i, "") : null
+            }
             backlinks={backlinks}
+            unlinked={unlinked}
             outgoing={outgoing}
             tags={tags}
             headings={headings}
+            isMac={isMac}
+            onOpenFile={(fileId) => {
+              const f = vault.get(fileId);
+              if (f) openFile(f);
+            }}
+            onOpenByName={(name) => {
+              // Resolve a wikilink target name (no extension) to a vault
+              // file by case-insensitive basename match. Mirrors the
+              // logic in the `lattice-open-wikilink` handler so clicks
+              // from the outgoing-links list behave like real wikilink
+              // clicks in the editor.
+              const target = name.toLowerCase();
+              let found: FileNode | null = null;
+              vault.forEach((node) => {
+                if (found) return;
+                if (node.kind === "folder") return;
+                const base = node.name
+                  .replace(/\.md$/i, "")
+                  .replace(/\.canvas$/i, "");
+                if (base.toLowerCase() === target) found = node;
+              });
+              if (found) openFile(found);
+            }}
           />
         </div>
       </div>
@@ -498,6 +1214,16 @@ export default function App() {
         backlinks={metrics.backlinks}
         words={metrics.words}
         characters={metrics.characters}
+        dirtyCount={dirtyCount}
+        onClickSync={() => {
+          // Clicking the status-pill sync indicator is the canonical
+          // shortcut into the Changes view (VCS + BYOC). If the left
+          // sidebar is collapsed, expand it first so the panel is
+          // actually visible — otherwise the click would silently
+          // switch a hidden view.
+          if (leftCollapsed) setLeftCollapsed(false);
+          setLeftView("changes");
+        }}
       />
 
       {/* ===== Floating window controls (always at top right) ===== */}
@@ -533,11 +1259,34 @@ export default function App() {
         onToggleTheme={toggleTheme}
       />
 
+      {/* ===== Vimium hint mode (f key) ===== */}
+      {hintModeActive && (
+        <HintOverlay
+          onActivate={() => setHintModeActive(false)}
+          onCancel={() => setHintModeActive(false)}
+        />
+      )}
+
+      {/* ===== Keyboard shortcuts overlay (? or Ctrl+/) ===== */}
+      {shortcutsOverlayOpen && (
+        <KeyboardShortcutsOverlay onClose={() => setShortcutsOverlayOpen(false)} />
+      )}
+
+      {/* ===== Which-key overlay (vim Space leader) ===== */}
+      {whichKeyVisible && (
+        <WhichKeyOverlay
+          prefix="Space"
+          title="Leader key"
+          detail="Press a key to act, or Esc to cancel."
+          items={WHICH_KEY_ITEMS}
+        />
+      )}
+
       {/* ===== Manage Vaults overlay (z-index above settings) ===== */}
       <ManageVaultsModal
         open={vaultsOpen}
         vaults={knownVaults}
-        activeVaultName={VAULT_NAME}
+        activeVaultName={vaultName}
         onOpenVault={onOpenVault}
         onRemoveFromList={onRemoveVault}
         onCreateNewVault={onCreateNewVault}
@@ -545,6 +1294,51 @@ export default function App() {
         onOpenExistingVault={onOpenExistingVault}
         onClose={closeManageVaults}
       />
+
+      {/* ===== New Paper modal (Slice C) ===== */}
+      <NewPaperModal
+        open={newPaperOpen}
+        vaultPath={vaultPath}
+        vaultName={vaultName}
+        onClose={closeNewPaper}
+        onOpenPath={onOpenFileByPath}
+        activeMarkdown={
+          activeFile && activeFile.kind === "file"
+            ? { name: activeFile.name, body: activeFile.content ?? "" }
+            : null
+        }
+      />
+
+      {/* ===== Publish wizard (Slice D) ===== */}
+      <PublishWizard
+        open={publishOpen}
+        vaultPath={vaultPath}
+        vaultName={vaultName}
+        onClose={closePublishWizard}
+      />
+
+      {/* ===== Export to PDF dialog ===== */}
+      {exportPdfOpen && (
+        <ExportPdfModal
+          fileName={exportPdfFileName}
+          onClose={() => setExportPdfOpen(false)}
+        />
+      )}
+
+      {/* ===== Task Detail Modal ===== */}
+      {taskModalData && (
+        <TaskDetailModal
+          fileId={taskModalData.fileId}
+          line={taskModalData.line}
+          taskId={taskModalData.taskId}
+          onClose={() => setTaskModalData(null)}
+        />
+      )}
+
+      {/* ===== Kanban Config Modal ===== */}
+      {kanbanConfigOpen && (
+        <KanbanConfigModal onClose={() => setKanbanConfigOpen(false)} />
+      )}
     </div>
   );
 }

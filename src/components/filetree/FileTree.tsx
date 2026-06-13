@@ -1,48 +1,207 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { FileNode } from "../../state/types";
 import { IcChevronDown, IcChevronRight } from "../common/Icons";
 import { setDragImageBelowCursor } from "../common/dragGhost";
+import { useVaultStore } from "../../state/vaultStore";
+import { useSettingsStore } from "../../state/settingsStore";
+import { renameEntry, createFolder as createFolderOnDisk, createFile as createFileOnDisk, deleteFile, deleteFolder } from "../../lib/tauriApi";
+import { renameAndUpdateLinks } from "../../lib/markdown";
+import { confirm, message } from "@tauri-apps/plugin-dialog";
 import "./FileTree.css";
 
-type Props = {
-  nodes: FileNode[];
-  selectedId: string | null;
-  onOpen: (file: FileNode) => void;
-};
+/**
+ * Normalize a file-system path to use forward slashes (safe on both
+ * Windows and Unix, since Tauri/Rust accepts both).  Prevents the
+ * Windows backslash trap where `lastIndexOf("/")` returns -1 on a
+ * `C:\vault\folder\file.md` path, causing moves to land on the
+ * filesystem root instead of the intended parent directory.
+ */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
 
-export function FileTree({ nodes, selectedId, onOpen }: Props) {
+/** Get the parent directory of a path (normalized, cross-platform). */
+function parentDir(p: string): string {
+  const n = normalizePath(p);
+  const idx = n.lastIndexOf("/");
+  return idx > 0 ? n.slice(0, idx) : "";
+}
+
+// ── Context Menu ──
+interface ContextMenuState {
+  x: number;
+  y: number;
+  node: FileNode | null;
+  isRoot: boolean;
+}
+
+function ContextMenu({
+  menu,
+  onClose,
+  onAction,
+}: {
+  menu: ContextMenuState;
+  onClose: () => void;
+  onAction: (action: string) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, [onClose]);
+
+  const items: { label: string; action: string; danger?: boolean }[] = [];
+
+  if (menu.isRoot || (menu.node && menu.node.kind === "folder")) {
+    items.push({ label: "New File", action: "newFile" });
+    items.push({ label: "New Folder", action: "newFolder" });
+  }
+
+  if (menu.node) {
+    if (items.length > 0) items.push({ label: "---", action: "" });
+    items.push({ label: "Rename", action: "rename" });
+    items.push({ label: "Delete", action: "delete", danger: true });
+  }
+
+  if (items.length === 0) return null;
+
   return (
-    <div className="file-tree">
-      {nodes.map((n) => (
-        <TreeRow key={n.id} node={n} depth={0} selectedId={selectedId} onOpen={onOpen} />
-      ))}
+    <div
+      ref={menuRef}
+      className="context-menu animate-fade-in"
+      style={{ top: menu.y, left: menu.x }}
+    >
+      {items.map((item, i) =>
+        item.label === "---" ? (
+          <div key={i} className="context-menu-separator" />
+        ) : (
+          <button
+            key={item.action}
+            className={`context-menu-item ${item.danger ? "context-menu-danger" : ""}`}
+            onClick={() => onAction(item.action)}
+          >
+            {item.label}
+          </button>
+        )
+      )}
     </div>
   );
 }
 
+// ── Inline Input ──
+function InlineInput({
+  defaultValue,
+  onSubmit,
+  onCancel,
+  depth,
+}: {
+  defaultValue: string;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+  depth: number;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      const dotIndex = defaultValue.lastIndexOf(".");
+      if (dotIndex > 0) {
+        inputRef.current.setSelectionRange(0, dotIndex);
+      } else {
+        inputRef.current.select();
+      }
+    }
+  }, [defaultValue]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      const value = inputRef.current?.value.trim();
+      if (value) onSubmit(value);
+      else onCancel();
+    } else if (e.key === "Escape") {
+      onCancel();
+    }
+  };
+
+  return (
+    <div className="tree-row inline-input-wrapper" style={{ paddingLeft: depth * 14 }}>
+      <input
+        ref={inputRef}
+        type="text"
+        className="inline-input"
+        defaultValue={defaultValue}
+        onKeyDown={handleKeyDown}
+        onBlur={onCancel}
+      />
+    </div>
+  );
+}
+
+// ── Tree Row ──
 function TreeRow({
   node,
   depth,
   selectedId,
   onOpen,
+  onContextMenu,
+  inlineEdit,
+  onInlineSubmit,
+  onInlineCancel,
 }: {
   node: FileNode;
   depth: number;
   selectedId: string | null;
   onOpen: (file: FileNode) => void;
+  onContextMenu: (e: React.MouseEvent, node: FileNode) => void;
+  inlineEdit: { path: string; type: "newFile" | "newFolder" | "rename" } | null;
+  onInlineSubmit: (value: string) => void;
+  onInlineCancel: () => void;
 }) {
   const [open, setOpen] = useState(true);
   const selected = node.id === selectedId;
+  const showFileExtensions = useSettingsStore((s) => s.showFileExtensions);
+  const displayName = !showFileExtensions && node.kind === "file" && node.name.toLowerCase().endsWith(".md")
+    ? node.name.slice(0, -3)
+    : node.name;
 
   const onDragStart = (e: React.DragEvent) => {
-    if (node.kind === "folder") return;
     e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("application/x-lattice-file-id", node.id);
-    e.dataTransfer.setData("text/plain", node.name);
-    // Replace the default "faded element" drag image with a small chip
-    // positioned below-right of the cursor (Obsidian-style).
+    e.dataTransfer.setData("text/plain", JSON.stringify({
+      type: "nexus-sidebar-item",
+      path: node.id,
+      isDir: node.kind === "folder",
+      name: node.name
+    }));
     setDragImageBelowCursor(e, node.name);
   };
+
+  const isRenaming = inlineEdit?.path === node.id && inlineEdit?.type === "rename";
+
+  if (isRenaming) {
+    return (
+      <InlineInput
+        defaultValue={node.name}
+        onSubmit={onInlineSubmit}
+        onCancel={onInlineCancel}
+        depth={depth + (node.kind === "folder" ? 0 : 1)}
+      />
+    );
+  }
 
   if (node.kind === "folder") {
     return (
@@ -51,20 +210,85 @@ function TreeRow({
           className={`tree-row folder${selected ? " selected" : ""}`}
           style={{ paddingLeft: 6 + depth * 14 }}
           onClick={() => setOpen((o) => !o)}
+          onContextMenu={(e) => onContextMenu(e, node)}
+          draggable
+          onDragStart={onDragStart}
+          onDragOver={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).classList.add("drag-over-folder");
+          }}
+          onDragLeave={(e) => {
+            (e.currentTarget as HTMLElement).classList.remove("drag-over-folder");
+          }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            (e.currentTarget as HTMLElement).classList.remove("drag-over-folder");
+
+            const data = e.dataTransfer.getData("text/plain");
+            if (!data) return;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type !== "nexus-sidebar-item") return;
+              const { path: sourcePath, name: sourceName } = parsed;
+
+              const sourceNorm = normalizePath(sourcePath);
+              const nodeNorm = normalizePath(node.id);
+              if (sourceNorm === nodeNorm || nodeNorm.startsWith(sourceNorm + '/')) return;
+              const srcParent = parentDir(sourcePath);
+              if (srcParent === nodeNorm) return;
+
+              const newPath = `${node.id}/${sourceName}`;
+              const doMove = await confirm(`Are you sure you want to move '${sourceName}' into '${node.name}'?`, { title: "Move Item", kind: "warning" });
+              if (!doMove) return;
+
+              const vaultPath = useVaultStore.getState().vaultPath;
+              const isMd = sourcePath.toLowerCase().endsWith(".md");
+
+              if (isMd && vaultPath) {
+                const doUpdate = await confirm(`Update all internal links to '${sourceName}'?`, { title: "Update Links" });
+                if (doUpdate) {
+                  await renameAndUpdateLinks(sourcePath, newPath);
+                } else {
+                  await renameEntry(sourcePath, newPath);
+                }
+              } else {
+                await renameEntry(sourcePath, newPath);
+              }
+              useVaultStore.getState().refreshTree();
+            } catch (err) {
+              console.error("Move failed:", err);
+            }
+          }}
         >
           <span className="tree-chev">{open ? <IcChevronDown /> : <IcChevronRight />}</span>
-          <span className="tree-label">{node.name}</span>
+          <span className="tree-label">{displayName}</span>
         </div>
-        {open &&
-          node.children?.map((c) => (
-            <TreeRow
-              key={c.id}
-              node={c}
-              depth={depth + 1}
-              selectedId={selectedId}
-              onOpen={onOpen}
-            />
-          ))}
+        {open && (
+          <>
+            {inlineEdit && (inlineEdit.type === "newFile" || inlineEdit.type === "newFolder") && inlineEdit.path === node.id && (
+              <InlineInput
+                defaultValue={inlineEdit.type === "newFile" ? "untitled.md" : "New Folder"}
+                onSubmit={onInlineSubmit}
+                onCancel={onInlineCancel}
+                depth={depth + 1}
+              />
+            )}
+            {node.children?.map((c) => (
+              <TreeRow
+                key={c.id}
+                node={c}
+                depth={depth + 1}
+                selectedId={selectedId}
+                onOpen={onOpen}
+                onContextMenu={onContextMenu}
+                inlineEdit={inlineEdit}
+                onInlineSubmit={onInlineSubmit}
+                onInlineCancel={onInlineCancel}
+              />
+            ))}
+          </>
+        )}
       </>
     );
   }
@@ -73,13 +297,345 @@ function TreeRow({
     <div
       className={`tree-row file${selected ? " selected" : ""}`}
       style={{ paddingLeft: 22 + depth * 14 }}
+      data-file-id={node.id}
       draggable
       onDragStart={onDragStart}
       onClick={() => onOpen(node)}
       onDoubleClick={() => onOpen(node)}
-      title={node.name}
+      onContextMenu={(e) => onContextMenu(e, node)}
+      // aria-label instead of `title` so the native browser tooltip
+      // (yellow OS bubble) never appears — it would otherwise draw
+      // on top of our Ctrl+hover preview popover, especially on the
+      // hover-then-Ctrl path where the OS tooltip is already on
+      // screen and Chromium won't dismiss it just because we strip
+      // the `title` attribute mid-display. Screen readers still get
+      // the name via aria-label.
+      aria-label={displayName}
+      // ── Drop-on-file ────────────────────────────────────────────────
+      // File rows also accept drops so the user can "drag completely
+      // outside" a folder. Without this, the browser's default
+      // dragover behaviour cancels the drop (cursor goes to the
+      // not-allowed glyph) any time you hover over another file row,
+      // which meant items could only be dropped in folder gaps. A drop
+      // onto a file routes the move to THAT file's parent directory
+      // (or vault root for top-level files), making any sibling row a
+      // valid target.
+      onDragOver={(e) => {
+        e.preventDefault();
+        (e.currentTarget as HTMLElement).classList.add("drag-over-sibling");
+      }}
+      onDragLeave={(e) => {
+        (e.currentTarget as HTMLElement).classList.remove("drag-over-sibling");
+      }}
+      onDrop={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        (e.currentTarget as HTMLElement).classList.remove("drag-over-sibling");
+
+        const data = e.dataTransfer.getData("text/plain");
+        if (!data) return;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type !== "nexus-sidebar-item") return;
+          const { path: sourcePath, name: sourceName } = parsed;
+
+          // Resolve target dir = parent of THIS file row. Top-level
+          // files have no "/" in their id, so the parent is the vault
+          // root itself.
+          const targetDir = parentDir(node.id) || useVaultStore.getState().vaultPath || "";
+          if (!targetDir) return;
+
+          // Don't drop a folder into itself or one of its descendants.
+          const sourceNorm = normalizePath(sourcePath);
+          const targetDirNorm = normalizePath(targetDir);
+          if (sourceNorm === targetDirNorm || targetDirNorm.startsWith(sourceNorm + "/")) return;
+          // No-op when already in the same directory.
+          const sourceParent = parentDir(sourcePath);
+          if (sourceParent === targetDir) return;
+
+          const newPath = `${targetDir}/${sourceName}`;
+          const targetLabel = targetDir.split(/[/\\]/).pop() || "root";
+          const doMove = await confirm(
+            `Are you sure you want to move '${sourceName}' into '${targetLabel}'?`,
+            { title: "Move Item", kind: "warning" },
+          );
+          if (!doMove) return;
+
+          const vaultPath = useVaultStore.getState().vaultPath;
+          const isMd = sourcePath.toLowerCase().endsWith(".md");
+
+          if (isMd && vaultPath) {
+            const doUpdate = await confirm(`Update all internal links to '${sourceName}'?`, { title: "Update Links" });
+            if (doUpdate) {
+              await renameAndUpdateLinks(sourcePath, newPath);
+            } else {
+              await renameEntry(sourcePath, newPath);
+            }
+          } else {
+            await renameEntry(sourcePath, newPath);
+          }
+          useVaultStore.getState().refreshTree();
+        } catch (err) {
+          console.error("Move failed:", err);
+        }
+      }}
     >
-      <span className="tree-label">{node.name}</span>
+      <span className="tree-label">{displayName}</span>
+    </div>
+  );
+}
+
+export type InlineEditState = { path: string; type: "newFile" | "newFolder" | "rename" } | null;
+
+type Props = {
+  nodes: FileNode[];
+  selectedId: string | null;
+  onOpen: (file: FileNode) => void;
+  inlineEdit: InlineEditState;
+  setInlineEdit: (val: InlineEditState) => void;
+  vaultPath: string | null;
+};
+
+export function FileTree({ nodes, selectedId, onOpen, inlineEdit, setInlineEdit, vaultPath }: Props) {
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, node: FileNode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, node, isRoot: false });
+  }, []);
+
+  const handleRootContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!vaultPath) return;
+    setContextMenu({ x: e.clientX, y: e.clientY, node: null, isRoot: true });
+  }, [vaultPath]);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  // ---- window events from outside the file tree ----------------------
+  // EditorArea's tab context menu (and DocMoreMenu) fire these to
+  // drive file-tree-owned actions without prop-drilling. Keeping the
+  // listeners local means FileTree stays the single owner of inline-
+  // rename state and scroll-to-row behaviour.
+  //
+  // Folder rows default to open (useState(true) per FileTreeNode), so
+  // "reveal" only needs to scrollIntoView + flash the row. If we ever
+  // make folders default-closed we'll need to lift open state into a
+  // Set<string> here and force-open every ancestor of the target.
+  useEffect(() => {
+    const onRename = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileId: string }>).detail;
+      if (!detail?.fileId) return;
+      setInlineEdit({ path: detail.fileId, type: "rename" });
+      // Also scroll the row into view so the inline editor is visible.
+      requestAnimationFrame(() => {
+        const el = document.querySelector(
+          `[data-file-id="${CSS.escape(detail.fileId)}"]`,
+        );
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    };
+
+    const onReveal = (e: Event) => {
+      const detail = (e as CustomEvent<{ fileId: string }>).detail;
+      if (!detail?.fileId) return;
+      requestAnimationFrame(() => {
+        const el = document.querySelector(
+          `[data-file-id="${CSS.escape(detail.fileId)}"]`,
+        );
+        if (!el) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        // Brief highlight flash so the user's eye lands on it. The
+        // class self-removes after the animation (700 ms).
+        el.classList.add("reveal-flash");
+        window.setTimeout(() => el.classList.remove("reveal-flash"), 700);
+      });
+    };
+
+    window.addEventListener("lattice-rename-file", onRename);
+    window.addEventListener("lattice-reveal-file", onReveal);
+    return () => {
+      window.removeEventListener("lattice-rename-file", onRename);
+      window.removeEventListener("lattice-reveal-file", onReveal);
+    };
+  }, [setInlineEdit]);
+
+  const handleContextAction = useCallback(async (action: string) => {
+    if (!contextMenu) return;
+    const node = contextMenu.node;
+
+    if (action === "newFile" || action === "newFolder") {
+      const parentPath = node?.kind === "folder" ? node.id : vaultPath;
+      if (parentPath) {
+        setInlineEdit({ path: parentPath, type: action as "newFile" | "newFolder" });
+      }
+    } else if (action === "rename" && node) {
+      setInlineEdit({ path: node.id, type: "rename" });
+    } else if (action === "delete" && node) {
+      const msg = node.kind === "folder" ? `Delete folder "${node.name}" and all contents?` : `Delete "${node.name}"?`;
+      const doDelete = await confirm(msg, { title: "Delete", kind: "warning" });
+      if (doDelete) {
+        (async () => {
+          try {
+            if (node.kind === "folder") {
+              await deleteFolder(node.id);
+            } else {
+              await deleteFile(node.id);
+            }
+            useVaultStore.getState().refreshTree();
+          } catch (err) {
+            console.error("Delete failed:", err);
+          }
+        })();
+      }
+    }
+    closeContextMenu();
+  }, [contextMenu, vaultPath, setInlineEdit]);
+
+  const handleInlineSubmit = useCallback(async (value: string) => {
+    if (!inlineEdit) return;
+    try {
+      if (inlineEdit.type === "newFile") {
+        const newPath = `${inlineEdit.path}/${value}`;
+        await createFileOnDisk(newPath);
+        await useVaultStore.getState().refreshTree();
+        // optionally auto-open:
+        const flat = useVaultStore.getState().flatVault;
+        const newNode = flat.get(newPath);
+        if (newNode) onOpen(newNode);
+      } else if (inlineEdit.type === "newFolder") {
+        const newPath = `${inlineEdit.path}/${value}`;
+        await createFolderOnDisk(newPath);
+        await useVaultStore.getState().refreshTree();
+      } else if (inlineEdit.type === "rename") {
+        const oldPath = inlineEdit.path;
+        const oldParentDir = parentDir(oldPath);
+        const newPath = `${oldParentDir}/${value}`;
+        const isMd = oldPath.toLowerCase().endsWith(".md");
+
+        if (isMd && vaultPath) {
+          const doUpdate = await confirm(`Rename to "${value}"?\n\nUpdate internal links?`, { title: "Update Links" });
+          if (doUpdate) {
+            await renameAndUpdateLinks(oldPath, newPath);
+          } else {
+            await renameEntry(oldPath, newPath);
+          }
+        } else {
+          await renameEntry(oldPath, newPath);
+        }
+        await useVaultStore.getState().refreshTree();
+      }
+    } catch (err) {
+      console.error("Operation failed:", err);
+      await message(`Operation failed: ${err}`, { title: "Error", kind: "error" });
+    }
+    setInlineEdit(null);
+  }, [inlineEdit, vaultPath, onOpen, setInlineEdit]);
+
+  const handleInlineCancel = useCallback(() => setInlineEdit(null), [setInlineEdit]);
+
+  return (
+    <div 
+      className="file-tree"
+      onContextMenu={handleRootContextMenu}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={async (e) => {
+        e.preventDefault();
+        const data = e.dataTransfer.getData("text/plain");
+        if (!data || !vaultPath) return;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type !== "nexus-sidebar-item") return;
+          const { path: sourcePath, name: sourceName } = parsed;
+          const srcParentDir = parentDir(sourcePath);
+          if (srcParentDir === vaultPath) return; // already in root
+
+          const newPath = `${vaultPath}/${sourceName}`;
+          const doMove = await confirm(`Move '${sourceName}' to the vault root?`, { title: "Move Item", kind: "warning" });
+          if (!doMove) return;
+
+          const isMd = sourcePath.toLowerCase().endsWith(".md");
+          if (isMd) {
+            const doUpdate = await confirm(`Update internal links to '${sourceName}'?`, { title: "Update Links" });
+            if (doUpdate) {
+              await renameAndUpdateLinks(sourcePath, newPath);
+            } else {
+              await renameEntry(sourcePath, newPath);
+            }
+          } else {
+            await renameEntry(sourcePath, newPath);
+          }
+          useVaultStore.getState().refreshTree();
+        } catch (err) {
+          console.error("Root move failed:", err);
+        }
+      }}
+    >
+      {inlineEdit && (inlineEdit.type === "newFile" || inlineEdit.type === "newFolder") && inlineEdit.path === vaultPath && (
+        <InlineInput
+          defaultValue={inlineEdit.type === "newFile" ? "untitled.md" : "New Folder"}
+          onSubmit={handleInlineSubmit}
+          onCancel={handleInlineCancel}
+          depth={0}
+        />
+      )}
+      {/* Empty state when no vault is open */}
+      {nodes.length === 0 && !vaultPath && (
+        <div
+          style={{
+            padding: "24px 12px",
+            textAlign: "center",
+            color: "var(--text-faint)",
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ marginBottom: 8, fontSize: 20 }}>📁</div>
+          <div>No vault open</div>
+          <div style={{ marginTop: 4, color: "var(--text-muted)" }}>
+            Click the vault name below to open or create a folder.
+          </div>
+        </div>
+      )}
+      {/* Empty vault: vault is open but contains no files */}
+      {nodes.length === 0 && vaultPath && (
+        <div
+          style={{
+            padding: "24px 12px",
+            textAlign: "center",
+            color: "var(--text-faint)",
+            fontSize: 12,
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ marginBottom: 8, fontSize: 20 }}>✨</div>
+          <div>Vault is empty</div>
+          <div style={{ marginTop: 4, color: "var(--text-muted)" }}>
+            Click <strong>New note</strong> in the toolbar above to create your first note.
+          </div>
+        </div>
+      )}
+      {nodes.map((n) => (
+        <TreeRow
+          key={n.id}
+          node={n}
+          depth={0}
+          selectedId={selectedId}
+          onOpen={onOpen}
+          onContextMenu={handleContextMenu}
+          inlineEdit={inlineEdit}
+          onInlineSubmit={handleInlineSubmit}
+          onInlineCancel={handleInlineCancel}
+        />
+      ))}
+      {contextMenu && (
+        <ContextMenu
+          menu={contextMenu}
+          onClose={closeContextMenu}
+          onAction={handleContextAction}
+        />
+      )}
     </div>
   );
 }

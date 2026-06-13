@@ -1,0 +1,98 @@
+/* ── Slides view (SlidesView.tsx) ───────────────────────────────────
+   Reveal.js's `embedded: true` mode mostly gets out of our way, but
+   it still applies a handful of full-page assumptions we need to
+   override:
+     - `.reveal` defaults to `position: absolute; inset: 0;` which
+       makes it size to the viewport, not the parent.  We swap to a
+       flex-fill child.
+     - The bundled black theme uses `font-family: Source Sans Pro`
+       that we don't ship — we override to `inherit` so users see
+       Lattice's UI font (and don't get a FOUC waiting on a missing
+       webfont).
+     - The deck background is `#191919` in the black theme; we re-use
+       the existing app surface variable so theme switching works. */
+
+.slides-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  /* Reveal computes its scale off the container's box.  Without a
+     defined background here, the deck shows through transparent
+     panes (e.g. when the editor splitter exposes the under-pane). */
+  background: var(--bg-app);
+  color: var(--text-normal);
+}
+
+.slides-host.reveal {
+  /* Override Reveal's default `position: absolute; inset: 0`. */
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  font-family: inherit;
+  color: var(--text-normal);
+}
+
+/* Reveal injects an inline `background-color` on `.slides` at
+   initialise time pulled from the theme.  We don't need to override
+   that — the black theme's `#191919` is close to our app surface and
+   removing it would also kill the per-slide `data-background-color`
+   feature. */
+
+.slides-view .reveal .slides {
+  /* Keep slide text legible on the dark theme regardless of
+     light/dark app theme. */
+  text-align: left;
+}
+
+.slides-view .reveal .slides section {
+  /* Reveal centres slides vertically by default which makes short
+     slides float in the middle of the deck — fine for a TED-talk
+     but odd for note slides.  Top-align gives a more "deck on a
+     page" feel that matches Marp / Deckset. */
+  display: block;
+}
+
+.slides-view .reveal h1,
+.slides-view .reveal h2,
+.slides-view .reveal h3,
+.slides-view .reveal h4 {
+  color: var(--text-normal);
+  font-family: inherit;
+  text-transform: none; /* black theme uppercases h2/h3 by default */
+  letter-spacing: normal;
+  font-weight: 600;
+}
+
+.slides-view .reveal a {
+  color: var(--text-accent, #7ea7ff);
+  text-decoration: none;
+}
+
+.slides-view .reveal pre,
+.slides-view .reveal code {
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, monospace);
+}
+
+.slides-view .reveal pre {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+  border-radius: 6px;
+}
+
+.slides-view .reveal .katex {
+  color: inherit;
+}
+
+/* Wikilink styling inside slides — same look as MarkdownPreview but
+   without the hover preview affordance (slides are presentation
+   mode). */
+.slides-view .reveal .md-wikilink {
+  color: var(--text-accent, #7ea7ff);
+  border-bottom: 1px dashed var(--text-accent, #7ea7ff);
+  cursor: pointer;
+}

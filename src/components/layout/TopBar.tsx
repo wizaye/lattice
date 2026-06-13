@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { IcClose, IcMaximize, IcMinimize } from "../common/Icons";
 
 /**
  * Window control cluster (minimize / maximize / close).
@@ -12,6 +11,11 @@ import { IcClose, IcMaximize, IcMinimize } from "../common/Icons";
  * because `window.__TAURI_INTERNALS__` is undefined. Wrapped in
  * `safeWindow()` so the controls render as inert no-ops and the rest
  * of the app stays usable for visual inspection.
+ *
+ * Glyphs are inline SVGs sized to a 10x10 viewBox and rendered with a
+ * 1px hairline stroke \u2014 the exact metrics Windows 11 Mica chrome ships
+ * for caption controls (Segoe Fluent Icons). Stays crisp at all DPI
+ * because the parent `.win-btn` constrains them to 14x14 px.
  */
 function safeWindow() {
   try {
@@ -19,6 +23,53 @@ function safeWindow() {
   } catch {
     return null;
   }
+}
+
+// Stock Windows 11 chrome glyphs. `shape-rendering: crispEdges` keeps
+// the 1px strokes pixel-aligned so they read as the same flat lines the
+// native title-bar draws.
+const svgProps = {
+  viewBox: "0 0 10 10",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1,
+  shapeRendering: "crispEdges" as const,
+};
+
+function GlyphMinimize() {
+  return (
+    <svg {...svgProps}>
+      <line x1="0" y1="5" x2="10" y2="5" />
+    </svg>
+  );
+}
+
+function GlyphMaximize() {
+  return (
+    <svg {...svgProps}>
+      <rect x="0.5" y="0.5" width="9" height="9" />
+    </svg>
+  );
+}
+
+function GlyphRestore() {
+  // Two overlapping squares: the back one shifted up-right by 2px,
+  // matching the Segoe Fluent "ChromeRestore" glyph (E923).
+  return (
+    <svg {...svgProps}>
+      <rect x="0.5" y="2.5" width="7" height="7" />
+      <path d="M2.5 2.5 V 0.5 H 9.5 V 7.5 H 7.5" />
+    </svg>
+  );
+}
+
+function GlyphClose() {
+  return (
+    <svg {...svgProps}>
+      <line x1="0.5" y1="0.5" x2="9.5" y2="9.5" />
+      <line x1="9.5" y1="0.5" x2="0.5" y2="9.5" />
+    </svg>
+  );
 }
 
 export function WindowControls() {
@@ -48,21 +99,21 @@ export function WindowControls() {
         title="Minimize"
         onClick={() => w()?.minimize().catch(() => {})}
       >
-        <IcMinimize />
+        <GlyphMinimize />
       </button>
       <button
         className="win-btn"
         title={maximized ? "Restore" : "Maximize"}
         onClick={() => w()?.toggleMaximize().catch(() => {})}
       >
-        <IcMaximize />
+        {maximized ? <GlyphRestore /> : <GlyphMaximize />}
       </button>
       <button
         className="win-btn close"
         title="Close"
         onClick={() => w()?.close().catch(() => {})}
       >
-        <IcClose />
+        <GlyphClose />
       </button>
     </div>
   );

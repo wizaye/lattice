@@ -44,6 +44,20 @@ button.sp-stat:hover { background: var(--hover); color: var(--text-normal); }
 .sp-num { color: var(--text-normal); font-weight: 500; }
 .sp-lbl { color: var(--text-muted); }
 
+/* Vim mode indicator badge */
+.sp-vim {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  cursor: default;
+  user-select: none;
+  transition: color 0.1s, background 0.1s;
+}
+
 .sp-icon {
   display: inline-flex;
   align-items: center;
@@ -71,4 +85,35 @@ button.sp-icon.sync { cursor: pointer; }
 }
 .sp-icon.sync.off:hover {
   background: rgba(227, 100, 100, 0.12);
+}
+
+/* Dirty-count badge — VS Code-style number bubble overlaid on the
+   sync icon when there are uncommitted local changes. Positioned with
+   the icon as the relative parent so the badge "sticks" to the icon
+   no matter where the pill lives on screen. Pill is small (26px tall)
+   so we keep the badge compact and pin it to top-right. */
+.sp-icon.sync { position: relative; }
+.sp-dirty-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 1.5px var(--bg-header);
+  pointer-events: none;
+}
+.sp-icon.sync.off .sp-dirty-badge {
+  /* When sync is "off" the icon itself is red, so a matching red badge
+     reads as a single unit. */
+  background: var(--text-error, #e36464);
 }

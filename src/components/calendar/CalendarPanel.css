@@ -1,0 +1,461 @@
+/* ---------------------------------------------------------------------
+ * v2 §1.5 — Calendar panel styles.
+ *
+ * Inherits theme variables (--bg, --panel, --fg, --fg-muted, --accent,
+ * --border, …) from the global ":root" / "[data-theme=dark|light]" rules
+ * in App.css.  Nothing in here hard-codes colour outside of the
+ * source-specific accent chips at the bottom.
+ *
+ * Layout intent: header (sticky-ish) + scrollable body grid + sticky
+ * "Today" card at the bottom.  Sidebar is ~280px so chip text + grids
+ * are tuned for that width.
+ * --------------------------------------------------------------------- */
+
+.cal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0; /* let flex children own the scroll */
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cal-view-btn {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.cal-view-btn + .cal-view-btn {
+  border-left: 1px solid var(--border);
+}
+.cal-view-btn:hover {
+  background: var(--panel-hover, rgba(127, 127, 127, 0.1));
+}
+.cal-view-btn.active {
+  background: var(--accent, #3b82f6);
+  color: var(--accent-fg, white);
+}
+
+.cal-today-btn {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background 120ms ease;
+}
+.cal-today-btn:hover {
+  background: var(--panel-hover, rgba(127, 127, 127, 0.1));
+}
+
+/* ── Date label ──────────────────────────────────────────────────── */
+.cal-date-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  padding: 0 2px;
+}
+.cal-date-label svg {
+  opacity: 0.7;
+}
+
+/* ── Body (scrolls) ──────────────────────────────────────────────── */
+.cal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--panel, transparent);
+}
+
+.cal-error {
+  color: var(--danger, #ef4444);
+  font-size: 11px;
+  padding: 6px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.cal-empty {
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-align: center;
+  padding: 16px 8px;
+}
+.cal-empty-soft {
+  color: var(--fg-muted);
+  font-size: 11px;
+  opacity: 0.7;
+  padding: 6px 0;
+}
+
+/* ── Day view ────────────────────────────────────────────────────── */
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cal-day-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  padding: 2px 4px 4px;
+}
+.cal-day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cal-event {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2, rgba(127, 127, 127, 0.08));
+  border-left: 3px solid var(--accent, #3b82f6);
+}
+.cal-event-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.cal-event-time {
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+.cal-event-title {
+  font-size: 12px;
+  color: var(--fg);
+  font-weight: 500;
+}
+.cal-event-attendees {
+  font-size: 10px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-event-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0.6;
+}
+.cal-event:hover .cal-event-actions {
+  opacity: 1;
+}
+
+/* ── Week view ───────────────────────────────────────────────────── */
+.cal-week {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-week-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.cal-week-row:hover {
+  background: var(--panel-hover, rgba(127, 127, 127, 0.1));
+}
+.cal-week-row.active {
+  background: var(--accent-bg, rgba(59, 130, 246, 0.15));
+}
+.cal-week-date {
+  width: 36px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.cal-week-dow {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+}
+.cal-week-day {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.cal-week-events {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+.cal-week-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--panel-2, rgba(127, 127, 127, 0.15));
+  color: var(--fg);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-week-more {
+  font-size: 10px;
+  color: var(--fg-muted);
+  font-weight: 500;
+  align-self: center;
+}
+
+/* ── Month view ──────────────────────────────────────────────────── */
+.cal-month {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-month-dow-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-month-dow {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-align: center;
+  padding: 2px 0;
+  text-transform: uppercase;
+}
+.cal-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-month-cell {
+  aspect-ratio: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.cal-month-cell:hover {
+  background: var(--panel-hover, rgba(127, 127, 127, 0.1));
+}
+.cal-month-cell.muted {
+  color: var(--fg-muted);
+  opacity: 0.45;
+}
+.cal-month-cell.today {
+  border-color: var(--accent, #3b82f6);
+  font-weight: 700;
+}
+.cal-month-cell.active {
+  background: var(--accent, #3b82f6);
+  color: var(--accent-fg, white);
+}
+.cal-month-num {
+  align-self: flex-start;
+  margin-left: 2px;
+}
+.cal-month-dots {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 1px;
+}
+.cal-month-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent, #3b82f6);
+}
+
+/* ── Today card ──────────────────────────────────────────────────── */
+.cal-today-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel, transparent);
+}
+.cal-today-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cal-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent, #3b82f6);
+  background: var(--accent-bg, rgba(59, 130, 246, 0.15));
+  padding: 2px 6px;
+  border-radius: 999px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cal-journal-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  background: var(--accent, #3b82f6);
+  color: var(--accent-fg, white);
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+.cal-journal-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.cal-journal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cal-agenda {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-agenda-item {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  border-left: 2px solid var(--accent, #3b82f6);
+  background: var(--panel-2, rgba(127, 127, 127, 0.06));
+}
+.cal-agenda-time {
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.cal-agenda-title {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Source-specific accents ────────────────────────────────────────
+   These map 1:1 to the CalSource enum.  We pick distinct hues so a
+   month grid with mixed providers is scannable at a glance.  All
+   colours work on both light and dark themes (mid-saturation so they
+   neither blow out on white nor sink on near-black). */
+.cal-chip-local,
+.cal-event.cal-chip-local,
+.cal-agenda-item.cal-chip-local {
+  border-left-color: #6b7280; /* slate */
+}
+.cal-week-chip.cal-chip-local,
+.cal-month-dot.cal-chip-local {
+  background: #6b7280;
+  color: white;
+}
+
+.cal-chip-outlook,
+.cal-event.cal-chip-outlook,
+.cal-agenda-item.cal-chip-outlook {
+  border-left-color: #0078d4; /* M365 blue */
+}
+.cal-week-chip.cal-chip-outlook,
+.cal-month-dot.cal-chip-outlook {
+  background: #0078d4;
+  color: white;
+}
+
+.cal-chip-google,
+.cal-event.cal-chip-google,
+.cal-agenda-item.cal-chip-google {
+  border-left-color: #ea4335; /* Google red */
+}
+.cal-week-chip.cal-chip-google,
+.cal-month-dot.cal-chip-google {
+  background: #ea4335;
+  color: white;
+}
+
+.cal-chip-apple,
+.cal-event.cal-chip-apple,
+.cal-agenda-item.cal-chip-apple {
+  border-left-color: #fb6340; /* Apple-ish coral */
+}
+.cal-week-chip.cal-chip-apple,
+.cal-month-dot.cal-chip-apple {
+  background: #fb6340;
+  color: white;
+}
+
+.cal-chip-calcom,
+.cal-event.cal-chip-calcom,
+.cal-agenda-item.cal-chip-calcom {
+  border-left-color: #292929; /* Cal.com black */
+}
+.cal-week-chip.cal-chip-calcom,
+.cal-month-dot.cal-chip-calcom {
+  background: #292929;
+  color: white;
+}

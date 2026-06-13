@@ -95,6 +95,7 @@ type Props = {
   source: string;
   /** Called with serialized JSON after every edit. */
   onChange: (json: string) => void;
+  fileId?: string;
 };
 
 // ---------------------------------------------------------------------
@@ -608,7 +609,7 @@ function computeAlignSnap(
 // Component
 // ---------------------------------------------------------------------
 
-export function CanvasView({ source, onChange }: Props) {
+export function CanvasView({ source, onChange, fileId }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Parse on mount / when the underlying file changes. We key on the
@@ -963,6 +964,37 @@ export function CanvasView({ source, onChange }: Props) {
       );
     }
   }, [doc]);
+
+  // Listen for canvas export events dispatched from the pane doc header menu
+  useEffect(() => {
+    if (!fileId) return;
+    const handlePng = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.fileId === fileId) {
+        exportPng();
+      }
+    };
+    const handleSvg = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.fileId === fileId) {
+        exportSvg();
+      }
+    };
+    const handleJson = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.fileId === fileId) {
+        exportJson();
+      }
+    };
+    window.addEventListener("lattice-canvas-export-png", handlePng);
+    window.addEventListener("lattice-canvas-export-svg", handleSvg);
+    window.addEventListener("lattice-canvas-export-json", handleJson);
+    return () => {
+      window.removeEventListener("lattice-canvas-export-png", handlePng);
+      window.removeEventListener("lattice-canvas-export-svg", handleSvg);
+      window.removeEventListener("lattice-canvas-export-json", handleJson);
+    };
+  }, [fileId, exportPng, exportSvg, exportJson]);
 
   // ----- hit-test helper used by both eraser + arrow tool -----------
   const eraseAt = useCallback(

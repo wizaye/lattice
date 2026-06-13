@@ -1,0 +1,12 @@
+# Welcome to Lattice
+
+A tiny **Obsidian-style** workspace built on Tauri + React.
+
+- Drag files from the sidebar into the editor
+- Drop a tab on the edge of a pane to splitasdas
+- 
+- Resize the [[Oversubscriptions]] sidebars from either side
+- Toggle the activity bar icons to collapse panels
+- Open **Project Map.canvas** to try the new infinite canvas
+
+Have a look at [[Rahul's 1 on 1]] for a sample note.

@@ -1,0 +1,291 @@
+/* ── Kanban board — full-pane editor view ─────────────────────────── */
+
+.kb-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-editor);
+  overflow: hidden;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────── */
+
+.kb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  height: 44px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-weak, var(--border));
+  background: var(--bg-editor);
+}
+
+.kb-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.kb-subtitle {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.kb-spacer {
+  flex: 1;
+}
+
+.kb-filter {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-weak, var(--border));
+  background: var(--bg-2, var(--bg-editor));
+  color: var(--text-normal);
+  font-size: 12px;
+  outline: none;
+  width: 200px;
+}
+.kb-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.kb-filter::placeholder { color: var(--text-faint); }
+
+.kb-config-btn {
+  background: transparent;
+  border: 1px solid var(--border-weak, var(--border));
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 120ms ease;
+}
+.kb-config-btn:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.kb-config-btn:active {
+  transform: scale(0.97);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────── */
+
+.kb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 40px;
+}
+.kb-empty-icon {
+  font-size: 48px;
+  opacity: 0.3;
+  line-height: 1;
+}
+.kb-empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.kb-empty-body {
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.6;
+}
+.kb-empty-body code {
+  background: var(--bg-header);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ── Board ────────────────────────────────────────────────────────── */
+
+.kb-board {
+  display: flex;
+  flex: 1;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 16px 20px 0;
+}
+
+/* ── Column ───────────────────────────────────────────────────────── */
+
+.kb-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 240px;
+  max-width: 380px;
+  background: var(--bg-2, color-mix(in srgb, var(--bg-editor) 96%, var(--border) 4%));
+  border-radius: 10px 10px 0 0;
+  margin-right: 12px;
+  overflow: hidden;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.kb-column:last-child { margin-right: 0; }
+
+.kb-column--drop {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-2, var(--bg-editor)) 92%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* ── Column header ────────────────────────────────────────────────── */
+
+.kb-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-weak, var(--border));
+  flex-shrink: 0;
+}
+
+.kb-col-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.kb-col-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.kb-col-count {
+  font-size: 11px;
+  background: var(--bg-header);
+  color: var(--text-faint);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+}
+
+/* ── Cards container ──────────────────────────────────────────────── */
+
+.kb-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 14px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.kb-col-empty {
+  border: 2px dashed var(--border-weak, var(--border));
+  border-radius: 8px;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+  transition: border-color 0.15s, background 0.15s;
+}
+.kb-col-empty--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--accent);
+}
+
+.kb-drop-indicator {
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: 0 4px;
+  opacity: 0.7;
+}
+
+/* ── Card ─────────────────────────────────────────────────────────── */
+
+.kb-card {
+  background: var(--bg-editor);
+  border: 1px solid var(--border-weak, var(--border));
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: grab;
+  transition: box-shadow 0.12s, transform 0.12s, border-color 0.12s;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+}
+
+.kb-card:hover {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  transform: translateY(-1px);
+}
+
+.kb-card:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+}
+
+.kb-card-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-normal);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.kb-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.kb-tag {
+  font-size: 10px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 500;
+}
+
+.kb-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.kb-card-source {
+  font-size: 10px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.kb-card-line {
+  font-size: 10px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}

@@ -1,0 +1,36 @@
+# Flatpak manifest for Lattice
+# Build with: flatpak-builder build-dir com.vijaygatla.Lattice.yml
+
+app-id: com.vijaygatla.Lattice
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: lattice
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri
+  - --share=network
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=com.vijaygatla.Lattice
+
+modules:
+  - name: lattice
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 lattice /app/bin/lattice
+      - install -Dm644 lattice.desktop /app/share/applications/com.vijaygatla.Lattice.desktop
+      - install -Dm644 icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.vijaygatla.Lattice.png
+      - install -Dm644 icons/icon.png /app/share/icons/hicolor/256x256/apps/com.vijaygatla.Lattice.png
+    sources:
+      - type: archive
+        url: https://github.com/vijaygatla/lattice/releases/download/v0.1.0/lattice_0.1.0_amd64.tar.gz
+        sha256: CHANGEME
+      - type: file
+        path: lattice.desktop
+      - type: dir
+        path: icons

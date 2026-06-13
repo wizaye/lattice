@@ -1,123 +1,18 @@
 import type { FileNode } from "./types";
 
-// A small starter canvas so the user has something to look at the
-// moment they click `Project Map.canvas` in the file tree. The shape
-// is the JSON Canvas 1.0 format (https://jsoncanvas.org/spec/1.0/)
-// serialized as a string — exactly how Obsidian writes `.canvas` files
-// to disk, so this content round-trips between editors.
-const SAMPLE_CANVAS = JSON.stringify(
-  {
-    nodes: [
-      {
-        id: "n-1",
-        type: "text",
-        x: -260,
-        y: -160,
-        width: 240,
-        height: 90,
-        text: "# Project Map\n\nDouble-click anywhere to add a card.",
-        color: "6",
-      },
-      {
-        id: "n-2",
-        type: "text",
-        x: 80,
-        y: -180,
-        width: 220,
-        height: 80,
-        text: "**Ideas**\n- shipping flow\n- onboarding",
-      },
-      {
-        id: "n-3",
-        type: "text",
-        x: 80,
-        y: -40,
-        width: 220,
-        height: 80,
-        text: "**Open questions**\nWhere do canvases live?",
-        color: "3",
-      },
-      {
-        id: "n-4",
-        type: "text",
-        x: 80,
-        y: 100,
-        width: 220,
-        height: 80,
-        text: "**Done**\n- sidebar polish",
-        color: "4",
-      },
-    ],
-    edges: [
-      { id: "e-1", fromNode: "n-1", fromSide: "right", toNode: "n-2", toSide: "left", toEnd: "arrow" },
-      { id: "e-2", fromNode: "n-1", fromSide: "right", toNode: "n-3", toSide: "left", toEnd: "arrow" },
-      { id: "e-3", fromNode: "n-1", fromSide: "right", toNode: "n-4", toSide: "left", toEnd: "arrow" },
-    ],
-  },
-  null,
-  "\t",
-);
+/**
+ * The sentinel "file id" for the GraphView virtual tab. EditorArea
+ * checks `activeTab.fileId === GRAPH_TAB_FILE_ID` to decide whether
+ * to render GraphView instead of a markdown / canvas editor.
+ */
+export const GRAPH_TAB_FILE_ID = "__graph__";
 
-export const VAULT_NAME = "Az-Cim";
-
-export const initialVault: FileNode[] = [
-  {
-    id: "folder-clippings",
-    name: "Clippings",
-    kind: "folder",
-    children: [
-      {
-        id: "file-clip-1",
-        name: "Welcome to Lattice",
-        kind: "file",
-        content: `# Welcome to Lattice
-
-A tiny **Obsidian-style** workspace built on Tauri + React.
-
-- Drag files from the sidebar into the editor
-- Drop a tab on the edge of a pane to split
-- Resize the [[Oversubscriptions]] sidebars from either side
-- Toggle the activity bar icons to collapse panels
-- Open **Project Map.canvas** to try the new infinite canvas
-
-Have a look at [[Rahul's 1 on 1]] for a sample note.`,
-      },
-    ],
-  },
-  {
-    id: "file-oversubscriptions",
-    name: "Oversubscriptions",
-    kind: "file",
-    content: `# Oversubscriptions
-
-Notes on capacity planning and oversubscription strategy.
-
-See also: [[Rahul's 1 on 1]]`,
-  },
-  {
-    id: "file-rahul-1on1",
-    name: "Rahul's 1 on 1",
-    kind: "file",
-    content: `# Rahul's 1 on 1
-
-You can refer Oversubscriptions here - [[Oversubscriptions]]
-
-
-RCM - external library which is no longer a part
-
-
-[[DQos]]
-
-[[ResourceCentralClient.cs]]
-`,
-  },
-  {
-    id: "file-project-map-canvas",
-    name: "Project Map.canvas",
-    kind: "canvas",
-    content: SAMPLE_CANVAS,
-  },
-];
+/**
+ * The sentinel "file id" for the KanbanView virtual tab. EditorArea
+ * checks `activeTab.fileId === KANBAN_TAB_FILE_ID` to render the
+ * full-pane Kanban board instead of a text editor.
+ */
+export const KANBAN_TAB_FILE_ID = "__kanban__";
 
 /** Flatten the vault for fast id-based lookup. */
 export function flattenVault(nodes: FileNode[]): Map<string, FileNode> {
@@ -129,3 +24,142 @@ export function flattenVault(nodes: FileNode[]): Map<string, FileNode> {
   nodes.forEach(walk);
   return out;
 }
+
+// ── Demo content ──────────────────────────────────────────────────────────
+
+export const DEMO_NOTE_ID = "__demo__";
+export const DEMO_KANBAN_ID = "__kanban_demo__";
+
+export const DEMO_NOTE_CONTENT = `# Welcome to Lattice
+
+Your second brain — local-first, markdown-native. This note shows everything the editor can render.
+
+## Text Formatting
+
+Write in **bold**, *italic*, ~~strikethrough~~, or combine ***bold italic***. Inline \`code\` is monospace with a subtle highlight. You can [[wikilink]] to any note or link to [external URLs](https://obsidian.md).
+
+## Code Block
+
+\`\`\`typescript
+interface Note {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+}
+
+function createNote(title: string): Note {
+  return {
+    id: crypto.randomUUID(),
+    title,
+    content: "",
+    tags: [],
+  };
+}
+\`\`\`
+
+## Mermaid Diagram
+
+\`\`\`mermaid
+graph TD
+  A[User opens note] --> B{Has content?}
+  B -->|Yes| C[Render preview]
+  B -->|No| D[Show empty state]
+  C --> E[Display in pane]
+  D --> E
+  E --> F[User edits]
+  F --> A
+\`\`\`
+
+## Blockquote
+
+> The best tool is the one you actually use.
+> A PKM system works when it captures your thoughts
+> with as little friction as possible.
+
+## Table
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Editor | ✅ Live | CodeMirror 6 |
+| Preview | ✅ Live | markdown-it |
+| Graph | ✅ Live | force-graph |
+| Kanban | ✅ Live | Native markdown |
+| Slides | ✅ Live | Reveal.js |
+| Sync | 🔧 Beta | GitHub + Drive |
+
+## Task List
+
+- [x] Set up the editor
+- [x] Add reading mode
+- [/] Build Kanban board
+- [ ] Publish first vault
+- [ ] Add AI suggestions
+
+## Nested Lists
+
+1. Plan the note
+   - Write outline
+   - Add headings
+   - Fill in content
+2. Review and edit
+   - Check links work
+   - Fix formatting
+3. Publish or sync
+
+---
+
+You can switch between **Source** and **Reading** mode using the book icon above. Try clicking the [[Welcome to Lattice|wikilink]] — it opens this same note.
+`;
+
+export const DEMO_KANBAN_CONTENT = `---
+kanban-plugin: basic
+---
+
+## 📥 Backlog
+
+- [ ] Implement full-text search across vault
+- [ ] Add calendar heatmap for activity
+- [ ] Dark/light theme auto-follow OS
+- [ ] Command palette (Ctrl+P)
+
+## 🔧 In Progress
+
+- [ ] Fix CodeMirror formatting in all themes
+- [ ] Add Mermaid diagram rendering
+- [ ] Obsidian-style Kanban board
+
+## 👀 Review
+
+- [ ] Reading mode polish pass
+- [ ] PDF export dialog
+
+## ✅ Done
+
+- [x] CodeMirror 6 editor setup
+- [x] Force-directed graph view
+- [x] GitHub BYOC sync
+- [x] Reveal.js slides view
+- [x] Split-pane editor
+
+%% kanban:settings
+\`\`\`
+{"kanban-plugin":"basic"}
+\`\`\`
+%%
+`;
+
+export const DEMO_VAULT_NODES: FileNode[] = [
+  {
+    id: DEMO_NOTE_ID,
+    name: "Welcome to Lattice.md",
+    kind: "file",
+    content: DEMO_NOTE_CONTENT,
+  },
+  {
+    id: DEMO_KANBAN_ID,
+    name: "Project Kanban.md",
+    kind: "file",
+    content: DEMO_KANBAN_CONTENT,
+  },
+];

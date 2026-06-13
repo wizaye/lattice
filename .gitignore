@@ -12,6 +12,18 @@ dist
 dist-ssr
 *.local
 
+# Project-local secrets — BYOC OAuth client ids / client secrets.
+# Read by src-tauri/build.rs and re-exported as rustc env so option_env!
+# in src-tauri/src/sync/clients.rs picks them up at compile time.
+.env
+.env.*
+!.env.example
+
+# Project-local Cargo config (legacy BYOC fallback — also reads OAuth vars).
+# NOTE: anchored with a leading slash so it ONLY ignores the workspace-root
+# .cargo/, NOT src-tauri/.cargo/ (which holds committed build settings).
+/.cargo/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

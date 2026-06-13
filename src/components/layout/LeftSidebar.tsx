@@ -12,15 +12,39 @@ import {
   IcMore,
   IcNewFolder,
   IcPanelLeft,
+  IcRefresh,
   IcSearch,
   IcSortAZ,
   IcSun,
 } from "../common/Icons";
-import { FileTree } from "../filetree/FileTree";
+import { FileTree, type InlineEditState } from "../filetree/FileTree";
+import { useVaultStore } from "../../state/vaultStore";
+import { useVcsStore } from "../../state/vcsStore";
 import { VaultPickerMenu } from "../modals/VaultPickerMenu";
+import { ChangesPanel } from "./ChangesPanel";
+import { CalendarPanel } from "../calendar/CalendarPanel";
+import { CanvasListPanel } from "./CanvasListPanel";
 import "./LeftSidebar.css";
 
-export type LeftView = "files" | "search" | "bookmarks";
+// `changes` is the VCS + BYOC home (see docs/impl-v2.md §4 + §5.2).
+// It's deep-linked from the status-pill sync indicator so the same
+// surface is reachable from both the activity strip and the bottom-
+// right corner of the app — single source of truth for "sync state".
+//
+// `calendar` (v2 §1.5) hosts the unified calendar surface — events
+// (today: local; later: Outlook/Google/Apple/Cal.com) + the journal
+// CTA (v2 §2.3) so the calendar IS the daily-notes entry point.
+//
+// Both `changes` and `calendar` are entered through the L-strip
+// (see [`LeftActivityStrip`]) so the header here only carries the
+// in-vault navigation tabs (files / search / bookmarks).
+export type LeftView =
+  | "files"
+  | "search"
+  | "bookmarks"
+  | "changes"
+  | "calendar"
+  | "canvas";
 
 type Props = {
   vaultName: string;
@@ -29,9 +53,17 @@ type Props = {
   files: FileNode[];
   selectedId: string | null;
   onOpenFile: (file: FileNode) => void;
+  /**
+   * Open an arbitrary vault file by absolute path.  Forwarded down
+   * to the [`CalendarPanel`] so clicking "Open today's journal" or
+   * an event's linked note lands in a tab using the same code path
+   * the file tree uses.
+   */
+  onOpenFileByPath: (path: string) => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+
   /** Open the Manage Vaults modal — invoked from the vault picker's
    *  "Manage vaults\u2026" item. The sidebar only forwards the click;
    *  modal state lives in App so the modal can render at the top of
@@ -51,6 +83,7 @@ export function LeftSidebar({
   files,
   selectedId,
   onOpenFile,
+  onOpenFileByPath,
   theme,
   onToggleTheme,
   onOpenSettings,
@@ -64,11 +97,16 @@ export function LeftSidebar({
   // (the menu lives in a portal — see VaultPickerMenu.tsx).
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false);
   const vaultBtnRef = useRef<HTMLButtonElement>(null);
-  const knownVaults = [
-    "vijay's corp obsidian vault",
-    "BoQ",
-    vaultName,
-  ].filter((v, i, a) => a.indexOf(v) === i);
+  const knownVaults = [vaultName].filter(Boolean);
+
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  // Subscribe to VCS state ONLY for the bits the sidebar header /
+  // toolbar need.  Subscribing to the whole status object would cause
+  // pointless re-renders on every commit; we only need the spinner
+  // flag here.
+  const vcsRefreshing = useVcsStore((s) => s.refreshing);
+  const vcsRefresh = useVcsStore((s) => s.refresh);
+  const [inlineEdit, setInlineEdit] = useState<InlineEditState>(null);
   return (
     <>
       {/* Header — view switcher tabs */}
@@ -97,7 +135,7 @@ export function LeftSidebar({
         <div className="ls-header-drag" data-tauri-drag-region />
         {isMac && (
           <button
-            className="icon-btn ls-toggle-btn"
+            className="icon-btn tiny ls-toggle-btn"
             title="Hide left sidebar"
             onClick={onToggleSidebar}
             style={{ marginRight: 6 }}
@@ -113,12 +151,13 @@ export function LeftSidebar({
         <div className="ls-toolbar">
           {view === "files" && (
             <>
-              <button className="icon-btn tiny" title="New note">
+              <button className="icon-btn tiny" title="New note" onClick={() => vaultPath && setInlineEdit({ path: vaultPath, type: "newFile" })}>
                 <IcEdit />
               </button>
-              <button className="icon-btn tiny" title="New folder">
+              <button className="icon-btn tiny" title="New folder" onClick={() => vaultPath && setInlineEdit({ path: vaultPath, type: "newFolder" })}>
                 <IcNewFolder />
               </button>
+
               <button className="icon-btn tiny" title="Sort">
                 <IcSortAZ />
               </button>
@@ -147,6 +186,42 @@ export function LeftSidebar({
               </button>
             </>
           )}
+          {view === "changes" && (
+            <>
+              <span className="ls-toolbar-label">Changes</span>
+              <span className="ls-toolbar-spacer" />
+              <button
+                className="icon-btn tiny"
+                title={
+                  vcsRefreshing
+                    ? "Refreshing…"
+                    : "Refresh version-control status"
+                }
+                // Disable only when there's literally no vault to scan;
+                // the spinner is for cosmetics — the store debounces
+                // so spamming the click is harmless.
+                onClick={() => vaultPath && void vcsRefresh(vaultPath)}
+                disabled={!vaultPath}
+              >
+                <IcRefresh />
+              </button>
+              <button className="icon-btn tiny" title="More">
+                <IcMore />
+              </button>
+            </>
+          )}
+          {view === "calendar" && (
+            <>
+              <span className="ls-toolbar-label">Calendar</span>
+              <span className="ls-toolbar-spacer" />
+            </>
+          )}
+          {view === "canvas" && (
+            <>
+              <span className="ls-toolbar-label">Canvas files</span>
+              <span className="ls-toolbar-spacer" />
+            </>
+          )}
         </div>
 
         {/* Active view — keyed on `view` so React remounts the subtree
@@ -156,13 +231,27 @@ export function LeftSidebar({
         <div className="ls-content">
           <div key={view} className="ls-view">
             {view === "files" && (
-              <FileTree nodes={files} selectedId={selectedId} onOpen={onOpenFile} />
+              <FileTree 
+                nodes={files} 
+                selectedId={selectedId} 
+                onOpen={onOpenFile} 
+                inlineEdit={inlineEdit}
+                setInlineEdit={setInlineEdit}
+                vaultPath={vaultPath}
+              />
             )}
             {view === "search" && (
               <div className="ls-empty">Type to search the vault.</div>
             )}
             {view === "bookmarks" && (
               <div className="ls-empty">No bookmarks yet.</div>
+            )}
+            {view === "changes" && <ChangesPanel />}
+            {view === "calendar" && (
+              <CalendarPanel onOpenFileByPath={onOpenFileByPath} />
+            )}
+            {view === "canvas" && (
+              <CanvasListPanel onOpenFile={onOpenFile} />
             )}
           </div>
         </div>
@@ -198,25 +287,29 @@ export function LeftSidebar({
             />
           )}
         </div>
-        <span className="ls-footer-spacer" />
-        <button
-          className="icon-btn tiny"
-          title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-          aria-label="Toggle theme"
-          onClick={onToggleTheme}
-        >
-          {theme === "dark" ? <IcSun /> : <IcMoon />}
-        </button>
-        <button className="icon-btn tiny" title="Help">
-          <IcHelp />
-        </button>
-        <button
-          className="icon-btn tiny"
-          title="Settings"
-          onClick={onOpenSettings}
-        >
-          <IcGear />
-        </button>
+        {/* Trailing icons are grouped so they always sit at the right
+            and never get squeezed out — the vault label ellipsizes
+            instead. (See LeftSidebar.css `.ls-footer-icons`.) */}
+        <div className="ls-footer-icons">
+          <button
+            className="icon-btn tiny"
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            aria-label="Toggle theme"
+            onClick={onToggleTheme}
+          >
+            {theme === "dark" ? <IcSun /> : <IcMoon />}
+          </button>
+          <button className="icon-btn tiny" title="Help">
+            <IcHelp />
+          </button>
+          <button
+            className="icon-btn tiny"
+            title="Settings"
+            onClick={onOpenSettings}
+          >
+            <IcGear />
+          </button>
+        </div>
       </div>
     </>
   );

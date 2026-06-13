@@ -9,11 +9,13 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 };
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import wasm from "vite-plugin-wasm";
+import topLevelAwait from "vite-plugin-top-level-await";
 // @ts-expect-error process is a nodejs global
 var host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(function () { return ({
-    plugins: __spreadArray([], react(), true),
+    plugins: __spreadArray([wasm(), topLevelAwait()], react(), true),
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
     //
     // 1. prevent Vite from obscuring rust errors
@@ -29,7 +31,11 @@ export default defineConfig(function () { return ({
                 host: host,
                 port: 1421,
             }
-            : undefined,
+            : {
+                // Disable the Vite error overlay — WASM fetch errors are caught
+                // gracefully by the collab layer; the overlay just blocks the UI.
+                overlay: false,
+            },
         watch: {
             // 3. tell Vite to ignore watching `src-tauri`
             ignored: ["**/src-tauri/**"],
@@ -39,19 +45,45 @@ export default defineConfig(function () { return ({
     // and re-bundle on the first import — noticeable on cold `tauri dev`
     // starts. Codicons CSS is small and pre-bundling avoids a second pass
     // when any component first pulls it in.
+    // loro-crdt ships WASM — it must be excluded from esbuild pre-bundling
+    // and handled entirely by vite-plugin-wasm.
     optimizeDeps: {
+        exclude: ["loro-crdt"],
         include: [
             "react",
             "react-dom",
             "react-dom/client",
-            "@vscode/codicons/dist/codicon.css",
         ],
+        // Tell esbuild (used during pre-bundling) to treat .wasm files as
+        // empty modules — prevents "ESM WASM proposal not supported" errors
+        // when scanning transitive deps.
+        esbuildOptions: {
+            plugins: [{
+                    name: "wasm-stub",
+                    setup: function (build) {
+                        build.onLoad({ filter: /\.wasm$/ }, function () { return ({
+                            contents: "export default undefined",
+                        }); });
+                    },
+                }],
+        },
     },
+    // Resolve `loro-crdt` to its browser entry — uses `new URL(...)` +
+    // synchronous XHR to load WASM, which Vite handles correctly without
+    // the ESM WASM proposal that triggers the vite dev server error.
+    resolve: {
+        alias: {
+            "loro-crdt": "loro-crdt/browser",
+        },
+    },
+    // Serve .wasm files as static assets (needed for loro-crdt browser entry).
+    assetsInclude: ["**/*.wasm"],
     // Tauri ships its own WebView2 / WKWebView, so we can safely target a
     // modern ES baseline. This lets esbuild skip a chunk of legacy
     // transforms / polyfills and produces smaller, faster bundles.
+    // esnext required for top-level await (loro-crdt WASM initialisation)
     build: {
-        target: "es2022",
+        target: "esnext",
         // Cut sourcemap cost from prod builds (Tauri release builds run
         // through tsc + vite build before signing — sourcemaps can double
         // the pipeline time on a cold cache).
@@ -65,6 +97,11 @@ export default defineConfig(function () { return ({
     // Match the dev-server compile target so HMR and prod builds use the
     // same lowering rules (avoids "works in dev, breaks in prod" surprises).
     esbuild: {
-        target: "es2022",
+        target: "esnext",
+    },
+    // Required for vite-plugin-wasm when workers import WASM modules.
+    worker: {
+        format: "es",
+        plugins: function () { return [wasm()]; },
     },
 }); });

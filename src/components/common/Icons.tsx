@@ -79,6 +79,10 @@ export const IcClose = codicon("close");
 export const IcFolder = codicon("folder");
 export const IcSearch = codicon("search");
 export const IcBookmark = codicon("bookmark");
+// `source-control` is the VS Code SCM glyph — a circle-on-a-branch
+// that reads as "git" without being repo-specific (we plan to support
+// GitHub, GDrive, OneDrive, Dropbox, etc. through one BYOC pipe).
+export const IcSourceControl = codicon("source-control");
 
 // Left activity strip (Obsidian core plugins)
 export const IcGraph = codicon("type-hierarchy");
@@ -217,12 +221,29 @@ export const IcMerge = codicon("git-merge");
 export const IcCheck = codicon("check");
 export const IcFileSubmodule = codicon("file-submodule");
 
+// VCS / BYOC — Changes panel iconography
+export const IcGitCommit = codicon("git-commit");
+export const IcGitBranch = codicon("git-branch");
+export const IcGitPullRequest = codicon("git-pull-request");
+export const IcDiff = codicon("diff");
+export const IcDiscard = codicon("discard");
+export const IcCloud = codicon("cloud");
+export const IcCloudUpload = codicon("cloud-upload");
+export const IcCloudDownload = codicon("cloud-download");
+export const IcRefresh = codicon("refresh");
+export const IcSparkle = codicon("sparkle"); // AI-assisted commit message
+
 // Tabbar "View options" + markdown "More options" menus
 export const IcStack = codicon("layers");
 export const IcCloseAll = codicon("close-all");
 export const IcNewFile = codicon("new-file");
 export const IcEye = codicon("eye");
 export const IcCode = codicon("code");
+// "Slides view" doc-menu entry. codicons doesn't ship a dedicated
+// presentation/slideshow glyph; `play-circle` is the closest semantic
+// fit (overlap with media playback is acceptable since slide decks
+// behave like step-through playback).
+export const IcSlideshow = codicon("play-circle");
 export const IcLinkExternal = codicon("link-external");
 export const IcFileAdd = codicon("file-add");
 export const IcFilePdf = codicon("file-pdf");
@@ -231,3 +252,17 @@ export const IcCopy = codicon("copy");
 export const IcFolderOpened = codicon("folder-opened");
 export const IcLocation = codicon("location");
 export const IcTrash = codicon("trash");
+
+// Tab context menu — pin / unpin / unlink (Obsidian's tab right-click).
+// VS Code's `pin` codicon is a thumbtack glyph; `pinned` is the same
+// glyph slightly emphasized. We map both to the same name so a future
+// theme swap doesn't break visual parity.
+export const IcPin = codicon("pin");
+export const IcPinned = codicon("pinned");
+export const IcUnlink = codicon("link-external"); // closest match — Obsidian's "Unlink tab" detaches a tab from its history
+export const IcSplitH = codicon("split-horizontal");
+export const IcSplitV = codicon("split-vertical");
+
+// Graph view overlay controls
+export const IcWand = codicon("wand"); // restart force simulation
+export const IcCamera = codicon("device-camera"); // copy screenshot

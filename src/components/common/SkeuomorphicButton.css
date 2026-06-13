@@ -1,0 +1,126 @@
+/*
+ * SkeuomorphicButton — dark skeuomorphic raised button.
+ *
+ * Material recipe (translated from the skeuomorphic-ui skill tokens):
+ *   • Raised shell gradient:  #202020 -> #191919  (top -> bottom)
+ *   • Highlights (top-lit):   inset 0 1px 0.5px #ffffff1a,
+ *                             inset 0 1px 1px   #ffffff35
+ *   • Black depth lift:       0 10px 10px -9px  #00000070,
+ *                             0 20px 20px -14px #00000060,
+ *                             0  0px  6px  0px  #00000060
+ *
+ * Light comes from the top. Do not invert these shadows on press;
+ * use a subtle scale for tactility instead.
+ */
+
+/* Optional demo scene — keep background within #080808–#1a1a1a. */
+.skeuo-scene {
+  background: #0f0f0f;
+  padding: 32px;
+  border-radius: 14px;
+}
+
+.skeuo-btn {
+  /* Reset native button chrome */
+  appearance: none;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+
+  /* Layout — compact, UI-realistic scale */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  min-height: 36px;
+  border-radius: 10px;
+
+  /* Typography */
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #ececec;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.55);
+
+  /* Raised shell — material consistency token */
+  background-image: linear-gradient(to bottom, #202020, #191919);
+
+  /* Top-lit highlights + black depth lift */
+  box-shadow:
+    inset 0 1px 0.5px #ffffff1a,
+    inset 0 1px 1px   #ffffff35,
+    0 10px 10px -9px  #00000070,
+    0 20px 20px -14px #00000060,
+    0  0px  6px  0px  #00000060;
+
+  transition:
+    transform     90ms ease-out,
+    box-shadow   140ms ease-out,
+    filter       140ms ease-out;
+}
+
+.skeuo-btn:hover:not(:disabled) {
+  /* Very subtle — never override the material lighting */
+  filter: brightness(1.06);
+}
+
+.skeuo-btn:focus-visible {
+  /* Inset focus ring keeps lighting hierarchy intact */
+  box-shadow:
+    inset 0 0 0 1.5px rgba(120, 170, 255, 0.55),
+    inset 0 1px 0.5px #ffffff1a,
+    inset 0 1px 1px   #ffffff35,
+    0 10px 10px -9px  #00000070,
+    0 20px 20px -14px #00000060,
+    0  0px  6px  0px  #00000060;
+}
+
+.skeuo-btn:active:not(:disabled) {
+  /* Tactile press — subtle scale per skill guidance */
+  transform: scale(0.97);
+  filter: brightness(0.96);
+}
+
+.skeuo-btn:disabled {
+  cursor: not-allowed;
+  color: #6f6f6f;
+  filter: saturate(0.5) brightness(0.9);
+}
+
+/* Icon sits in hierarchy with the label, not above it */
+.skeuo-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  opacity: 0.9;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Circular icon button variant — for use inside an inset well
+ * (see skill's "Nested Inset + Popping Button Pattern").
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.skeuo-btn--circle {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border-radius: 9999px;
+  min-height: 0;
+}
+
+.skeuo-inset-well {
+  /* Carved cavity — darker than parent, concave with top edge reflection */
+  height: 100%;
+  padding: 6px;
+  border-radius: 9999px;
+  background: #0f0f0f;
+  box-shadow:
+    0 0.5px 0 #ffffff50,
+    inset 0 2px 6px #00000090;
+}
