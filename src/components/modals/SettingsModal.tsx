@@ -5,6 +5,7 @@ import {
   IcBook,
   IcBookmark,
   IcCalendar,
+  IcChevronRight,
   IcClose,
   IcEdit,
   IcExtensions,
@@ -116,53 +117,69 @@ export function SettingsModal({ open, onClose, theme, onToggleTheme }: Props) {
       }}
     >
       <div
-        className="settings-dialog"
+        className="settings-dialog mod-settings mod-sidebar-layout"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Left list */}
-        <aside className="settings-sidebar">
-          <div className="settings-group-label">Options</div>
-          <ul className="settings-list">
-            {OPTION_SECTIONS.map((s) => (
-              <SectionItem
-                key={s.id}
-                section={s}
-                active={active === s.id}
-                onClick={() => setActive(s.id)}
-              />
-            ))}
-          </ul>
+        {/* In-dialog close button — Obsidian places it at the top-right inside */}
+        <button
+          className="settings-close"
+          title="Close settings"
+          aria-label="Close settings"
+          onClick={onClose}
+        >
+          <IcClose />
+        </button>
 
-          <div className="settings-group-label">Core plugins</div>
-          <ul className="settings-list">
-            {CORE_PLUGIN_SECTIONS.map((s) => (
-              <SectionItem
-                key={s.id}
-                section={s}
-                active={active === s.id}
-                onClick={() => setActive(s.id)}
-              />
-            ))}
-          </ul>
-        </aside>
+        <div className="settings-body-row">
+          {/* Left list */}
+          <aside className="settings-sidebar">
+            <div className="settings-group">
+              <div className="settings-group-label">Options</div>
+              <ul className="settings-list">
+                {OPTION_SECTIONS.map((s) => (
+                  <SectionItem
+                    key={s.id}
+                    section={s}
+                    active={active === s.id}
+                    onClick={() => setActive(s.id)}
+                  />
+                ))}
+              </ul>
+            </div>
 
-        {/* Right content pane */}
-        <main className="settings-content">
-          <button
-            className="settings-close"
-            title="Close settings"
-            aria-label="Close settings"
-            onClick={onClose}
-          >
-            <IcClose />
-          </button>
+            <div className="settings-group">
+              <div className="settings-group-label">Core plugins</div>
+              <ul className="settings-list">
+                {CORE_PLUGIN_SECTIONS.map((s) => (
+                  <SectionItem
+                    key={s.id}
+                    section={s}
+                    active={active === s.id}
+                    onClick={() => setActive(s.id)}
+                  />
+                ))}
+              </ul>
+            </div>
 
-          <SectionBody
-            section={activeSection}
-            theme={theme}
-            onToggleTheme={onToggleTheme}
-          />
-        </main>
+            <div className="settings-group">
+              <div className="settings-group-label">Community plugins</div>
+              <ul className="settings-list settings-list-empty">
+                <li className="settings-empty-hint">
+                  No community plugins installed.
+                </li>
+              </ul>
+            </div>
+          </aside>
+
+          {/* Right content pane */}
+          <main className="settings-content">
+            <SectionBody
+              section={activeSection}
+              theme={theme}
+              onToggleTheme={onToggleTheme}
+            />
+          </main>
+        </div>
       </div>
     </div>
   );
@@ -185,6 +202,7 @@ function SectionItem({
       >
         <section.Icon className="settings-item-icon" />
         <span className="settings-item-label">{section.label}</span>
+        <IcChevronRight className="settings-item-chevron" />
       </button>
     </li>
   );
@@ -268,61 +286,61 @@ function SectionBody({
   if (section.id === "general") {
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">General</h2>
-        
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Language</div>
-            <div className="settings-row-desc">
-              Choose the language for the app interface.
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Language</div>
+              <div className="settings-row-desc">
+                Choose the language for the app interface.
+              </div>
             </div>
+            <select 
+              className="settings-input"
+              value={store.language}
+              onChange={(e) => store.set("language", e.target.value)}
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="ja">日本語</option>
+              <option value="zh">中文</option>
+            </select>
           </div>
-          <select 
-            className="settings-input"
-            value={store.language}
-            onChange={(e) => store.set("language", e.target.value)}
-          >
-            <option value="en">English</option>
-            <option value="es">Español</option>
-            <option value="fr">Français</option>
-            <option value="de">Deutsch</option>
-            <option value="ja">日本語</option>
-            <option value="zh">中文</option>
-          </select>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Auto-restore vault</div>
-            <div className="settings-row-desc">
-              Automatically open your last active vault when starting the app.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Auto-restore vault</div>
+              <div className="settings-row-desc">
+                Automatically open your last active vault when starting the app.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input 
+                type="checkbox" 
+                checked={store.autoRestoreVault} 
+                onChange={(e) => store.set("autoRestoreVault", e.target.checked)} 
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input 
-              type="checkbox" 
-              checked={store.autoRestoreVault} 
-              onChange={(e) => store.set("autoRestoreVault", e.target.checked)} 
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Telemetry</div>
-            <div className="settings-row-desc">
-              Help improve Lattice by sending anonymous usage data.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Telemetry</div>
+              <div className="settings-row-desc">
+                Help improve Lattice by sending anonymous usage data.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input 
+                type="checkbox" 
+                checked={store.telemetryOptIn} 
+                onChange={(e) => store.set("telemetryOptIn", e.target.checked)} 
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input 
-              type="checkbox" 
-              checked={store.telemetryOptIn} 
-              onChange={(e) => store.set("telemetryOptIn", e.target.checked)} 
-            />
-            <span className="settings-slider"></span>
-          </label>
         </div>
       </div>
     );
@@ -331,77 +349,77 @@ function SectionBody({
   if (section.id === "editor") {
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">Editor</h2>
-        
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Font size</div>
-            <div className="settings-row-desc">
-              The font size in pixels for the editor text.
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Font size</div>
+              <div className="settings-row-desc">
+                The font size in pixels for the editor text.
+              </div>
+            </div>
+            <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+              <input 
+                type="range" 
+                min="10" max="32" 
+                value={store.fontSize}
+                onChange={(e) => store.set("fontSize", parseInt(e.target.value))}
+              />
+              <span style={{minWidth: '3ch', textAlign: 'right'}}>{store.fontSize}</span>
             </div>
           </div>
-          <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
-            <input 
-              type="range" 
-              min="10" max="32" 
-              value={store.fontSize}
-              onChange={(e) => store.set("fontSize", parseInt(e.target.value))}
-            />
-            <span style={{minWidth: '3ch', textAlign: 'right'}}>{store.fontSize}</span>
-          </div>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Show line numbers</div>
-            <div className="settings-row-desc">
-              Show line numbers in the gutter.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Show line numbers</div>
+              <div className="settings-row-desc">
+                Show line numbers in the gutter.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input 
+                type="checkbox" 
+                checked={store.lineNumbers} 
+                onChange={(e) => store.set("lineNumbers", e.target.checked)} 
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input 
-              type="checkbox" 
-              checked={store.lineNumbers} 
-              onChange={(e) => store.set("lineNumbers", e.target.checked)} 
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Word wrap</div>
-            <div className="settings-row-desc">
-              Wrap long lines instead of scrolling horizontally.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Word wrap</div>
+              <div className="settings-row-desc">
+                Wrap long lines instead of scrolling horizontally.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input 
+                type="checkbox" 
+                checked={store.wordWrap} 
+                onChange={(e) => store.set("wordWrap", e.target.checked)} 
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input 
-              type="checkbox" 
-              checked={store.wordWrap} 
-              onChange={(e) => store.set("wordWrap", e.target.checked)} 
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Vim mode</div>
-            <div className="settings-row-desc">
-              Enable Vim keybindings in the editor. Once active, the status bar shows
-              the current mode (<strong>NORMAL</strong> / <strong>INSERT</strong> / <strong>VISUAL</strong>).
-              Press <code>i</code> to enter insert, <code>Esc</code> to return to normal.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Vim mode</div>
+              <div className="settings-row-desc">
+                Enable Vim keybindings in the editor. Once active, the status bar shows
+                the current mode (<strong>NORMAL</strong> / <strong>INSERT</strong> / <strong>VISUAL</strong>).
+                Press <code>i</code> to enter insert, <code>Esc</code> to return to normal.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={store.vimMode}
+                onChange={(e) => store.set("vimMode", e.target.checked)}
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={store.vimMode}
-              onChange={(e) => store.set("vimMode", e.target.checked)}
-            />
-            <span className="settings-slider"></span>
-          </label>
         </div>
 
         {store.vimMode && (
@@ -453,55 +471,55 @@ function SectionBody({
   if (section.id === "files") {
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">Files and links</h2>
-        
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Show file extensions</div>
-            <div className="settings-row-desc">
-              Show '.md' extension on files in the sidebar.
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Show file extensions</div>
+              <div className="settings-row-desc">
+                Show '.md' extension on files in the sidebar.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input 
+                type="checkbox" 
+                checked={store.showFileExtensions} 
+                onChange={(e) => store.set("showFileExtensions", e.target.checked)} 
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
+
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Deleted files</div>
+              <div className="settings-row-desc">
+                Where to put deleted files.
+              </div>
+            </div>
+            <select 
+              className="settings-input"
+              value={store.deleteBehavior}
+              onChange={(e) => store.set("deleteBehavior", e.target.value as any)}
+            >
+              <option value="trash">Move to system trash</option>
+              <option value="permanent">Permanently delete</option>
+            </select>
+          </div>
+
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Attachment folder path</div>
+              <div className="settings-row-desc">
+                Where to save newly added attachments.
+              </div>
+            </div>
             <input 
-              type="checkbox" 
-              checked={store.showFileExtensions} 
-              onChange={(e) => store.set("showFileExtensions", e.target.checked)} 
+              type="text" 
+              className="settings-input" 
+              value={store.attachmentFolder}
+              onChange={(e) => store.set("attachmentFolder", e.target.value)}
             />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Deleted files</div>
-            <div className="settings-row-desc">
-              Where to put deleted files.
-            </div>
           </div>
-          <select 
-            className="settings-input"
-            value={store.deleteBehavior}
-            onChange={(e) => store.set("deleteBehavior", e.target.value as any)}
-          >
-            <option value="trash">Move to system trash</option>
-            <option value="permanent">Permanently delete</option>
-          </select>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Attachment folder path</div>
-            <div className="settings-row-desc">
-              Where to save newly added attachments.
-            </div>
-          </div>
-          <input 
-            type="text" 
-            className="settings-input" 
-            value={store.attachmentFolder}
-            onChange={(e) => store.set("attachmentFolder", e.target.value)}
-          />
         </div>
       </div>
     );
@@ -510,147 +528,149 @@ function SectionBody({
   if (section.id === "ai-privacy") {
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">AI & Privacy</h2>
-        
         <p style={{ marginBottom: '20px', opacity: 0.8, fontSize: '14px' }}>
           Configure which AI providers are available and where they can be used.
           Local providers (Ollama) never send data to the cloud.
         </p>
 
-        <h3 style={{ fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>AI Providers</h3>
+        <h3 className="settings-subheading">AI Providers</h3>
 
-        {modelConfigs.map((config) => (
-          <div key={config.id} className="settings-row" style={{ borderLeft: config.enabled ? '3px solid var(--accent, #7c5bf0)' : 'none', paddingLeft: config.enabled ? '12px' : '0' }}>
-            <div className="settings-row-text">
-              <div className="settings-row-title">{config.provider}</div>
-              <div className="settings-row-desc">
-                {config.id === "ollama" ? "Local AI running on your machine (port 11434)" :
-                 config.id === "openai" ? "OpenAI GPT-4, GPT-4o, GPT-3.5-turbo" :
-                 config.id === "anthropic" ? "Claude 3.5 Sonnet, Claude 3 Opus/Haiku" :
-                 config.id === "gemini" ? "Gemini 1.5 Pro, Gemini 1.5 Flash" :
-                 "Azure-hosted OpenAI models"}
+        <div className="settings-card">
+          {modelConfigs.map((config) => (
+            <div key={config.id} className="settings-row" style={{ borderLeft: config.enabled ? '3px solid var(--accent, #7c5bf0)' : 'none', paddingLeft: config.enabled ? '12px' : undefined }}>
+              <div className="settings-row-text">
+                <div className="settings-row-title">{config.provider}</div>
+                <div className="settings-row-desc">
+                  {config.id === "ollama" ? "Local AI running on your machine (port 11434)" :
+                   config.id === "openai" ? "OpenAI GPT-4, GPT-4o, GPT-3.5-turbo" :
+                   config.id === "anthropic" ? "Claude 3.5 Sonnet, Claude 3 Opus/Haiku" :
+                   config.id === "gemini" ? "Gemini 1.5 Pro, Gemini 1.5 Flash" :
+                   "Azure-hosted OpenAI models"}
+                </div>
+                {config.enabled && config.id !== "ollama" && (
+                  <input
+                    type="password"
+                    className="settings-input"
+                    placeholder="API Key"
+                    value={config.apiKey}
+                    onChange={(e) => {
+                      const next = modelConfigs.map((c) =>
+                        c.id === config.id ? { ...c, apiKey: e.target.value } : c
+                      );
+                      setModelConfigs(next);
+                    }}
+                    style={{ marginTop: '8px', maxWidth: '300px' }}
+                  />
+                )}
               </div>
-              {config.enabled && config.id !== "ollama" && (
+              <label className="settings-switch">
                 <input
-                  type="password"
-                  className="settings-input"
-                  placeholder="API Key"
-                  value={config.apiKey}
+                  type="checkbox"
+                  checked={config.enabled}
                   onChange={(e) => {
                     const next = modelConfigs.map((c) =>
-                      c.id === config.id ? { ...c, apiKey: e.target.value } : c
+                      c.id === config.id ? { ...c, enabled: e.target.checked } : c
                     );
                     setModelConfigs(next);
                   }}
-                  style={{ marginTop: '8px', maxWidth: '300px' }}
                 />
-              )}
+                <span className="settings-slider"></span>
+              </label>
             </div>
-            <label className="settings-switch">
-              <input
-                type="checkbox"
-                checked={config.enabled}
-                onChange={(e) => {
-                  const next = modelConfigs.map((c) =>
-                    c.id === config.id ? { ...c, enabled: e.target.checked } : c
-                  );
-                  setModelConfigs(next);
-                }}
-              />
-              <span className="settings-slider"></span>
-            </label>
-          </div>
-        ))}
+          ))}
+        </div>
 
-        <h3 style={{ fontSize: '18px', marginTop: '32px', marginBottom: '12px' }}>AI Feature Scopes</h3>
+        <h3 className="settings-subheading">AI Feature Scopes</h3>
         <p style={{ marginBottom: '16px', opacity: 0.8, fontSize: '14px' }}>
           Control where AI can be invoked. Disabling a scope prevents AI from being used in that feature,
           regardless of which providers are enabled above.
         </p>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">VCS commit messages</div>
-            <div className="settings-row-desc">
-              Generate commit messages from staged changes
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">VCS commit messages</div>
+              <div className="settings-row-desc">
+                Generate commit messages from staged changes
+              </div>
             </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={featureScopes["vcs-commits"]}
+                onChange={(e) => setFeatureScopes({ ...featureScopes, "vcs-commits": e.target.checked })}
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={featureScopes["vcs-commits"]}
-              onChange={(e) => setFeatureScopes({ ...featureScopes, "vcs-commits": e.target.checked })}
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Smart link suggestions</div>
-            <div className="settings-row-desc">
-              Suggest wikilinks while writing based on vault content
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Smart link suggestions</div>
+              <div className="settings-row-desc">
+                Suggest wikilinks while writing based on vault content
+              </div>
             </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={featureScopes["smart-links"]}
+                onChange={(e) => setFeatureScopes({ ...featureScopes, "smart-links": e.target.checked })}
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={featureScopes["smart-links"]}
-              onChange={(e) => setFeatureScopes({ ...featureScopes, "smart-links": e.target.checked })}
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Meeting summaries</div>
-            <div className="settings-row-desc">
-              Generate summaries and action items from meeting transcripts
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Meeting summaries</div>
+              <div className="settings-row-desc">
+                Generate summaries and action items from meeting transcripts
+              </div>
             </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={featureScopes["meeting-summaries"]}
+                onChange={(e) => setFeatureScopes({ ...featureScopes, "meeting-summaries": e.target.checked })}
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={featureScopes["meeting-summaries"]}
-              onChange={(e) => setFeatureScopes({ ...featureScopes, "meeting-summaries": e.target.checked })}
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Canvas text completion</div>
-            <div className="settings-row-desc">
-              Auto-complete text nodes in canvas view
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Canvas text completion</div>
+              <div className="settings-row-desc">
+                Auto-complete text nodes in canvas view
+              </div>
             </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={featureScopes["canvas-completion"]}
+                onChange={(e) => setFeatureScopes({ ...featureScopes, "canvas-completion": e.target.checked })}
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={featureScopes["canvas-completion"]}
-              onChange={(e) => setFeatureScopes({ ...featureScopes, "canvas-completion": e.target.checked })}
-            />
-            <span className="settings-slider"></span>
-          </label>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Chat / Ask AI</div>
-            <div className="settings-row-desc">
-              Direct chat with AI about your notes
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Chat / Ask AI</div>
+              <div className="settings-row-desc">
+                Direct chat with AI about your notes
+              </div>
             </div>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                checked={featureScopes["chat"]}
+                onChange={(e) => setFeatureScopes({ ...featureScopes, "chat": e.target.checked })}
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={featureScopes["chat"]}
-              onChange={(e) => setFeatureScopes({ ...featureScopes, "chat": e.target.checked })}
-            />
-            <span className="settings-slider"></span>
-          </label>
         </div>
 
         <div style={{ marginTop: '32px', padding: '12px', background: 'var(--background-modifier-form-field)', borderRadius: '4px' }}>
@@ -667,77 +687,77 @@ function SectionBody({
   if (section.id === "appearance") {
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">Appearance</h2>
-        
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Theme</div>
-            <div className="settings-row-desc">
-              Choose between light and dark color schemes.
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Theme</div>
+              <div className="settings-row-desc">
+                Choose between light and dark color schemes.
+              </div>
             </div>
+            <button
+              className="settings-btn"
+              onClick={onToggleTheme}
+              title="Toggle theme"
+            >
+              {theme === "dark" ? <IcSun /> : <IcMoon />}
+              <span>{theme === "dark" ? "Light" : "Dark"}</span>
+            </button>
           </div>
-          <button
-            className="settings-btn"
-            onClick={onToggleTheme}
-            title="Toggle theme"
-          >
-            {theme === "dark" ? <IcSun /> : <IcMoon />}
-            <span>{theme === "dark" ? "Light" : "Dark"}</span>
-          </button>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Accent color</div>
-            <div className="settings-row-desc">
-              The primary color used for highlights and buttons.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Accent color</div>
+              <div className="settings-row-desc">
+                The primary color used for highlights and buttons.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input 
+                type="color" 
+                value={store.accentColor} 
+                onChange={(e) => store.set("accentColor", e.target.value)}
+                style={{ padding: 0, width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }}
+              />
+              <button className="settings-btn" onClick={() => store.set("accentColor", "#7c5bf0")}>Reset</button>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <input 
-              type="color" 
-              value={store.accentColor} 
-              onChange={(e) => store.set("accentColor", e.target.value)}
-              style={{ padding: 0, width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer' }}
-            />
-            <button className="settings-btn" onClick={() => store.set("accentColor", "#7c5bf0")}>Reset</button>
-          </div>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Font family</div>
-            <div className="settings-row-desc">
-              The font family to use for the interface.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Font family</div>
+              <div className="settings-row-desc">
+                The font family to use for the interface.
+              </div>
             </div>
+            <select 
+              className="settings-input"
+              value={store.fontFamily}
+              onChange={(e) => store.set("fontFamily", e.target.value)}
+            >
+              <option value="Inter">Inter</option>
+              <option value="Roboto">Roboto</option>
+              <option value="System">System Default</option>
+            </select>
           </div>
-          <select 
-            className="settings-input"
-            value={store.fontFamily}
-            onChange={(e) => store.set("fontFamily", e.target.value)}
-          >
-            <option value="Inter">Inter</option>
-            <option value="Roboto">Roboto</option>
-            <option value="System">System Default</option>
-          </select>
-        </div>
 
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">UI Density</div>
-            <div className="settings-row-desc">
-              How compact the interface elements should be.
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">UI Density</div>
+              <div className="settings-row-desc">
+                How compact the interface elements should be.
+              </div>
             </div>
+            <select 
+              className="settings-input"
+              value={store.density}
+              onChange={(e) => store.set("density", e.target.value as any)}
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+              <option value="cozy">Cozy</option>
+            </select>
           </div>
-          <select 
-            className="settings-input"
-            value={store.density}
-            onChange={(e) => store.set("density", e.target.value as any)}
-          >
-            <option value="comfortable">Comfortable</option>
-            <option value="compact">Compact</option>
-            <option value="cozy">Cozy</option>
-          </select>
         </div>
       </div>
     );
@@ -747,8 +767,6 @@ function SectionBody({
     const noVault = !vaultPath || vaultPath === "__mock__";
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">Daily notes</h2>
-
         {noVault ? (
           <p className="settings-body-empty">Open a vault to configure daily-note settings.</p>
         ) : (
@@ -758,78 +776,80 @@ function SectionBody({
                 {journalError}
               </p>
             )}
-            <div className="settings-row">
-              <div className="settings-row-text">
-                <div className="settings-row-title">Enable daily notes</div>
-                <div className="settings-row-desc">
-                  Controls auto daily-note behavior. Manual open/create still works.
+            <div className="settings-card">
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-title">Enable daily notes</div>
+                  <div className="settings-row-desc">
+                    Controls auto daily-note behavior. Manual open/create still works.
+                  </div>
                 </div>
+                <label className="settings-switch">
+                  <input
+                    type="checkbox"
+                    checked={journalSettings?.enabled ?? true}
+                    disabled={!journalSettings || journalBusy}
+                    onChange={(e) => void patchJournalSettings({ enabled: e.target.checked })}
+                  />
+                  <span className="settings-slider"></span>
+                </label>
               </div>
-              <label className="settings-switch">
-                <input
-                  type="checkbox"
-                  checked={journalSettings?.enabled ?? true}
-                  disabled={!journalSettings || journalBusy}
-                  onChange={(e) => void patchJournalSettings({ enabled: e.target.checked })}
-                />
-                <span className="settings-slider"></span>
-              </label>
-            </div>
 
-            <div className="settings-row">
-              <div className="settings-row-text">
-                <div className="settings-row-title">Weekly rollup</div>
-                <div className="settings-row-desc">
-                  Create `YYYY-Www.md` when opening a daily note.
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-title">Weekly rollup</div>
+                  <div className="settings-row-desc">
+                    Create `YYYY-Www.md` when opening a daily note.
+                  </div>
                 </div>
+                <label className="settings-switch">
+                  <input
+                    type="checkbox"
+                    checked={journalSettings?.weekly_rollup ?? false}
+                    disabled={!journalSettings || journalBusy}
+                    onChange={(e) =>
+                      void patchJournalSettings({ weekly_rollup: e.target.checked })
+                    }
+                  />
+                  <span className="settings-slider"></span>
+                </label>
               </div>
-              <label className="settings-switch">
-                <input
-                  type="checkbox"
-                  checked={journalSettings?.weekly_rollup ?? false}
-                  disabled={!journalSettings || journalBusy}
-                  onChange={(e) =>
-                    void patchJournalSettings({ weekly_rollup: e.target.checked })
-                  }
-                />
-                <span className="settings-slider"></span>
-              </label>
-            </div>
 
-            <div className="settings-row">
-              <div className="settings-row-text">
-                <div className="settings-row-title">Monthly rollup</div>
-                <div className="settings-row-desc">
-                  Create `YYYY-MM.md` when opening a daily note.
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-title">Monthly rollup</div>
+                  <div className="settings-row-desc">
+                    Create `YYYY-MM.md` when opening a daily note.
+                  </div>
                 </div>
+                <label className="settings-switch">
+                  <input
+                    type="checkbox"
+                    checked={journalSettings?.monthly_rollup ?? false}
+                    disabled={!journalSettings || journalBusy}
+                    onChange={(e) =>
+                      void patchJournalSettings({ monthly_rollup: e.target.checked })
+                    }
+                  />
+                  <span className="settings-slider"></span>
+                </label>
               </div>
-              <label className="settings-switch">
-                <input
-                  type="checkbox"
-                  checked={journalSettings?.monthly_rollup ?? false}
-                  disabled={!journalSettings || journalBusy}
-                  onChange={(e) =>
-                    void patchJournalSettings({ monthly_rollup: e.target.checked })
-                  }
-                />
-                <span className="settings-slider"></span>
-              </label>
-            </div>
 
-            <div className="settings-row">
-              <div className="settings-row-text">
-                <div className="settings-row-title">Journal folder</div>
-                <div className="settings-row-desc">
-                  Vault-relative folder where daily notes are created.
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <div className="settings-row-title">Journal folder</div>
+                  <div className="settings-row-desc">
+                    Vault-relative folder where daily notes are created.
+                  </div>
                 </div>
+                <input
+                  type="text"
+                  className="settings-input"
+                  value={journalSettings?.folder ?? "journals"}
+                  disabled={!journalSettings || journalBusy}
+                  onChange={(e) => void patchJournalSettings({ folder: e.target.value })}
+                />
               </div>
-              <input
-                type="text"
-                className="settings-input"
-                value={journalSettings?.folder ?? "journals"}
-                disabled={!journalSettings || journalBusy}
-                onChange={(e) => void patchJournalSettings({ folder: e.target.value })}
-              />
             </div>
           </>
         )}
@@ -852,24 +872,25 @@ function SectionBody({
     const isEnabled = store.corePlugins[section.id] ?? false;
     return (
       <div className="settings-body">
-        <h2 className="settings-body-title">{section.label}</h2>
-        <div className="settings-row">
-          <div className="settings-row-text">
-            <div className="settings-row-title">Enable {section.label}</div>
-            <div className="settings-row-desc">
-              Toggle this core plugin on or off.
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <div className="settings-row-title">Enable {section.label}</div>
+              <div className="settings-row-desc">
+                Toggle this core plugin on or off.
+              </div>
             </div>
+            <label className="settings-switch">
+              <input 
+                type="checkbox" 
+                checked={isEnabled} 
+                onChange={() => store.toggleCorePlugin(section.id)} 
+              />
+              <span className="settings-slider"></span>
+            </label>
           </div>
-          <label className="settings-switch">
-            <input 
-              type="checkbox" 
-              checked={isEnabled} 
-              onChange={() => store.toggleCorePlugin(section.id)} 
-            />
-            <span className="settings-slider"></span>
-          </label>
         </div>
-        
+
         {section.id === "sync" && isEnabled && (
           <div style={{marginTop: '20px'}}>
             <p>
@@ -891,7 +912,6 @@ function SectionBody({
 
   return (
     <div className="settings-body">
-      <h2 className="settings-body-title">{section.label}</h2>
       <p className="settings-body-empty">
         Settings for <strong>{section.label}</strong> will appear here.
       </p>

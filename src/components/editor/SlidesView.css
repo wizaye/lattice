@@ -47,6 +47,14 @@
   /* Keep slide text legible on the dark theme regardless of
      light/dark app theme. */
   text-align: left;
+  /* Reveal's black theme defaults to `font-size: 42px` on the
+     logical 960×600 deck, which makes h1 ~158px and body text feel
+     like a billboard inside an embedded pane.  We size everything
+     off a calmer 24px base so notes-style decks read like a
+     document, not a keynote.  `em`-relative headings below stack
+     on top of this. */
+  font-size: 24px;
+  line-height: 1.4;
 }
 
 .slides-view .reveal .slides section {
@@ -55,6 +63,7 @@
      but odd for note slides.  Top-align gives a more "deck on a
      page" feel that matches Marp / Deckset. */
   display: block;
+  padding: 0 8px;
 }
 
 .slides-view .reveal h1,
@@ -66,7 +75,24 @@
   text-transform: none; /* black theme uppercases h2/h3 by default */
   letter-spacing: normal;
   font-weight: 600;
+  margin: 0.4em 0 0.3em;
+  line-height: 1.2;
 }
+
+.slides-view .reveal h1 { font-size: 1.9em; }
+.slides-view .reveal h2 { font-size: 1.55em; }
+.slides-view .reveal h3 { font-size: 1.3em; }
+.slides-view .reveal h4 { font-size: 1.1em; }
+
+.slides-view .reveal p,
+.slides-view .reveal ul,
+.slides-view .reveal ol,
+.slides-view .reveal blockquote {
+  margin: 0.4em 0;
+  font-size: 1em;
+}
+
+.slides-view .reveal li { margin: 0.15em 0; }
 
 .slides-view .reveal a {
   color: var(--text-accent, #7ea7ff);
@@ -76,12 +102,46 @@
 .slides-view .reveal pre,
 .slides-view .reveal code {
   font-family: var(--font-monospace, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.85em;
 }
 
 .slides-view .reveal pre {
   background: rgba(255, 255, 255, 0.06);
   box-shadow: none;
   border-radius: 6px;
+  padding: 0.6em 0.8em;
+  width: 100%;
+}
+
+.slides-view .reveal pre code {
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+
+/* Reveal's built-in chrome (controls arrows, progress bar, slide
+   number) is sized for full-screen presentations. Reveal sets
+   `font-size: 10px` on `.controls` and then sizes the arrows
+   in `em` (3.6em ≈ 36px), but because `.reveal` has `font-size:
+   42px` from the bundled black theme, our earlier `0.6em`
+   override resolved to ~25px and made each arrow ~90px wide —
+   bigger than the slide chrome itself.  Pin an absolute pixel
+   size so the cascade can't reinflate the buttons. */
+.slides-view .reveal .controls {
+  font-size: 11px;
+}
+.slides-view .reveal .controls .controls-arrow {
+  /* Defensive: even with controls font-size pinned at 11px (so
+     3.6em ≈ 40px), some themes ship a font-size override on the
+     individual nav buttons.  Cap absolute width/height too. */
+  width: 36px;
+  height: 36px;
+}
+.slides-view .reveal .progress {
+  height: 3px;
+}
+.slides-view .reveal .slide-number {
+  font-size: 11px;
+  padding: 2px 6px;
 }
 
 .slides-view .reveal .katex {
@@ -95,4 +155,126 @@
   color: var(--text-accent, #7ea7ff);
   border-bottom: 1px dashed var(--text-accent, #7ea7ff);
   cursor: pointer;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Light-mode overrides
+   ──────────────────────────────────────────────────────────────
+   We only ship the bundled Reveal `black` theme (the `light` and
+   `white` themes aren't installed in `node_modules/reveal.js/dist/
+   theme/`).  In light mode the black theme's `#191919` page bg
+   and `#fff` body text leak through, leaving dark slides on a
+   light app surface with white-on-white headings — unreadable.
+   These rules re-paint the deck using the app's surface vars so
+   the slide reads like a document page in light mode.
+
+   Notes on what Reveal paints:
+     - `.reveal` gets `color: #fff` from the theme — overridden.
+     - `.reveal .slides` gets `background-color: #191919` inlined
+       by Reveal at init from the theme — overridden.
+     - Reveal renders a separate background layer
+       `.reveal .backgrounds > .slide-background` per slide that
+       picks up `--r-background-color` (the theme var).  We force
+       it transparent so the deck shows our app surface.
+     - `.controls` SVG arrows use `currentColor` for the stroke;
+       `.progress` uses `color` for the fill bar and `background`
+       for the track. */
+
+:root[data-theme="light"] .slides-view {
+  background: var(--bg-editor, #ffffff);
+}
+
+:root[data-theme="light"] .slides-host.reveal,
+:root[data-theme="light"] .slides-view .reveal .slides,
+:root[data-theme="light"] .slides-view .reveal .slides section {
+  color: var(--text-normal);
+  background-color: transparent;
+}
+
+:root[data-theme="light"] .slides-view .reveal .backgrounds,
+:root[data-theme="light"] .slides-view .reveal .backgrounds .slide-background,
+:root[data-theme="light"] .slides-view .reveal .backgrounds .slide-background-content {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+:root[data-theme="light"] .slides-view .reveal h1,
+:root[data-theme="light"] .slides-view .reveal h2,
+:root[data-theme="light"] .slides-view .reveal h3,
+:root[data-theme="light"] .slides-view .reveal h4,
+:root[data-theme="light"] .slides-view .reveal h5,
+:root[data-theme="light"] .slides-view .reveal h6 {
+  color: var(--text-normal);
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .slides-view .reveal p,
+:root[data-theme="light"] .slides-view .reveal li,
+:root[data-theme="light"] .slides-view .reveal blockquote,
+:root[data-theme="light"] .slides-view .reveal strong,
+:root[data-theme="light"] .slides-view .reveal em {
+  color: var(--text-normal);
+}
+
+:root[data-theme="light"] .slides-view .reveal blockquote {
+  background: rgba(0, 0, 0, 0.04);
+  border-left: 3px solid var(--border, rgba(0, 0, 0, 0.15));
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+:root[data-theme="light"] .slides-view .reveal pre {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-normal);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .slides-view .reveal code {
+  color: var(--text-normal);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+}
+
+:root[data-theme="light"] .slides-view .reveal pre code {
+  background: transparent;
+  padding: 0;
+}
+
+:root[data-theme="light"] .slides-view .reveal a,
+:root[data-theme="light"] .slides-view .reveal .md-wikilink {
+  color: var(--text-accent, #5b3df0);
+  border-bottom-color: var(--text-accent, #5b3df0);
+  text-shadow: none;
+}
+
+/* Reveal chrome — arrows, progress bar, slide number */
+:root[data-theme="light"] .slides-view .reveal .controls {
+  color: var(--text-muted, #4b5563);
+}
+:root[data-theme="light"] .slides-view .reveal .controls .controls-arrow {
+  color: var(--text-muted, #4b5563);
+}
+:root[data-theme="light"] .slides-view .reveal .controls .controls-arrow:hover {
+  color: var(--text-normal);
+}
+:root[data-theme="light"] .slides-view .reveal .progress {
+  color: var(--accent, #7c5bf0);
+  background: rgba(0, 0, 0, 0.08);
+}
+:root[data-theme="light"] .slides-view .reveal .slide-number {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-muted, #4b5563);
+}
+
+/* Tables (rendered from markdown) */
+:root[data-theme="light"] .slides-view .reveal table th,
+:root[data-theme="light"] .slides-view .reveal table td {
+  border-color: var(--border, rgba(0, 0, 0, 0.12));
+  color: var(--text-normal);
+}
+
+/* Horizontal rule (when not used as a slide separator) */
+:root[data-theme="light"] .slides-view .reveal hr {
+  border-color: var(--border, rgba(0, 0, 0, 0.12));
 }

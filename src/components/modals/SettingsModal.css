@@ -1,5 +1,9 @@
 /* ============================================================
    Settings overlay — Obsidian-style modal
+   Layout mirrors Obsidian's `.modal.mod-settings.mod-sidebar-layout`:
+   header bar on top, sidebar (`vertical-tab-header`) on the left,
+   content (`vertical-tab-content`) on the right, and a floating
+   `mod-raised` close button anchored to the viewport corner.
    ============================================================ */
 
 .settings-overlay {
@@ -9,13 +13,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.55);
   padding: 24px;
   animation: settings-fade 140ms ease-out;
 }
 
 :root[data-theme="light"] .settings-overlay {
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.32);
 }
 
 @keyframes settings-fade {
@@ -23,18 +27,28 @@
   to   { opacity: 1; }
 }
 
+/* ---- Dialog shell ---- */
+
 .settings-dialog {
+  position: relative;
   display: flex;
-  width: min(900px, 100%);
-  height: min(640px, 100%);
-  background: var(--bg-app);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  flex-direction: column;
+  width: min(1100px, 96vw);
+  height: min(740px, 92vh);
+  /* Frame tone matches the sidebar so the greyed-out sidebar reads as
+     part of the chrome and the content pane pops as the active surface. */
+  background: #161616;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
   overflow: hidden;
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.45),
-    0 4px 12px rgba(0, 0, 0, 0.25);
+    0 28px 70px rgba(0, 0, 0, 0.55),
+    0 8px 18px rgba(0, 0, 0, 0.30);
   animation: settings-pop 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+:root[data-theme="light"] .settings-dialog {
+  background: #ece9e3;
 }
 
 @keyframes settings-pop {
@@ -42,26 +56,43 @@
   to   { transform: none;                          opacity: 1; }
 }
 
-/* ---- Left list ---- */
+/* ---- Body row (sidebar + content) ---- */
+
+.settings-body-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- Sidebar (vertical-tab-header) ---- */
 
 .settings-sidebar {
-  width: 220px;
+  width: 240px;
   flex-shrink: 0;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border-soft);
+  /* Greyed-out panel — visibly darker than the content pane (Obsidian-style).
+     Hard-coded because --bg-sidebar resolves to the same color as --bg-app
+     on dark themes, which would erase the panel separation. */
+  background: #161616;
+  border-right: 1px solid #0e0e0e;
   overflow-y: auto;
-  padding: 14px 8px 18px;
+  padding: 12px 8px 18px;
 }
+
+:root[data-theme="light"] .settings-sidebar {
+  background: #ece9e3;
+  border-right-color: #d6d2cb;
+}
+
+.settings-group + .settings-group { margin-top: 14px; }
 
 .settings-group-label {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-faint);
-  padding: 10px 10px 6px;
+  padding: 6px 10px 4px;
   text-transform: none;
 }
-.settings-sidebar > .settings-group-label:first-child { padding-top: 2px; }
 
 .settings-list {
   list-style: none;
@@ -72,18 +103,28 @@
   gap: 1px;
 }
 
+.settings-empty-hint {
+  list-style: none;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 .settings-item {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 6px 0 10px;
   border-radius: 6px;
   color: var(--text-normal);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+  border: none;
+  background: transparent;
 }
 .settings-item:hover { background: var(--hover); }
 .settings-item.active {
@@ -107,38 +148,71 @@
   text-overflow: ellipsis;
 }
 
-/* ---- Right content pane ---- */
+.settings-item-chevron.codicon {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 80ms ease-out, color 80ms ease-out;
+}
+.settings-item:hover .settings-item-chevron.codicon { opacity: 1; }
+.settings-item.active .settings-item-chevron.codicon {
+  opacity: 1;
+  color: var(--text-muted);
+}
+
+/* ---- Right content pane (vertical-tab-content) ---- */
 
 .settings-content {
   position: relative;
   flex: 1;
   min-width: 0;
-  background: var(--bg-editor);
+  /* Active surface — clearly lighter than the greyed sidebar so the two
+     panels read as distinct surfaces (Obsidian-style). */
+  background: #262626;
   overflow-y: auto;
-  padding: 24px 28px 28px;
+  padding: 36px 36px 36px 36px;
 }
+
+:root[data-theme="light"] .settings-content {
+  background: #ffffff;
+}
+
+/* ---- In-dialog close button (Obsidian's top-right X) ---- */
 
 .settings-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 6px;
-  color: var(--text-muted);
+  background: transparent;
+  color: var(--text-faint);
+  border: none;
+  cursor: pointer;
+  z-index: 2;
+  transition:
+    background 80ms ease-out,
+    color 80ms ease-out;
 }
-.settings-close:hover { background: var(--hover); color: var(--text-normal); }
-.settings-close .codicon { font-size: var(--icon-sm); line-height: 1; }
+.settings-close:hover {
+  background: var(--hover);
+  color: var(--text-normal);
+}
+.settings-close .codicon { font-size: 14px; line-height: 1; }
+
+/* ---- Body content ---- */
 
 .settings-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-width: 720px;
-  padding-right: 32px; /* keep clear of the close button */
+  gap: 0;
+  max-width: 760px;
 }
 
 .settings-body p {
@@ -148,23 +222,57 @@
   color: var(--text-normal);
 }
 
-.settings-body-title {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-normal);
-}
-
 .settings-body-empty {
   color: var(--text-muted);
   font-size: 13px;
   font-style: italic;
 }
 
+/* Sub-section heading — Obsidian's dark text group label that sits
+   above each settings card (e.g. "Interface", "Font", "Links"). */
+.settings-subheading {
+  margin: 28px 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-normal);
+  letter-spacing: -0.005em;
+}
+.settings-body > .settings-subheading:first-child {
+  margin-top: 0;
+}
+
+/* Grouped settings card — rounded grey container that wraps a related
+   set of setting rows (Obsidian's `.setting-items` container). */
+.settings-card {
+  background: #2c2c2c;
+  border: 1px solid #1f1f1f;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+:root[data-theme="light"] .settings-card {
+  background: #f5f5f3;
+  border-color: #ebe9e4;
+}
+
+.settings-card .settings-row {
+  padding: 14px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="light"] .settings-card .settings-row {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.settings-card .settings-row:first-child {
+  border-top: 0;
+}
+
 .settings-actions {
   display: flex;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 14px;
   justify-content: flex-end;
 }
 
@@ -193,7 +301,7 @@
   filter: brightness(1.06);
 }
 
-/* ---- Row layout for setting rows (Appearance theme picker etc.) ---- */
+/* ---- Row layout for setting rows (toggle / dropdown / slider rows) ---- */
 
 .settings-row {
   display: flex;
@@ -214,4 +322,143 @@
   margin-top: 2px;
   font-size: 12px;
   color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* ============================================================
+   Controls — Obsidian-style toggle, dropdown, input, slider
+   ============================================================ */
+
+/* ---- Toggle pill (checkbox-container) ---- */
+
+.settings-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.settings-switch input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+.settings-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border-strong, #3a3a3a);
+  border-radius: 999px;
+  transition: background 120ms ease-out;
+}
+.settings-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 120ms ease-out;
+}
+.settings-switch input[type="checkbox"]:checked + .settings-slider {
+  background: var(--accent, #7c5cff);
+}
+.settings-switch input[type="checkbox"]:checked + .settings-slider::before {
+  transform: translateX(16px);
+}
+.settings-switch input[type="checkbox"]:focus-visible + .settings-slider {
+  outline: 2px solid var(--accent, #7c5cff);
+  outline-offset: 2px;
+}
+
+/* ---- Text / select inputs (dropdown) ---- */
+
+.settings-input,
+.settings-row input[type="text"],
+.settings-row input[type="number"],
+.settings-row select {
+  height: 28px;
+  min-width: 140px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-app);
+  color: var(--text-normal);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 80ms ease-out, box-shadow 80ms ease-out;
+}
+.settings-row select {
+  padding-right: 24px;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+                    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.settings-input:hover,
+.settings-row input[type="text"]:hover,
+.settings-row input[type="number"]:hover,
+.settings-row select:hover {
+  border-color: var(--border-strong);
+}
+.settings-input:focus,
+.settings-row input[type="text"]:focus,
+.settings-row input[type="number"]:focus,
+.settings-row select:focus {
+  border-color: var(--accent, #7c5cff);
+  box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.18);
+}
+
+/* ---- Range slider ---- */
+
+.settings-row input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 160px;
+  height: 4px;
+  background: var(--border-strong, #3a3a3a);
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+.settings-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #7c5cff);
+  border: 2px solid var(--bg-app);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.settings-row input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #7c5cff);
+  border: 2px solid var(--bg-app);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- Inline code chip inside descriptions ---- */
+.settings-row-desc code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text-normal);
 }
